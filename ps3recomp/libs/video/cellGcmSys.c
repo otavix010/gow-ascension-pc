@@ -1697,9 +1697,11 @@ static u32 gcm_spu_block_for_put(u32 put)
  *
  * Dropping DRAWS on a resync is survivable: a frame is lost. Dropping a FENCE
  * is not, it deadlocks the title. Sweep the skipped range first. */
+static u32 s_blk_start = 0xFFFFFFFFu;   /* GOWA (25/10): see gcm_blk_lands */
 static void gcm_fifo_resync_why(const char* why, u32* getoff, u32 put)
 {
     static int n = 0;
+    s_blk_start = 0xFFFFFFFFu;   /* the run the walker was on is gone */
     if (n++ < 8)
         fprintf(stderr, "[cellGcmSys] FIFO resync (%s) 0x%08X -> put 0x%08X\n",
                 why, *getoff, put);
@@ -1776,6 +1778,51 @@ static int gcm_park_block_ok(u32 off, u32 put)
         s_settle_bad_off = o; s_settle_bad_w = w; return 0;   /* types 3-7: the walker skips them as unknown words; not a header */
     }
     return 1;
+}
+/* GOWA (25/10): where the walker's current straight run began -- the last place it
+ * reached by a JUMP/CALL/RET or by a park opening, after the check above passed --
+ * and the one before it. The notebook case the check cannot catch: the block was
+ * still being written, but the words past the new ones were the previous lap's,
+ * and THOSE decode as a block too; the walker ran through them, and when the title
+ * finished, its position (0x00A48080) was in the middle of a NOP's 13 data words.
+ * Holding there never ends. If decoding the run again from its start, as the words
+ * are now, does not land exactly on the walker, the walker is out of step: rewind
+ * to the start and run the block again (now complete; a few commands repeat --
+ * draws and label writes of the same value). */
+static u32 s_blk_calloff, s_blk_prev = 0xFFFFFFFFu, s_blk_prev_calloff;
+static int s_settle_branch = 1;
+static u32 s_rw_start = 0xFFFFFFFFu; static unsigned long long s_rw_t;
+static int gcm_rewind_ok(u32 start)   /* not the same start twice within 200 ms */
+{
+    /* a straight run only goes forward, and a block is at most 16 KB: a start
+     * behind by more than 64 KB, or ahead, is stale (the boot moves the walker
+     * from the load ring at 0x06200000 to IO 0x10000 without a branch) */
+    if (!(start < s_fifo_getoff && s_fifo_getoff - start < 0x10000u)) { s_blk_start = 0xFFFFFFFFu; return 0; }
+    const unsigned long long now = gcm_us_now();
+    if (start == s_rw_start && now - s_rw_t < 200000ull) return 0;
+    s_rw_start = start; s_rw_t = now; return 1;
+}
+static unsigned long long s_n_rewind;
+/* 1 = the run from `start` lands exactly on `target`; 2 = it ends in a branch TO
+ * `target` (the walker's path is right, the words at the target are the trouble);
+ * 0 = out of step; -1 = too far to tell */
+static int gcm_blk_lands(u32 start, u32 target, u32 calloff)
+{
+    u32 o = start;
+    for (int n = 0; n < 16384; n++) {
+        if (o == target) return 1;
+        const u32 ea = gcm_io2ea(o);
+        if (!ea) return 0;
+        const u32 w = gcm_fifo_rd32(ea);
+        const u32 type = w >> 29;
+        if ((w & 0xFFFF0000u) == 0xFEAD0000u) { o += 4; continue; }   /* flip word first, as the walker */
+        if (type == 1 || (w & 3u) == 2u) return (w & 0x1FFFFFFCu) == target ? 2 : 0;
+        if (w == 0x00020000u) return calloff == target ? 2 : 0;
+        if (type == 0 || type == 2) o += 4u + ((w >> 18) & 0x7FFu) * 4u;
+        else o += 4;   /* FEAD flip words and unknown words: one word, as the walker */
+        if (start <= target && o > target) return 0;   /* stepped over it: it is inside a command */
+    }
+    return -1;
 }
 static void gcm_fifo_dump_around(u32 getoff)
 {
@@ -2319,7 +2366,7 @@ static void gcm_rsx_process_fifo_unlocked(void)
                             "mapping -- resyncing to put=0x%08X\n",
                             s_fifo_getoff, put);
             }
-            s_fifo_getoff = put;
+            s_fifo_getoff = put; s_blk_start = 0xFFFFFFFFu;
             why = "no-io-mapping";
             break;
         }
@@ -2350,10 +2397,30 @@ static void gcm_rsx_process_fifo_unlocked(void)
          * check also runs at the start of every pass and after every JUMP, CALL
          * and RET (s_settle_need): what follows is decoded to the next park or
          * branch before any of it runs. */
-        if (s_settle_need || (s_fifo_getoff == s_park_at && !(type == 1 && (w & 0x1FFFFFFCu) == s_fifo_getoff))) {
+        const int park_opened = s_fifo_getoff == s_park_at && !(type == 1 && (w & 0x1FFFFFFCu) == s_fifo_getoff);
+        if (s_settle_need || park_opened) {
             static long long settle_ms = -1;
             if (settle_ms < 0) { const char* e = getenv("GOWA_PARK_SETTLE_MS"); settle_ms = e ? atoll(e) : 2000; }
             s_settle_need = 0;
+            /* 25/10: before the block check, is the walker still in step with its run
+             * (see s_blk_start)? At a pass start, a park that opened, a refusal: running
+             * through the previous lap's words it can stop after THEIR flip word or on
+             * an old park, inside a command of the new block -- where a word may even
+             * read as a header (0x114439B4) and the garbage that follows has no bad
+             * branch (surfaces 49383x4, the game waiting). Rewind to the run's start. */
+            { static int rw_on = -1;
+              if (rw_on < 0) { const char* e = getenv("GOWA_PARK_REWIND"); rw_on = !(e && *e == '0'); }
+              if (rw_on && s_blk_start != 0xFFFFFFFFu && s_blk_start != s_fifo_getoff &&
+                  gcm_blk_lands(s_blk_start, s_fifo_getoff, s_blk_calloff) == 0 && gcm_rewind_ok(s_blk_start)) {
+                  s_n_rewind++;
+                  if (s_n_rewind <= 16 || (s_n_rewind & (s_n_rewind - 1)) == 0)
+                      fprintf(stderr, "[park-settle] fora de passo em 0x%08X (palavra 0x%08X): volta ao início do trecho 0x%08X (#%llu)\n",
+                              s_fifo_getoff, w, s_blk_start, s_n_rewind);
+                  if (s_n_rewind <= 3) gcm_jh_dump("volta", s_fifo_getoff, put);
+                  s_fifo_getoff = s_blk_start; s_fifo_calloff = s_blk_calloff;
+                  s_park_hold_since = 0; s_park_at = 0xFFFFFFFFu; s_settle_need = 1; s_settle_branch = 1;
+                  continue;
+              } }
             if (settle_ms > 0 && !gcm_park_block_ok(s_fifo_getoff, put)) {
                 const unsigned long long now = gcm_us_now();
                 if (!s_park_hold_since || s_park_hold_off != s_fifo_getoff) {
@@ -2364,7 +2431,11 @@ static void gcm_rsx_process_fifo_unlocked(void)
                     /* 24/10: the one that never closed (notebook, 1 run in 3 with the
                      * generated build) had the bad word AT the block start: how the
                      * walker got there is the question -- the transfers leading here */
-                    { static int nd; if (s_settle_bad_off == s_fifo_getoff && nd++ < 3) gcm_jh_dump("park-settle +0", s_fifo_getoff, put); }
+                    { static int nd; if (s_settle_bad_off == s_fifo_getoff && nd++ < 3) {
+                        gcm_jh_dump("park-settle +0", s_fifo_getoff, put);
+                        /* and who wrote there, with GOWA_PUTRING=<lo>:<hi> */
+                        extern void gowa_putring_dump(uint32_t, uint32_t); const u32 ea0 = gcm_io2ea(s_fifo_getoff);
+                        if (ea0) gowa_putring_dump(ea0 - 0x1000u, ea0 + 0x200u); } }
                 }
                 if (now - s_park_hold_since < (unsigned long long)settle_ms * 1000ull) { s_settle_need = 1; why = "parked"; break; }
                 s_park_n_timeout++;
@@ -2375,6 +2446,10 @@ static void gcm_rsx_process_fifo_unlocked(void)
                 if (s_park_n_held <= 16 || (s_park_n_held & (s_park_n_held - 1)) == 0)
                     fprintf(stderr, "[park-settle] #%llu: bloco em 0x%08X fechou depois de %llu us (estouros %llu)\n",
                             s_park_n_held, s_fifo_getoff, waited, s_park_n_timeout);
+            }
+            if (s_settle_branch || park_opened) {   /* a new straight run starts here */
+                s_blk_prev = s_blk_start; s_blk_prev_calloff = s_blk_calloff;
+                s_blk_start = s_fifo_getoff; s_blk_calloff = s_fifo_calloff; s_settle_branch = 0;
             }
             s_park_at = 0xFFFFFFFFu; s_park_hold_since = 0;
         }
@@ -2496,7 +2571,7 @@ static void gcm_rsx_process_fifo_unlocked(void)
                   break;
               }
               gcm_jh_note(s_fifo_getoff, tgt);
-              s_fifo_getoff = tgt; s_settle_need = 1; }
+              s_fifo_getoff = tgt; s_settle_need = 1; s_settle_branch = 1; }
             continue;
         }
         if ((w & 3) == 2) {                    /* CALL: offset | 2 */
@@ -2504,14 +2579,14 @@ static void gcm_rsx_process_fifo_unlocked(void)
               if (!gcm_io2ea(tgt)) { gcm_fifo_bad_branch("CALL", tgt, w); gcm_fifo_dump_around(s_fifo_getoff); gcm_fifo_resync_why("unmapped-CALL", &s_fifo_getoff, put); break; }
               s_fifo_calloff = s_fifo_getoff + 4;
               gcm_jh_note(s_fifo_getoff | 2u, tgt);
-              s_fifo_getoff  = tgt; s_settle_need = 1; }
+              s_fifo_getoff  = tgt; s_settle_need = 1; s_settle_branch = 1; }
             continue;
         }
         if (w == 0x00020000u) {                /* RET */
             gcm_jh_note(s_fifo_getoff, 0xFFFFFFFFu);
             s_fifo_getoff = s_fifo_calloff;
             s_fifo_calloff = 0;
-            s_settle_need = 1;
+            s_settle_need = 1; s_settle_branch = 1;
             continue;
         }
         if (type == 0 || type == 2) {          /* method (incrementing / NI) */
@@ -3013,7 +3088,7 @@ static void gcm_rsx_process_fifo_unlocked(void)
                 vm_write32(jmp_at, 0x20000000u | io_begin);   /* JUMP -> begin */
                 vm_write32(ctx + 0x8, begin);                 /* current = begin */
                 vm_write32(GCM_CONTROL_GUEST_ADDR + 0, io_begin);  /* put */
-                s_fifo_getoff = io_begin;                          /* get */
+                s_fifo_getoff = io_begin; s_blk_start = 0xFFFFFFFFu;  /* get */
                 put = io_begin;
                 static int n = 0;
                 if (n++ < 8)
@@ -4580,4 +4655,5 @@ void cellGcm_syscall_set_fifo(u32 put, u32 get)
     vm_write32(GCM_CONTROL_GUEST_ADDR + 4, get);
     s_fifo_getoff  = get;
     s_fifo_calloff = 0;
+    s_blk_start = 0xFFFFFFFFu;
 }
