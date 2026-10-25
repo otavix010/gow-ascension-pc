@@ -1,0 +1,179 @@
+# Builds a downloadable SDK bundle for each supported platform and attaches it
+# to the GitHub release when a v* tag is pushed.
+#
+# Why: a release with no binaries makes every would-be port author reproduce the
+# whole toolchain setup (clang-cl + Ninja under vcvars) before they can even try
+# the thing. The bundle is what a port actually consumes -- the runtime library,
+# its public headers, and the Python pipeline -- so a port can be attempted with
+# nothing but a tag download.
+#
+# Only Windows and macOS are built, because those are the only two platforms
+# with CI proving they compile. Shipping an untested Linux binary would repeat
+# the mistake of documenting macOS support the tree did not have.
+name: Release
+
+on:
+  push:
+    tags: [ 'v*' ]
+  workflow_dispatch:      # dry run: builds and uploads to the run, publishes nothing
+
+permissions:
+  contents: write         # needed to attach assets to the release
+
+jobs:
+  package:
+    name: ${{ matrix.platform }}
+    runs-on: ${{ matrix.runs-on }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: win-x64
+            runs-on: windows-latest
+          - platform: mac-arm64
+            runs-on: macos-14
+          # Linux ships as the toolkit and the runtime library, not a game
+          # runner: it has no renderer (the null backend's headless software path
+          # is a CI check, not a graphics backend) and the PPU boot scaffold does
+          # not yet load a title on POSIX. VERSION.txt says so in the bundle.
+          - platform: linux-x64
+            runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up MSVC environment
+        if: runner.os == 'Windows'
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - name: Install dependencies (Windows)
+        if: runner.os == 'Windows'
+        run: choco install ninja -y --no-progress
+
+      - name: Install dependencies (macOS)
+        if: runner.os == 'macOS'
+        run: brew install ninja sdl2
+
+      - name: Install dependencies (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends ninja-build libsdl2-dev
+
+      # clang-cl on Windows: the loader uses __builtin_bswap* and weak symbols
+      # that plain MSVC does not provide (docs/BUILDING.md).
+      - name: Configure
+        shell: bash
+        run: |
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release \
+              -DCMAKE_C_COMPILER=clang-cl -DCMAKE_CXX_COMPILER=clang-cl
+          else
+            cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+          fi
+
+      - name: Build
+        run: cmake --build build
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      # A tag can be pushed at any commit, including one that never went through
+      # the push workflows. Re-running the suites here is what makes "downloaded
+      # from a release" mean the same thing as "green on master".
+      - name: Run the lifter test suites
+        shell: bash
+        env:
+          CI: "1"
+        run: |
+          set -e
+          for t in tools/test_*.py; do
+            echo "--- $t"
+            python "$t"
+          done
+
+      - name: Stage the bundle
+        shell: bash
+        run: |
+          set -e
+          # On a tag this is "v0.12.0". On a workflow_dispatch dry run it is the
+          # BRANCH name, which may contain a slash -- "release/v0.12.0" made
+          # dist/${NAME} a nested directory, so the zip landed in dist/release/
+          # and the dist/*.zip upload glob found nothing. Every platform built and
+          # tested fine and the run still failed, which is the least useful way
+          # for a dry run to fail.
+          VER="${GITHUB_REF_NAME//\//-}"
+          NAME="ps3recomp-${VER}-${{ matrix.platform }}"
+          STAGE="dist/${NAME}"
+
+          # lib/ + include/ come from the project's own install rules, so the
+          # bundle layout cannot drift from what a local `cmake --install` gives.
+          cmake --install build --prefix "${STAGE}"
+
+          # The static library alone cannot recompile anything; the pipeline that
+          # turns an EBOOT into C is these scripts.
+          cp -r tools "${STAGE}/tools"
+          find "${STAGE}/tools" -name __pycache__ -type d -prune -exec rm -rf {} +   # test-run leftovers
+          cp README.md LICENSE CONTRIBUTORS.md "${STAGE}/"
+          mkdir -p "${STAGE}/docs" && cp docs/*.md "${STAGE}/docs/"
+
+          # What this bundle can actually do, per platform. Someone who
+          # downloads the Linux zip expecting to run a game should find that out
+          # here rather than after building one.
+          case "${{ matrix.platform }}" in
+            win-x64)    CAN="renders and runs recompiled titles (D3D12)" ;;
+            mac-arm64)  CAN="renders through Metal; cannot yet load a title -- the PPU boot scaffold does not run on POSIX" ;;
+            linux-x64)  CAN="toolkit and runtime library only -- no renderer in this bundle (the Vulkan backend is opt-in, build from source with -DPS3RECOMP_RSX_VULKAN=ON), and the PPU boot scaffold does not run on POSIX" ;;
+            *)          CAN="unknown" ;;
+          esac
+
+          { echo "ps3recomp ${VER}"
+            echo "platform: ${{ matrix.platform }}"
+            echo "commit:   ${GITHUB_SHA}"
+            echo "run:      ${{ github.run_id }}"
+            echo
+            echo "status:   ${CAN}"; } > "${STAGE}/VERSION.txt"
+
+          # cmake -E tar rather than zip/Compress-Archive: CMake is already a
+          # hard requirement on both runners, so this is one code path instead of
+          # a per-platform branch.
+          ( cd dist && cmake -E tar cf "${NAME}.zip" --format=zip "${NAME}" )
+          ls -la dist/
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ps3recomp-${{ matrix.platform }}
+          path: dist/*.zip
+          if-no-files-found: error
+
+  publish:
+    name: Attach to release
+    needs: package
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Checksums
+        run: |
+          cd dist
+          sha256sum *.zip | tee SHA256SUMS.txt
+
+      - name: Upload
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -e
+          TAG="${GITHUB_REF_NAME}"
+          # The release usually already exists (tagged and written by hand);
+          # create one only if it does not, so hand-written notes survive.
+          gh release view "$TAG" >/dev/null 2>&1 || \
+            gh release create "$TAG" --title "$TAG" --generate-notes
+          gh release upload "$TAG" dist/*.zip dist/SHA256SUMS.txt --clobber

@@ -1,0 +1,172 @@
+# Builds the runtime library on Windows, the only platform that can currently
+# run a recompiled game.
+#
+# The macOS job guards the POSIX paths; this one guards the platform everything
+# actually ships on. Without it, a change made to satisfy Clang could break the
+# MSVC/clang-cl build and nothing would notice until someone tried to build a
+# port -- which is the same class of drift that let docs/BUILDING.md advertise
+# macOS support the tree did not have.
+#
+# clang-cl rather than plain cl: the loader uses __builtin_bswap* and weak
+# symbols that MSVC does not provide (see docs/BUILDING.md).
+name: Windows
+
+on:
+  push:
+    branches: [ master, main ]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Windows x64 (${{ matrix.build_type }})
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        build_type: [Debug, Release]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # Puts cl, the Windows SDK and the MSVC headers on PATH. clang-cl needs
+      # the MSVC headers even though it is doing the compiling, and the
+      # conformance suite shells out to cl to build its generated driver.
+      - name: Set up MSVC environment
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - name: Install Ninja
+        run: choco install ninja -y --no-progress
+
+      - name: Show toolchain
+        run: |
+          clang-cl --version
+          ninja --version
+          cmake --version
+
+      - name: Configure
+        run: >
+          cmake -S . -B build -G Ninja
+          -DCMAKE_C_COMPILER=clang-cl
+          -DCMAKE_CXX_COMPILER=clang-cl
+          -DCMAKE_BUILD_TYPE=${{ matrix.build_type }}
+
+      - name: Build
+        run: cmake --build build
+
+      - name: Verify the library exists
+        shell: bash
+        run: |
+          ls -la build/ps3recomp_runtime.lib
+          test -s build/ps3recomp_runtime.lib
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      # The same eight suites the macOS job runs. The conformance one compiles
+      # and EXECUTES 1300+ lifted instruction cases; CI=1 makes it fail rather
+      # than skip if no compiler is reachable, because a green tick meaning
+      # "compiled nothing" is worse than a red one.
+      - name: Run the lifter test suites
+        shell: bash
+        env:
+          CI: "1"
+        run: |
+          set -e
+          for t in tools/test_*.py; do
+            echo "--- $t"
+            python "$t"
+          done
+
+      # runtime/ppu/ is the one part of the runtime no CMake target builds --
+      # it needs the lifter's per-game ppu_recomp.h -- so it was only ever
+      # compiled inside somebody's game port. Windows is where it works, so
+      # this is a real gate here: the baseline is near zero and any new error
+      # fails the job.
+      - name: Check the PPU boot scaffold (ratchet)
+        run: python tools/check_ppu_scaffold.py
+
+      # RSX texture layout -- format class, row sizes, Morton addressing. Pure
+      # Linux and macOS have run these since they were written; Windows never
+      # did. That gap let a broken xswd case sit red on both POSIX runners
+      # while Windows reported green, which is exactly the wrong way round for
+      # the platform most contributors build on.
+      - name: Run self-contained SPU helper tests
+        run: |
+          clang-cl /nologo /W0 /D_CRT_SECURE_NO_WARNINGS /I include /I runtime/spu /Fe:test_spu_helpers.exe runtime/spu/tests/test_spu_helpers.c
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          .\test_spu_helpers.exe
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+
+      # libnet over host sockets (PS3_NET_ONLINE), end to end on loopback: every
+      # handler is called through the NID it registered under.
+      - name: Run the sys_net loopback test
+        run: |
+          clang-cl /nologo /W0 /D_CRT_SECURE_NO_WARNINGS /I include /Fe:test_sys_net.exe libs/network/tests/test_sys_net.c ws2_32.lib
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          .\test_sys_net.exe
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+
+      # Matching2 over psnr without a server: response relocation, attribute
+      # packing, and the room structs a title reads.
+      - name: Run the Matching2 test
+        run: |
+          clang-cl /nologo /W0 /D_CRT_SECURE_NO_WARNINGS /I include /Fe:test_np_matching2.exe libs/network/tests/test_np_matching2.c
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          .\test_np_matching2.exe
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+
+      # The player name: --username, PS3_NP_ONLINE_ID, the OS login online,
+      # and PSN's online ID rules.
+      - name: Run the player-name test
+        run: |
+          clang-cl /nologo /W0 /D_CRT_SECURE_NO_WARNINGS /I include /Fe:test_np_identity.exe libs/network/tests/test_np_identity.c ws2_32.lib
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          .\test_np_identity.exe
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+
+      # NAT traversal: probing psnr from the P2P socket, dropping psnr's
+      # packets before the title sees them, punching toward peers.
+      - name: Run the NAT traversal test
+        run: |
+          clang-cl /nologo /W0 /D_CRT_SECURE_NO_WARNINGS /I include /Fe:test_np_nat.exe libs/network/tests/test_np_nat.c ws2_32.lib
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          .\test_np_nat.exe
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+
+      # arithmetic with no host API in it, so it runs everywhere, and it is the
+      # regression net for having lifted that maths out of the D3D12 uploader.
+      # sync_stress has always been the Windows-native suite; now that its
+      # source also builds on POSIX through the shim, this is what proves the
+      # shared source still means the same thing here.
+      - name: Build and run sync_stress
+        run: |
+          cmake -S tests/sync_stress -B build-sync-stress -G Ninja -DCMAKE_BUILD_TYPE=${{ matrix.build_type }} -DCMAKE_C_COMPILER=clang-cl
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          cmake --build build-sync-stress
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          ctest --test-dir build-sync-stress --output-on-failure
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+
+      - name: Run self-contained RSX tests
+        # NOT shell: bash. Git Bash rewrites a leading-slash argument into a
+        # Windows path, so /nologo arrived at the linker as an .obj under the
+        # Git install directory. PowerShell leaves MSVC-style flags alone.
+        run: |
+          clang-cl /nologo /W0 /D_CRT_SECURE_NO_WARNINGS /I include /I libs/video /Fe:test_texture_layout.exe libs/video/tests/test_texture_layout.c libs/video/rsx_texture_layout.c
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          .\test_texture_layout.exe
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          clang-cl /nologo /W0 /D_CRT_SECURE_NO_WARNINGS /I include /I libs/video /Fe:test_rsx_primitives.exe libs/video/tests/test_rsx_primitives.c
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          .\test_rsx_primitives.exe
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+
+      - name: Run condition semantics regressions
+        run: |
+          cmake -S tests/sync_stress -B build-sync -G Ninja -DCMAKE_C_COMPILER=clang-cl -DCMAKE_BUILD_TYPE=${{ matrix.build_type }}
+          cmake --build build-sync --target test_cond_semantics
+          ctest --test-dir build-sync -R "^cond_" --output-on-failure
