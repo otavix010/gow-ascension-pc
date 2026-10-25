@@ -2361,10 +2361,15 @@ static void gcm_rsx_process_fifo_unlocked(void)
                     if (s_park_n_held <= 24)
                         fprintf(stderr, "[park-settle] retém em 0x%08X: palavra 0x%08X em 0x%08X (+%u)\n", s_fifo_getoff,
                                 s_settle_bad_w, s_settle_bad_off, s_settle_bad_off - s_fifo_getoff);
+                    /* 24/10: the one that never closed (notebook, 1 run in 3 with the
+                     * generated build) had the bad word AT the block start: how the
+                     * walker got there is the question -- the transfers leading here */
+                    { static int nd; if (s_settle_bad_off == s_fifo_getoff && nd++ < 3) gcm_jh_dump("park-settle +0", s_fifo_getoff, put); }
                 }
                 if (now - s_park_hold_since < (unsigned long long)settle_ms * 1000ull) { s_settle_need = 1; why = "parked"; break; }
                 s_park_n_timeout++;
                 fprintf(stderr, "[park-settle] bloco em 0x%08X não fechou em %lld ms; segue como antes\n", s_fifo_getoff, settle_ms);
+                { static int nd; if (nd++ < 2) { gcm_jh_dump("park-settle estouro", s_fifo_getoff, put); gcm_fifo_dump_around(s_fifo_getoff + 8); } }
             } else if (s_park_hold_since) {
                 const unsigned long long waited = gcm_us_now() - s_park_hold_since;
                 if (s_park_n_held <= 16 || (s_park_n_held & (s_park_n_held - 1)) == 0)
