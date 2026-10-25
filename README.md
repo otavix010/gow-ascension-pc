@@ -37,7 +37,9 @@ winget install Microsoft.VisualStudio.2022.BuildTools --override "--quiet --wait
 - decripta o executável;
 - traduz e compila, escolhendo a build certa para a sua CPU.
 
-Num Ryzen 7 9800X3D (8 núcleos) levou ~4 minutos; num PC de 4 núcleos leva bem mais. Se parar no meio, rode de novo: ele continua de onde parou.
+Num Ryzen 7 9800X3D (8 núcleos) leva ~5 minutos; num PC de 4 núcleos, bem mais. Se parar no meio, rode de novo: ele continua de onde parou.
+
+Versão nova do port: baixe por cima e rode `gerar.cmd -RefazerDe 4` num terminal. Ele refaz só a tradução e a compilação, sem repetir o disco, o update e o firmware.
 
 **5. Jogue com `jogar.cmd`.** O log fica em `out\jogo.log` e os saves em `saves\`.
 
@@ -72,7 +74,7 @@ O PS3 tem um processador central (PPU, PowerPC), seis co-processadores vetoriais
 | PC teste 2 | Core i5-11400F (6/12, AVX-512) | RX 9060 XT | AVX-512 (Rocket Lake) | **~32** (1ª execução) | — |
 | Notebook | Core i5-10300H (4/8, sem AVX-512, ~2,8 GHz sustentado) | GTX 1650 | sem AVX-512 | **~5,7** | — |
 
-> **A build que o `gerar.cmd` produz hoje é ~1/3 mais lenta que a da tabela.** Os passes de desempenho que aplicamos ao longo do desenvolvimento e o PGO ainda não entram na geração automática. No notebook, nas mesmas condições: **~3,9 FPS** no cap. 16 com a build gerada, contra **5,9** com a nossa. Automatizar esses passes é a próxima etapa (veja o fim de [docs/COMO_GERAR.md](docs/COMO_GERAR.md)).
+> **A build que o `gerar.cmd` produz agora tem o mesmo desempenho da nossa.** Os passes de desempenho que aplicamos ao longo do desenvolvimento entram na geração (`scripts/otimizar.py`). No notebook, no cap. 16, em rodadas intercaladas: **6,4 e 7,1 FPS** com a build gerada, contra **6,3 e 6,5** com a nossa (antes da automação, a gerada dava 3,9). O PGO fica de fora; o que ainda difere está no fim de [docs/COMO_GERAR.md](docs/COMO_GERAR.md).
 
 ![Capítulo 16 no notebook com a build sem AVX-512](docs/imagens/cap16_notebook_portatil.png)
 
@@ -86,7 +88,7 @@ O PS3 tem um processador central (PPU, PowerPC), seis co-processadores vetoriais
 
 - **Engasgo na primeira entrada de cada área**: os pipelines de shader são compilados na hora e ficam em cache; da segunda vez some.
 - **Sem o limitador de 60** o jogo **acelera**, porque parte da lógica avança por quadro.
-- **Trava do leitor da GPU em PC lento**: corrigida nesta versão (o leitor executava blocos de comandos que a PPU ainda escrevia). Validada em 5 de 5 execuções no notebook, mas ainda vale relatar se acontecer.
+- **Trava do leitor da GPU em PC lento**: o caso principal foi corrigido (o leitor executava blocos de comandos que ainda estavam sendo escritos). No notebook ainda aparece uma variante rara: a imagem congela no meio da fase, com `[park-settle] ... não fechou em 2000 ms` no `out\jogo.log`. Vimos uma vez em cerca de 10 rodadas; está em investigação. Se acontecer, relate com o log.
 - Travas raras de carregamento ainda em investigação.
 - PC fraco (4 núcleos, sem AVX-512) roda, mas abaixo de 10 FPS nas partes pesadas.
 
@@ -107,6 +109,6 @@ A **native PC port** of *God of War: Ascension* (PS3), made by **static recompil
 
 **Bring your own disc**: no game code or data and no firmware here. You need your own copy (BCUS98232 + update 1.04, installed in RPCS3 or as the .pkg) and RPCS3 with the official PS3 firmware installed. Install Python and the Visual Studio 2022 Build Tools with Clang (commands above), download this repository to a path without spaces, double-click **`gerar.cmd`** (it asks for the folders, then decrypts your copy, translates and builds; ~4 minutes on an 8-core Ryzen 7 9800X3D), then play with **`jogar.cmd`**.
 
-Status: boots, menus, chapter 1 and chapter 16 play with correct image, 60 FPS locked on a Ryzen 7 9800X3D; the full game is not verified yet. Performance is CPU-bound and much better with AVX-512: ~68 FPS uncapped in chapter 16 on a 9800X3D, ~32 on an i5-11400F, ~5.7 on a 4-core laptop without AVX-512 (our optimized build; the build `gerar.cmd` produces today is about 1/3 slower, because the performance passes and PGO are not automated yet).
+Status: boots, menus, chapter 1 and chapter 16 play with correct image, 60 FPS locked on a Ryzen 7 9800X3D; the full game is not verified yet. Performance is CPU-bound and much better with AVX-512: ~68 FPS uncapped in chapter 16 on a 9800X3D, ~32 on an i5-11400F, ~6 on a 4-core laptop without AVX-512. The build `gerar.cmd` produces now includes the same performance passes as ours (`scripts/otimizar.py`) and measured the same speed on the laptop; only PGO is left out.
 
 License: our code is MIT; ps3recomp is MIT (Ned Heller); `scripts/gpl/unself.py` is GPL-2.0 (follows RPCS3's unself.cpp). Decryption keys are read from RPCS3's source (downloaded at a pinned commit). *God of War* is a trademark of Sony Interactive Entertainment; this is a non-commercial fan project, not affiliated with or endorsed by Sony.

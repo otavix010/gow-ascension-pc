@@ -25,6 +25,11 @@
   Pasta com key_vault.cpp e key_vault.h do código-fonte do RPCS3. Se não for dada,
   os dois arquivos são baixados do repositório do RPCS3 para dl\rpcs3_chaves.
 
+.PARAMETER RefazerDe
+  Refaz da etapa N em diante. Depois de atualizar o port, -RefazerDe 4 retraduz e
+  recompila sem repetir o disco, o update e o firmware.
+.PARAMETER SemOtimizar
+  Pula os passes de desempenho do código SPU (scripts\otimizar.py).
 .EXAMPLE
   gerar.cmd     (clique duas vezes: pede as pastas em janelas)
 .EXAMPLE
@@ -37,6 +42,8 @@ param(
     [string]$ChavesRpcs3 = '',
     [ValidateSet('auto', 'avx512', 'portatil')][string]$Build = 'auto',
     [int]$Jobs = 0,
+    [switch]$SemOtimizar,
+    [int]$RefazerDe = 0,
     [switch]$Refazer
 )
 $ErrorActionPreference = 'Stop'
@@ -48,6 +55,11 @@ $FFMPEG_NOME = 'ffmpeg-n9.0-latest-win64-lgpl-shared-9.0'
 $FFMPEG_URL = "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/$FFMPEG_NOME.zip"
 $OUT = Join-Path $R 'out\gerar'
 New-Item -ItemType Directory -Force $OUT | Out-Null
+# -RefazerDe N: refaz da etapa N em diante (ex.: 4 depois de atualizar o port; o jogo e o
+# firmware preparados nas etapas 2 e 3 continuam valendo)
+if ($RefazerDe -gt 0) {
+    Get-ChildItem $OUT -Filter '*.ok' | Where-Object { [int]($_.Name.Split('_')[0]) -ge $RefazerDe } | Remove-Item -Force
+}
 
 function Msg($t) { Write-Host "[gerar] $t" -ForegroundColor Cyan }
 
@@ -221,6 +233,10 @@ Etapa '4_ppu' {
 # ---------------------------------------------------------------------------- SPU
 Etapa '5_spu' {
     $s = Join-Path $R 'scripts'
+    # recomeça do zero: os passes de desempenho guardam backups .sem_* e não podem rodar
+    # por cima de código já otimizado (o gowanat_tspm é código nosso, do repositório)
+    Get-ChildItem (Join-Path $R 'port\spu') -Force -ErrorAction SilentlyContinue |
+        Where-Object { $_.Name -ne 'gowanat_tspm' } | Remove-Item -Recurse -Force
     # a ferramenta é dona da pasta de saída inteira (substitui a cada execução): gera à parte e copia
     $sw = Join-Path $R 'out\spu_workloads'
     Exec $LOG "python `"$R\ps3recomp\tools\build_spu_workloads.py`" --input `"$R\jogo\GOWA.elf`" --input `"$R\fw\libsre.prx`" --lifted `"$sw`" --out `"$sw\spu_workloads.c`" --constructor --allow-partial"
@@ -243,6 +259,8 @@ Etapa '5_spu' {
     # job do WWS); sem este passe os números colidem e o jogo para esperando um job
     Exec $LOG "python `"$s\spu_num_remap.py`" aplicar"
     Exec $LOG "python `"$s\guarda_avx512.py`" aplicar"
+    # passes de desempenho (núcleos vetoriais, luz do EDGE na GPU, saltos diretos...)
+    if (-not $SemOtimizar) { Exec $LOG "python `"$s\otimizar.py`"" }
 }
 
 # ---------------------------------------------------------------------------- compilar

@@ -56,6 +56,14 @@ O `fw\lle\libsre_image.bin` também é lido pelo jogo ao rodar.
 - A tabela de funções folha (`folhas_spu.py`).
 - `spu_num_remap.py`, **obrigatório**: o boot liga `GOWA_SPU_NUM_REMAP=3`, e a 7ª SPU se apresenta com o número de outra nas listas de job. Sem esse passe os números colidem e o jogo para no boot, esperando um job que nunca roda.
 - `guarda_avx512.py`: os núcleos vetoriais compilam em AVX-512 ou AVX2.
+- `otimizar.py`: os passes de desempenho, na ordem da nossa build de referência. Para pular, use `-SemOtimizar`.
+  - promoção de registradores a variáveis locais;
+  - convenção de chamada interna, constantes da memória local e achatamento preguiçoso;
+  - os núcleos vetoriais dos laços mais pesados: 14 no EDGE, 2 em plugins, o da cadeia de chamadas do General6 e o ninho da luz;
+  - o gancho que leva a luz por vértice do EDGE para a GPU (`/*LUZGPU*/`);
+  - saltos diretos entre funções e a divisão das funções no idioma de seção crítica.
+
+  Repetir a etapa 5 apaga o código SPU gerado e começa do zero, porque os passes guardam backups `.sem_*` e não rodam duas vezes sobre o mesmo código.
 
 **6. Compilar.** Pergunta ao clang se a CPU tem AVX-512 (F/BW/VL/DQ) e chama `scripts\build_portatil.cmd`:
 - **com AVX-512**: `native`, em `port\build_native\`;
@@ -65,17 +73,15 @@ O código das SPUs sai com `-march=native` (a CPU de quem compila); o da PPU, co
 
 **7. Jogar.** Copia as DLLs do FFmpeg para a pasta do exe e escreve o `jogar.cmd`.
 
-## O que a geração automática ainda não faz
+## Diferenças que sobram em relação à nossa build
 
-A nossa build de referência teve, por cima da tradução, passes de desempenho aplicados ao longo do desenvolvimento. Eles estão nos scripts, mas ainda não entram no `gerar.ps1`, porque dependem de ordem, de backups intermediários e de alguns ajustes à mão:
+O `otimizar.py` reproduz a cadeia de passes da nossa build de referência: num clone limpo, 131 dos arquivos SPU saem idênticos. O que ainda difere:
 
-- promoção de registradores, saltos diretos e constantes da memória local, nos módulos SPU: `refaz_jm.sh` e `refaz_modulo.sh`;
-- núcleos vetoriais dos laços mais pesados (`vetorizar_laco.py`, `vetorizar_ninho.py`, `vetorizar_chamadas.py`);
-- no EDGE (módulo 0x72DF80): o gancho que leva a luz por vértice para a GPU (`/*LUZGPU*/`) e uma entrada extra;
-- no gerenciador de políticas: três entradas extras;
-- PGO (perfil de execução).
-
-Por isso a build gerada é mais lenta que os números do README. A diferença medida está no README. Automatizar esses passes é a próxima etapa.
+- **PGO** (perfil de execução, ~+4%): exige rodar o jogo para medir, então não entra na geração;
+- alguns módulos de job antigos foram promovidos com uma versão anterior dos scripts e têm mais funções promovidas;
+- 6 dos 14 núcleos vetoriais do EDGE saem do gerador atual um pouco diferentes dos que usamos; foram conferidos no jogo com `GOWA_VK_CHECK`;
+- 3 entradas extras do gerenciador de políticas, que mediram empate;
+- ganchos de experimento do EDGE, desligados por padrão.
 
 ## Verificação
 
