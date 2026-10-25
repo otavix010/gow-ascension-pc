@@ -195,12 +195,28 @@ function Achar-Disco([string]$d) {
             & "$env:SystemRoot\System32\tar.exe" -xf $d -C $dx
             if ($LASTEXITCODE -ne 0) { throw "falhou a extração de $d (tar $LASTEXITCODE). Extraia o arquivo numa pasta e escolha a pasta." }
             $achou = Achar-PS3Game $dx
+            # um .7z/.zip com a .iso dentro: extrai a .iso também e apaga a intermediária
+            if (-not $achou) {
+                $iso = Get-ChildItem -LiteralPath $dx -Recurse -File -Filter *.iso -ErrorAction SilentlyContinue | Select-Object -First 1
+                if ($iso) {
+                    Msg "extraindo $($iso.Name)"
+                    & "$env:SystemRoot\System32\tar.exe" -xf $iso.FullName -C $dx
+                    if ($LASTEXITCODE -ne 0) { throw "falhou a extração de $($iso.FullName) (tar $LASTEXITCODE)" }
+                    Remove-Item -LiteralPath $iso.FullName -Force
+                    $achou = Achar-PS3Game $dx
+                }
+            }
         }
         if (-not $achou) { throw "não achei PS3_GAME\USRDIR dentro de $d (uma .iso criptografada, como as da Redump, não serve)" }
         return $achou
     }
     $achou = Achar-PS3Game $d
-    if (-not $achou) { throw "não achei PS3_GAME\USRDIR em $d" }
+    if (-not $achou) {
+        # uma pasta com só o arquivo do disco dentro
+        $arq = @(Get-ChildItem -LiteralPath $d -File -ErrorAction SilentlyContinue | Where-Object { $_.Name -match '\.(7z|zip|rar|iso)$' })
+        if ($arq.Count -eq 1) { return (Achar-Disco $arq[0].FullName) }
+        throw "não achei PS3_GAME\USRDIR em $d"
+    }
     return $achou
 }
 Etapa '2_jogo' {
