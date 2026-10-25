@@ -489,25 +489,23 @@ static volatile long long g_ld_present_qpc;
 /* GOWA (25/10): medidor de desempenho na tela, como o do MSI Afterburner ou o da
  * Steam. GOWA_OSD=1 liga na partida; F10 liga e desliga. Desligado, custa um teste
  * por apresentação. Vem DESLIGADO por padrão (o launcher liga pela opção dele);
- * GOWA_OSD_TECLA=0 desliga a tecla F10. Ligado: um desenho por quadro, no backbuffer, antes do
- * Present -- o texto vai em constantes da raiz e a fonte (Consolas 8x14, gerada uma
- * vez pelo GDI) num buffer de 1,5 KB; uso de GPU e VRAM vêm de uma thread que lê a
- * cada segundo os contadores do Windows (os mesmos do Gerenciador de Tarefas) e a
- * DXGI. FPS = quadros que o jogo pediu por segundo (o jogo= do [fps]). */
+ * GOWA_OSD_TECLA=0 desliga a tecla F10. O desenho é o medidor padrão dos ports Otavix
+ * (port/otavix_osd.c): uma janela própria por cima da do jogo, com o texto na resolução
+ * real da tela e o tamanho pela referência de 1080p, igual em todos os jogos e nítido
+ * qualquer que seja a escala de render. Antes era desenhado aqui no backbuffer, com uma
+ * fonte de bitmap 8x14 multiplicada por 1-3, que saía grande e serrilhada. Uso de GPU e
+ * VRAM vêm de uma thread que lê a cada segundo os contadores do Windows (os mesmos do
+ * Gerenciador de Tarefas) e a DXGI. FPS = quadros que o jogo pediu por segundo (o jogo=
+ * do [fps]). */
 #include <pdh.h>
 #include <pdhmsg.h>   /* PDH_MORE_DATA */
 #pragma comment(lib, "pdh")
-static D3D12_CPU_DESCRIPTOR_HANDLE rtv_handle(u32 idx);
+/* port/otavix_osd.c, o medidor padrão (compilado no executável) */
+void otx_osd_iniciar(void);
+void otx_osd_texto(const char* linha);
 IDXGIAdapter3* g_ld_osd_adapter;
-static int s_osd_on = -1, s_osd_f10, s_osd_tecla = -1;
-static ID3D12RootSignature* s_osd_rs;
-static ID3D12PipelineState* s_osd_pso;
-static ID3D12Resource* s_osd_fonte;
-static ID3D12CommandAllocator* s_osd_alloc[3];
-static ID3D12GraphicsCommandList* s_osd_list;
-static u64 s_osd_alloc_fence[3];
-static u32 s_osd_ai, s_osd_falhou;
-static char s_osd_txt[96];
+static int s_osd_on = -1, s_osd_f10, s_osd_tecla = -1, s_osd_mostrando;
+static char s_osd_txt[192];
 static volatile LONG s_osd_gpu_pct = -1, s_osd_vram_mb = -1, s_osd_vram_tot_mb = -1;
 static volatile LONG s_osd_temp_cpu = -1, s_osd_temp_gpu = -1, s_osd_temp_cpu_max = -1, s_osd_temp_gpu_max = -1;
 LUID g_ld_osd_luid;
@@ -616,112 +614,13 @@ static DWORD WINAPI ld_osd_amostrador(LPVOID arg)
         }
     }
 }
-static int ld_osd_pipeline(void)
-{
-    if (s_osd_pso) return 1;
-    if (s_osd_falhou) return 0;
-    s_osd_falhou = 1;
-    /* a fonte: ASCII 32..127 em células de 8x14, uma linha por byte (bit 7 = coluna 0) */
-    u32 fonte[96 * 4]; memset(fonte, 0, sizeof fonte);
-    { HDC dc = CreateCompatibleDC(NULL);
-      BITMAPINFO bi; memset(&bi, 0, sizeof bi);
-      bi.bmiHeader.biSize = sizeof bi.bmiHeader; bi.bmiHeader.biWidth = 8; bi.bmiHeader.biHeight = -14;
-      bi.bmiHeader.biPlanes = 1; bi.bmiHeader.biBitCount = 32; bi.bmiHeader.biCompression = BI_RGB;
-      u32* px = NULL;
-      HBITMAP bm = dc ? CreateDIBSection(dc, &bi, DIB_RGB_COLORS, (void**)&px, NULL, 0) : NULL;
-      HFONT fo = CreateFontA(-12, 7, 0, 0, FW_BOLD, 0, 0, 0, ANSI_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
-                             NONANTIALIASED_QUALITY, FIXED_PITCH | FF_MODERN, "Consolas");
-      if (!bm || !fo) { if (bm) DeleteObject(bm); if (fo) DeleteObject(fo); if (dc) DeleteDC(dc); return 0; }
-      HGDIOBJ ob = SelectObject(dc, bm), of = SelectObject(dc, fo);
-      SetTextColor(dc, RGB(255, 255, 255)); SetBkColor(dc, RGB(0, 0, 0)); SetBkMode(dc, OPAQUE);
-      for (int ch = 32; ch < 128; ch++) {
-          memset(px, 0, 8 * 14 * 4);
-          char s1 = ch == 127 ? (char)0xB0 : (char)ch; TextOutA(dc, 0, 1, &s1, 1); GdiFlush();   /* 127 = grau */
-          for (int y = 0; y < 14; y++) {
-              u32 b = 0;
-              for (int x = 0; x < 8; x++) if ((px[y * 8 + x] & 0xFF) > 96) b |= 0x80u >> x;
-              fonte[(ch - 32) * 4 + (y >> 2)] |= b << ((y & 3) * 8);
-          }
-      }
-      SelectObject(dc, ob); SelectObject(dc, of); DeleteObject(bm); DeleteObject(fo); DeleteDC(dc); }
-    { D3D12_HEAP_PROPERTIES hp = {0}; hp.Type = D3D12_HEAP_TYPE_UPLOAD;
-      D3D12_RESOURCE_DESC rd = {0}; rd.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER; rd.Width = sizeof fonte;
-      rd.Height = rd.DepthOrArraySize = rd.MipLevels = 1; rd.SampleDesc.Count = 1; rd.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
-      if (FAILED(g.dev->lpVtbl->CreateCommittedResource(g.dev, &hp, D3D12_HEAP_FLAG_NONE, &rd, D3D12_RESOURCE_STATE_GENERIC_READ,
-                                                        NULL, &IID_ID3D12Resource, (void**)&s_osd_fonte))) return 0;
-      void* m = NULL; D3D12_RANGE nada = {0, 0};
-      if (FAILED(s_osd_fonte->lpVtbl->Map(s_osd_fonte, 0, &nada, &m))) return 0;
-      memcpy(m, fonte, sizeof fonte); s_osd_fonte->lpVtbl->Unmap(s_osd_fonte, 0, NULL); }
-    D3D12_ROOT_PARAMETER rp[2]; memset(rp, 0, sizeof rp);
-    rp[0].ParameterType = D3D12_ROOT_PARAMETER_TYPE_CBV; rp[0].Descriptor.ShaderRegister = 0;
-    rp[0].ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
-    rp[1].ParameterType = D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS; rp[1].Constants.ShaderRegister = 1;
-    rp[1].Constants.Num32BitValues = 32; rp[1].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
-    D3D12_ROOT_SIGNATURE_DESC rsd = {0}; rsd.NumParameters = 2; rsd.pParameters = rp;
-    ID3DBlob* sig = NULL; ID3DBlob* err = NULL;
-    if (FAILED(D3D12SerializeRootSignature(&rsd, D3D_ROOT_SIGNATURE_VERSION_1, &sig, &err))) { if (err) err->lpVtbl->Release(err); return 0; }
-    HRESULT hr = g.dev->lpVtbl->CreateRootSignature(g.dev, 0, sig->lpVtbl->GetBufferPointer(sig), sig->lpVtbl->GetBufferSize(sig),
-                                                    &IID_ID3D12RootSignature, (void**)&s_osd_rs);
-    sig->lpVtbl->Release(sig);
-    if (FAILED(hr)) return 0;
-    static const char src[] =
-        "cbuffer F : register(b0) { uint4 fonte[96]; };\n"
-        "cbuffer T : register(b1) { uint4 p; uint4 q; uint4 txt[6]; };\n"   /* p = x0, y0, escala, n; q = largura, altura */
-        "uint comp(uint4 v, uint j) { return j == 0 ? v.x : j == 1 ? v.y : j == 2 ? v.z : v.w; }\n"
-        "float4 vs(uint id : SV_VertexID) : SV_Position {\n"
-        "    float2 c = float2(id & 1, id >> 1); float s = (float)p.z;\n"
-        "    float2 sz = float2(p.w * 8.0 * s + 8.0 * s, 14.0 * s + 6.0 * s);\n"
-        "    float2 px = float2(p.x, p.y) + c * sz;\n"
-        "    return float4(px.x / q.x * 2.0 - 1.0, 1.0 - px.y / q.y * 2.0, 0, 1); }\n"
-        "float4 ps(float4 pos : SV_Position) : SV_Target {\n"
-        "    float s = (float)p.z; float4 fundo = float4(0, 0, 0, 0.6);\n"
-        "    float2 l = pos.xy - float2(p.x, p.y) - float2(4.0 * s, 3.0 * s);\n"
-        "    if (l.x < 0 || l.y < 0) return fundo;\n"
-        "    uint ci = (uint)(l.x / (8.0 * s)), col = (uint)(l.x / s) & 7, lin = (uint)(l.y / s);\n"
-        "    if (ci >= p.w || lin >= 14) return fundo;\n"
-        "    uint code = (comp(txt[ci >> 4], (ci >> 2) & 3) >> ((ci & 3) * 8)) & 0xFF;\n"
-        "    if (code < 32 || code > 127) return fundo;\n"
-        "    uint bits = (comp(fonte[code - 32], lin >> 2) >> ((lin & 3) * 8)) & 0xFF;\n"
-        "    return ((bits >> (7 - col)) & 1) ? float4(1.0, 1.0, 0.55, 1.0) : fundo; }\n";
-    ID3DBlob *vsb = NULL, *psb = NULL;
-    if (FAILED(D3DCompile(src, sizeof src - 1, "ld_osd", NULL, NULL, "vs", "vs_5_0", 0, 0, &vsb, &err))) {
-        if (err) { fprintf(stderr, "[osd] vs: %s\n", (const char*)err->lpVtbl->GetBufferPointer(err)); err->lpVtbl->Release(err); }
-        return 0;
-    }
-    if (FAILED(D3DCompile(src, sizeof src - 1, "ld_osd", NULL, NULL, "ps", "ps_5_0", 0, 0, &psb, &err))) {
-        if (err) { fprintf(stderr, "[osd] ps: %s\n", (const char*)err->lpVtbl->GetBufferPointer(err)); err->lpVtbl->Release(err); }
-        vsb->lpVtbl->Release(vsb); return 0;
-    }
-    D3D12_GRAPHICS_PIPELINE_STATE_DESC pd; memset(&pd, 0, sizeof pd);
-    pd.pRootSignature = s_osd_rs;
-    pd.VS.pShaderBytecode = vsb->lpVtbl->GetBufferPointer(vsb); pd.VS.BytecodeLength = vsb->lpVtbl->GetBufferSize(vsb);
-    pd.PS.pShaderBytecode = psb->lpVtbl->GetBufferPointer(psb); pd.PS.BytecodeLength = psb->lpVtbl->GetBufferSize(psb);
-    D3D12_RENDER_TARGET_BLEND_DESC* bl = &pd.BlendState.RenderTarget[0];
-    bl->BlendEnable = TRUE; bl->SrcBlend = D3D12_BLEND_SRC_ALPHA; bl->DestBlend = D3D12_BLEND_INV_SRC_ALPHA; bl->BlendOp = D3D12_BLEND_OP_ADD;
-    bl->SrcBlendAlpha = D3D12_BLEND_ONE; bl->DestBlendAlpha = D3D12_BLEND_ZERO; bl->BlendOpAlpha = D3D12_BLEND_OP_ADD;
-    bl->RenderTargetWriteMask = D3D12_COLOR_WRITE_ENABLE_ALL;
-    pd.RasterizerState.FillMode = D3D12_FILL_MODE_SOLID; pd.RasterizerState.CullMode = D3D12_CULL_MODE_NONE;
-    pd.SampleMask = 0xFFFFFFFFu; pd.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
-    pd.NumRenderTargets = 1; pd.RTVFormats[0] = DXGI_FORMAT_R8G8B8A8_UNORM; pd.SampleDesc.Count = 1;
-    hr = g.dev->lpVtbl->CreateGraphicsPipelineState(g.dev, &pd, &IID_ID3D12PipelineState, (void**)&s_osd_pso);
-    vsb->lpVtbl->Release(vsb); psb->lpVtbl->Release(psb);
-    if (FAILED(hr)) { fprintf(stderr, "[osd] PSO hr=0x%08lX\n", (unsigned long)hr); return 0; }
-    for (int i = 0; i < 3; i++)
-        if (FAILED(g.dev->lpVtbl->CreateCommandAllocator(g.dev, D3D12_COMMAND_LIST_TYPE_DIRECT, &IID_ID3D12CommandAllocator, (void**)&s_osd_alloc[i]))) return 0;
-    if (FAILED(g.dev->lpVtbl->CreateCommandList(g.dev, 0, D3D12_COMMAND_LIST_TYPE_DIRECT, s_osd_alloc[0], NULL,
-                                                &IID_ID3D12GraphicsCommandList, (void**)&s_osd_list))) return 0;
-    s_osd_list->lpVtbl->Close(s_osd_list);
-    CreateThread(NULL, 0, ld_osd_amostrador, NULL, 0, NULL);
-    s_osd_falhou = 0;
-    fprintf(stderr, "[osd] medidor na tela pronto (F10 liga e desliga)\n");
-    return 1;
-}
-/* o texto, refeito a cada 500 ms: FPS do jogo, tempo de quadro, CPU (sistema), GPU, VRAM */
-static void ld_osd_texto(void)
+/* o texto, refeito a cada 500 ms (devolve 1 quando refez): FPS do jogo, tempo de quadro,
+ * CPU (sistema), GPU, VRAM, RAM, no formato do medidor padrão */
+static int ld_osd_texto(void)
 {
     static LONGLONG t0; static u32 f0; static ULONGLONG i0, k0, u0;
     LARGE_INTEGER agora, fr; QueryPerformanceCounter(&agora); QueryPerformanceFrequency(&fr);
-    if (t0 && (agora.QuadPart - t0) * 2 < fr.QuadPart) return;
+    if (t0 && (agora.QuadPart - t0) * 2 < fr.QuadPart) return 0;
     extern u32 cellGcm_flip_request_count(void);
     const u32 f1 = cellGcm_flip_request_count();
     FILETIME fi, fk, fu; ULONGLONG i1 = 0, k1 = 0, u1 = 0;
@@ -737,20 +636,21 @@ static void ld_osd_texto(void)
         const int cpu = tot ? (int)(100.0 * (double)oc / (double)tot + 0.5) : 0;
         char gpu[16] = "--", vram[32] = "", tc[12] = "", tg[12] = "";
         if (s_osd_gpu_pct >= 0) snprintf(gpu, sizeof gpu, "%ld%%", (long)s_osd_gpu_pct);
-        if (s_osd_vram_mb >= 0) snprintf(vram, sizeof vram, "  VRAM %.1f/%.1f GB", s_osd_vram_mb / 1024.0, s_osd_vram_tot_mb / 1024.0);
-        if (s_osd_temp_cpu > 0) snprintf(tc, sizeof tc, " %ld\x7f", (long)s_osd_temp_cpu);
-        if (s_osd_temp_gpu > 0) snprintf(tg, sizeof tg, " %ld\x7f", (long)s_osd_temp_gpu);
+        if (s_osd_vram_mb >= 0) snprintf(vram, sizeof vram, "   VRAM %.1f/%.1f GB", s_osd_vram_mb / 1024.0, s_osd_vram_tot_mb / 1024.0);
+        if (s_osd_temp_cpu > 0) snprintf(tc, sizeof tc, " %ld\xC2\xB0" "C", (long)s_osd_temp_cpu);   /* °C em UTF-8 */
+        if (s_osd_temp_gpu > 0) snprintf(tg, sizeof tg, " %ld\xC2\xB0" "C", (long)s_osd_temp_gpu);
         char ram[32] = "";   /* RAM do sistema: em uso / total, como o Gerenciador de Tarefas */
         { MEMORYSTATUSEX ms; ms.dwLength = sizeof ms;
           if (GlobalMemoryStatusEx(&ms))
-              snprintf(ram, sizeof ram, "  RAM %.1f/%.1f GB", (double)(ms.ullTotalPhys - ms.ullAvailPhys) / 1073741824.0,
+              snprintf(ram, sizeof ram, "   RAM %.1f/%.1f GB", (double)(ms.ullTotalPhys - ms.ullAvailPhys) / 1073741824.0,
                        (double)ms.ullTotalPhys / 1073741824.0); }
-        snprintf(s_osd_txt, sizeof s_osd_txt, "FPS %.1f  %.1f ms  CPU %d%%%s  GPU %s%s%s%s",
+        snprintf(s_osd_txt, sizeof s_osd_txt, "FPS %.1f %.1f ms   CPU %d%%%s   GPU %s%s%s%s",
                  fps, fps > 0.05 ? 1000.0 / fps : 0.0, cpu, tc, gpu, tg, vram, ram);
     } else snprintf(s_osd_txt, sizeof s_osd_txt, "FPS --");
     t0 = agora.QuadPart; f0 = f1; i0 = i1; k0 = k1; u0 = u1;
+    return 1;
 }
-static void ld_osd_desenha(void)
+static void ld_osd_atualiza(void)
 {
     if (s_osd_on < 0) { const char* e = getenv("GOWA_OSD"); s_osd_on = e && *e == '1';
                         e = getenv("GOWA_OSD_TECLA"); s_osd_tecla = !(e && *e == '0'); }
@@ -758,51 +658,23 @@ static void ld_osd_desenha(void)
       HWND w = GetForegroundWindow(); DWORD pid = 0; if (w) GetWindowThreadProcessId(w, &pid);
       if (f10 && !s_osd_f10 && pid == GetCurrentProcessId()) s_osd_on = !s_osd_on;
       s_osd_f10 = f10; }
-    if (!s_osd_on || !g.ready || !ld_osd_pipeline()) return;
-    ld_osd_texto();
-    const u32 ai = s_osd_ai; s_osd_ai = (ai + 1u) % 3u;
-    if (s_osd_alloc_fence[ai] && g.fence->lpVtbl->GetCompletedValue(g.fence) < s_osd_alloc_fence[ai] &&
-        SUCCEEDED(g.fence->lpVtbl->SetEventOnCompletion(g.fence, s_osd_alloc_fence[ai], g.fence_event)))
-        WaitForSingleObject(g.fence_event, INFINITE);
-    s_osd_alloc[ai]->lpVtbl->Reset(s_osd_alloc[ai]);
-    ID3D12GraphicsCommandList* l = s_osd_list;
-    l->lpVtbl->Reset(l, s_osd_alloc[ai], NULL);
-    const u32 bbi = g.swap->lpVtbl->GetCurrentBackBufferIndex(g.swap);
-    ID3D12Resource* bb = g.backbuf[bbi];
-    D3D12_RESOURCE_DESC bd; bb->lpVtbl->GetDesc(bb, &bd);
-    D3D12_RESOURCE_BARRIER b; memset(&b, 0, sizeof b);
-    b.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION; b.Transition.pResource = bb;
-    b.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
-    b.Transition.StateBefore = D3D12_RESOURCE_STATE_PRESENT; b.Transition.StateAfter = D3D12_RESOURCE_STATE_RENDER_TARGET;
-    l->lpVtbl->ResourceBarrier(l, 1, &b);
-    const D3D12_CPU_DESCRIPTOR_HANDLE rtv = rtv_handle(bbi);
-    l->lpVtbl->OMSetRenderTargets(l, 1, &rtv, FALSE, NULL);
-    D3D12_VIEWPORT vp = {0, 0, (float)bd.Width, (float)bd.Height, 0.0f, 1.0f};
-    D3D12_RECT sc = {0, 0, (LONG)bd.Width, (LONG)bd.Height};
-    l->lpVtbl->RSSetViewports(l, 1, &vp); l->lpVtbl->RSSetScissorRects(l, 1, &sc);
-    l->lpVtbl->SetPipelineState(l, s_osd_pso);
-    l->lpVtbl->SetGraphicsRootSignature(l, s_osd_rs);
-    l->lpVtbl->SetGraphicsRootConstantBufferView(l, 0, s_osd_fonte->lpVtbl->GetGPUVirtualAddress(s_osd_fonte));
-    u32 k[32]; memset(k, 0, sizeof k);
-    const u32 esc = bd.Height >= 1400 ? 3u : bd.Height >= 900 ? 2u : 1u;   /* legível de 720p a 4K */
-    const u32 n = (u32)strlen(s_osd_txt);
-    k[0] = 8u * esc; k[1] = 8u * esc; k[2] = esc; k[3] = n < 96 ? n : 96; k[4] = (u32)bd.Width; k[5] = (u32)bd.Height;
-    memcpy(&k[8], s_osd_txt, n < 96 ? n : 96);
-    l->lpVtbl->SetGraphicsRoot32BitConstants(l, 1, 32, k, 0);
-    l->lpVtbl->IASetPrimitiveTopology(l, D3D_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP);
-    l->lpVtbl->DrawInstanced(l, 4, 1, 0, 0);
-    b.Transition.StateBefore = D3D12_RESOURCE_STATE_RENDER_TARGET; b.Transition.StateAfter = D3D12_RESOURCE_STATE_PRESENT;
-    l->lpVtbl->ResourceBarrier(l, 1, &b);
-    l->lpVtbl->Close(l);
-    ID3D12CommandList* lists[] = {(ID3D12CommandList*)l};
-    g.queue->lpVtbl->ExecuteCommandLists(g.queue, 1, lists);
-    const u64 v = ++g.fence_value;
-    g.queue->lpVtbl->Signal(g.queue, g.fence, v);
-    s_osd_alloc_fence[ai] = v;
+    if (!s_osd_on) {
+        if (s_osd_mostrando) { otx_osd_texto(NULL); s_osd_mostrando = 0; }
+        return;
+    }
+    static int iniciado;
+    if (!iniciado) {
+        iniciado = 1;
+        otx_osd_iniciar();
+        CreateThread(NULL, 0, ld_osd_amostrador, NULL, 0, NULL);
+        fprintf(stderr, "[osd] medidor na tela pronto (F10 liga e desliga)\n");
+    }
+    const int refeito = ld_osd_texto();
+    if (refeito || !s_osd_mostrando) { otx_osd_texto(s_osd_txt); s_osd_mostrando = 1; }
 }
 static HRESULT ld_swap_present(void)
 {
-    ld_osd_desenha();
+    ld_osd_atualiza();
     LARGE_INTEGER a, b; QueryPerformanceCounter(&a);
     const HRESULT hr = g.swap->lpVtbl->Present(g.swap, g_ld_present_sync ? 1 : 0,
                                                (!g_ld_present_sync && g_ld_present_tearing) ? DXGI_PRESENT_ALLOW_TEARING : 0);
