@@ -222,6 +222,7 @@ add_executable(${PROJECT_NAME}
     stubs.cpp
     gowa_offline.cpp
     otavix_osd.c                       # o medidor padrão dos ports Otavix (F10)
+    otavix_legenda.c                   # a legenda das teclas (F1)
     ${LLE_SOURCES}
     ${PS3RECOMP_SCAFFOLD}
     ${HLE_NID_TABLE}

@@ -197,6 +197,10 @@ static void pad_poll_keyboard(void)
  *   mouse direito = triângulo (forte) E, Backspace ou botão do meio = círculo
  *   Q = L1   F = R1   C = L2   R = R2   setas = direcional
  *   Esc ou Enter = Start (pausa)      Tab = Select */
+/* port/otavix_legenda.c, compilado no executável: a legenda das teclas por cima do jogo */
+void otx_legenda_iniciar(void);
+void otx_legenda_mostrar(int sim);
+
 static int pad_teclado_modo(void)
 {
     static int m = -1;
@@ -211,6 +215,11 @@ static void pad_poll_teclado_mouse(void)
         hs->analog_lx = hs->analog_ly = hs->analog_rx = hs->analog_ry = 128;
         hs->connected = 1;
     }
+    /* GOWA_LEGENDA=1 (testes): a legenda das teclas ligada desde o início, sem precisar de tecla */
+    { static int visto;
+      if (!visto) { visto = 1;
+          const char* e = getenv("GOWA_LEGENDA");
+          if (e && *e == '1') { otx_legenda_iniciar(); otx_legenda_mostrar(1); } } }
     if (!pad_host_window_focused()) return;
 #define PAD_K(vk) ((GetAsyncKeyState(vk) & 0x8000) != 0)
     u16 b = 0;
@@ -233,12 +242,32 @@ static void pad_poll_teclado_mouse(void)
     const int shift = PAD_K(VK_SHIFT);
 #undef PAD_K
     hs->buttons |= b;
-    { static int dito;
+    /* GOWA (25/10): a legenda das teclas (pedido de jogador: o jogo só desenha os botões do controle do PS3). F1
+     * mostra e esconde; a primeira tecla de jogo a mostra por 12 s. */
+    { static int dito, f1_antes, ligada;
+      static ULONGLONG ate;
       if (!dito && (b || dx || dy)) {
           dito = 1;
           printf("[teclado] teclado e mouse ativos (primeira tecla: botoes 0x%04X, direcao %d,%d%s)\n",
                  (unsigned)b, dx, dy, shift ? ", com Shift" : "");
           fflush(stdout);
+          ligada = 1;
+          ate = GetTickCount64() + 12000;
+          otx_legenda_iniciar();
+          otx_legenda_mostrar(1);
+      }
+      const int f1 = (GetAsyncKeyState(VK_F1) & 0x8000) != 0;
+      if (f1 && !f1_antes) {
+          ligada = !ligada;
+          ate = 0;
+          otx_legenda_iniciar();
+          otx_legenda_mostrar(ligada);
+      }
+      f1_antes = f1;
+      if (ate && GetTickCount64() >= ate) {
+          ate = 0;
+          ligada = 0;
+          otx_legenda_mostrar(0);
       } }
     if (dx || dy) {
         const u8 x = (u8)(dx < 0 ? 0 : dx > 0 ? 255 : 128), y = (u8)(dy < 0 ? 0 : dy > 0 ? 255 : 128);
