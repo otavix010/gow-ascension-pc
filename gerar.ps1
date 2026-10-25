@@ -75,6 +75,14 @@ if ($RefazerDe -gt 0) {
 }
 
 function Msg($t) { Write-Host "[gerar] $t" -ForegroundColor Cyan }
+# roda um programa externo sem que o stderr dele vire exceção: no Windows PowerShell 5.1,
+# com ErrorActionPreference = Stop, qualquer linha no stderr de um comando nativo lança
+# (mesmo com 2>$null) antes do teste do $LASTEXITCODE. Quem chama confere o $LASTEXITCODE.
+function SemExcecao([scriptblock]$bloco) {
+    $eap = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try { & $bloco } finally { $ErrorActionPreference = $eap }
+}
 
 # ---------------------------------------------------------------------------- entradas (janelas se faltarem)
 function Escolher-Pasta([string]$texto) {
@@ -102,7 +110,7 @@ function Baixar([string]$url, [string]$destino) {
     Remove-Item $part -ErrorAction SilentlyContinue
     $curl = Get-Command curl.exe -ErrorAction SilentlyContinue
     if ($curl) {
-        & $curl.Source -L --fail --retry 3 --silent --show-error -o $part $url
+        SemExcecao { & $curl.Source -L --fail --retry 3 --silent --show-error -o $part $url }
         if ($LASTEXITCODE -ne 0) { throw "falhou o download de $url (curl $LASTEXITCODE)" }
     } else {
         $ProgressPreference = 'SilentlyContinue'
@@ -152,7 +160,7 @@ Etapa '1_ferramentas' {
                   "`r`n    winget install Microsoft.VisualStudio.2022.BuildTools --override `"--quiet --wait --add Microsoft.VisualStudio.Workload.VCTools --add Microsoft.VisualStudio.Component.VC.Llvm.Clang --add Microsoft.VisualStudio.Component.VC.CMake.Project --includeRecommended`""
     }
     if ($falta) { throw ("Falta instalar:`r`n  - " + ($falta -join "`r`n  - ")) }
-    & python -c "import Crypto" 2>$null
+    SemExcecao { & python -c "import Crypto" 2>$null }
     if ($LASTEXITCODE -ne 0) { Exec $LOG 'python -m pip install --user pycryptodome' }
     $ff = Join-Path $R "dl\ffmpeg9\$FFMPEG_NOME"
     if (-not (Test-Path "$ff\include\libavcodec")) {
@@ -192,7 +200,7 @@ function Achar-Disco([string]$d) {
             }
             Msg "extraindo $d para $dx (uns 35 GB; leva alguns minutos)"
             New-Item -ItemType Directory -Force $dx | Out-Null
-            & "$env:SystemRoot\System32\tar.exe" -xf $d -C $dx
+            SemExcecao { & "$env:SystemRoot\System32\tar.exe" -xf $d -C $dx }
             if ($LASTEXITCODE -ne 0) { throw "falhou a extração de $d (tar $LASTEXITCODE). Extraia o arquivo numa pasta e escolha a pasta." }
             $achou = Achar-PS3Game $dx
             # um .7z/.zip com a .iso dentro: extrai a .iso também e apaga a intermediária
@@ -200,7 +208,7 @@ function Achar-Disco([string]$d) {
                 $iso = Get-ChildItem -LiteralPath $dx -Recurse -File -Filter *.iso -ErrorAction SilentlyContinue | Select-Object -First 1
                 if ($iso) {
                     Msg "extraindo $($iso.Name)"
-                    & "$env:SystemRoot\System32\tar.exe" -xf $iso.FullName -C $dx
+                    SemExcecao { & "$env:SystemRoot\System32\tar.exe" -xf $iso.FullName -C $dx }
                     if ($LASTEXITCODE -ne 0) { throw "falhou a extração de $($iso.FullName) (tar $LASTEXITCODE)" }
                     Remove-Item -LiteralPath $iso.FullName -Force
                     $achou = Achar-PS3Game $dx
