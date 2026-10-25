@@ -14,7 +14,9 @@
   Os logs de cada etapa ficam em out\gerar\.
 
 .PARAMETER Disco
-  Pasta com a cópia do disco BCUS98232 (a que contém PS3_GAME).
+  Pasta com a cópia do disco BCUS98232 (a que contém PS3_GAME, ou uma pasta acima
+  dela), ou o arquivo compactado com ela (.7z, .zip, .rar ou .iso decriptada): ele é
+  extraído uma vez para disco\ (uns 35 GB) com o tar do Windows.
 .PARAMETER Update
   O update 1.04: o arquivo .pkg, ou a pasta BCUS98232 já instalada no RPCS3
   (RPCS3\dev_hdd0\game\BCUS98232). Sem ele, o gerador baixa o update oficial
@@ -167,26 +169,64 @@ $VS = Achar-VS
 if (-not $VS) { throw 'Visual Studio Build Tools com Clang não encontrado (rode de novo a etapa 1: -Refazer)' }
 
 # ---------------------------------------------------------------------------- jogo
+# a pasta do jogo: a que contém PS3_GAME\USRDIR, ou uma até dois níveis abaixo da escolhida
+function Achar-PS3Game([string]$raiz) {
+    if (Test-Path -LiteralPath (Join-Path $raiz 'PS3_GAME\USRDIR') -PathType Container) { return $raiz }
+    $p = Get-ChildItem -LiteralPath $raiz -Directory -Recurse -Depth 2 -Filter PS3_GAME -ErrorAction SilentlyContinue |
+         Where-Object { Test-Path -LiteralPath (Join-Path $_.FullName 'USRDIR') -PathType Container } | Select-Object -First 1
+    if ($p) { return $p.Parent.FullName }
+    return $null
+}
+# o disco também pode vir compactado: extrai uma vez para disco\ (o tar do Windows lê 7z, zip, rar e iso)
+function Achar-Disco([string]$d) {
+    if (Test-Path -LiteralPath $d -PathType Leaf) {
+        if ($d -notmatch '\.(7z|zip|rar|iso)$') { throw "o disco tem que ser a pasta com PS3_GAME ou um arquivo .7z, .zip, .rar ou .iso ($d)" }
+        $dx = Join-Path $R 'disco'
+        $achou = $null
+        if (Test-Path -LiteralPath $dx) { $achou = Achar-PS3Game $dx }
+        if (-not $achou) {
+            $precisa = [math]::Max(36GB, (Get-Item -LiteralPath $d).Length * 1.1)
+            $livre = (Get-PSDrive -Name $R.Substring(0, 1)).Free
+            if ($livre -lt $precisa) {
+                throw ("pouco espaço para extrair o disco: {0:N0} GB livres em {1}, e o jogo extraído ocupa uns 35 GB" -f ($livre / 1GB), $R.Substring(0, 2))
+            }
+            Msg "extraindo $d para $dx (uns 35 GB; leva alguns minutos)"
+            New-Item -ItemType Directory -Force $dx | Out-Null
+            & "$env:SystemRoot\System32\tar.exe" -xf $d -C $dx
+            if ($LASTEXITCODE -ne 0) { throw "falhou a extração de $d (tar $LASTEXITCODE). Extraia o arquivo numa pasta e escolha a pasta." }
+            $achou = Achar-PS3Game $dx
+        }
+        if (-not $achou) { throw "não achei PS3_GAME\USRDIR dentro de $d (uma .iso criptografada, como as da Redump, não serve)" }
+        return $achou
+    }
+    $achou = Achar-PS3Game $d
+    if (-not $achou) { throw "não achei PS3_GAME\USRDIR em $d" }
+    return $achou
+}
 Etapa '2_jogo' {
-    if (-not (Test-Path (Join-Path $Disco 'PS3_GAME\USRDIR'))) { throw "não achei PS3_GAME\USRDIR em $Disco" }
+    $Disco = Achar-Disco $Disco
+    Msg "disco: $Disco"
     $vfs = Join-Path $R 'vfs'
     New-Item -ItemType Directory -Force $vfs | Out-Null
     $pg = Join-Path $vfs 'PS3_GAME'
-    if (-not (Test-Path $pg)) { Exec $LOG "mklink /J `"$pg`" `"$(Join-Path $Disco 'PS3_GAME')`"" }   # sem copiar 34 GB
+    # junção para o PS3_GAME do disco, sem copiar 34 GB; refeita a cada geração (o disco pode ter mudado
+    # de lugar). rmdir numa junção apaga só a junção.
+    if (Test-Path -LiteralPath $pg) { cmd /c "rmdir `"$pg`"" 2>$null }
+    if (-not (Test-Path -LiteralPath $pg)) { Exec $LOG "mklink /J `"$pg`" `"$(Join-Path $Disco 'PS3_GAME')`"" }
 
     if ($Update -eq 'auto') {
         $Update = Join-Path $R 'dl\BCUS98232_update_1.04.pkg'
-        if (-not (Test-Path $Update) -or (Get-FileHash $Update -Algorithm SHA1).Hash.ToLower() -ne $UPDATE_SHA1) {
+        if (-not (Test-Path -LiteralPath $Update) -or (Get-FileHash -LiteralPath $Update -Algorithm SHA1).Hash.ToLower() -ne $UPDATE_SHA1) {
             Msg 'baixando o update 1.04 oficial do servidor da PlayStation (235 MB)'
             Baixar $UPDATE_URL $Update
         }
-        if ((Get-FileHash $Update -Algorithm SHA1).Hash.ToLower() -ne $UPDATE_SHA1) {
-            Remove-Item $Update -Force
+        if ((Get-FileHash -LiteralPath $Update -Algorithm SHA1).Hash.ToLower() -ne $UPDATE_SHA1) {
+            Remove-Item -LiteralPath $Update -Force
             throw 'o update baixado não confere (SHA-1); rode de novo'
         }
     }
     $upd = $Update
-    if ((Test-Path $Update -PathType Leaf) -and $Update -match '\.pkg$') {
+    if ((Test-Path -LiteralPath $Update -PathType Leaf) -and $Update -match '\.pkg$') {
         $tmp = Join-Path $R 'out\update_pkg'
         Exec $LOG "python `"$R\ps3recomp\tools\pkg_extract.py`" `"$Update`" `"$tmp`""
         $sfo = Get-ChildItem $tmp -Recurse -Filter PARAM.SFO | Select-Object -First 1
@@ -218,7 +258,7 @@ Etapa '3_firmware' {
     $ch = $ChavesRpcs3; if (-not $ch) { $ch = Join-Path $R 'dl\rpcs3_chaves' }
     if ($Firmware -eq 'auto') {
         $Firmware = Join-Path $R 'dl\PS3UPDAT.PUP'
-        if (-not (Test-Path $Firmware)) {
+        if (-not (Test-Path -LiteralPath $Firmware)) {
             $lista = Join-Path $R 'dl\ps3-updatelist.txt'
             Baixar $PUP_LISTA $lista
             $url = [regex]::Match((Get-Content $lista -Raw), 'CDN=([^;\s]+/PS3UPDAT\.PUP)').Groups[1].Value
@@ -228,8 +268,8 @@ Etapa '3_firmware' {
         }
     }
     $sprx = $Firmware
-    if (Test-Path $Firmware -PathType Container) {
-        $sprx = Get-ChildItem $Firmware -Recurse -Filter libsre.sprx -ErrorAction SilentlyContinue | Select-Object -First 1 -ExpandProperty FullName
+    if (Test-Path -LiteralPath $Firmware -PathType Container) {
+        $sprx = Get-ChildItem -LiteralPath $Firmware -Recurse -Filter libsre.sprx -ErrorAction SilentlyContinue | Select-Object -First 1 -ExpandProperty FullName
         if (-not $sprx) { throw "não achei libsre.sprx em $Firmware (instale o firmware no RPCS3: File > Install Firmware)" }
     } elseif ($Firmware -match '\.pup$') {
         # o arquivo do site da PlayStation: o libsre.sprx sai dos pacotes do dev_flash de dentro dele
