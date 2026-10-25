@@ -1,0 +1,6 @@
+# Só para os nossos scripts: o cmd precisa de CRLF; o ps3recomp/ fica como veio do original.
+/*.cmd text eol=crlf
+/scripts/**/*.cmd text eol=crlf
+/scripts/**/*.ps1 text eol=crlf
+/*.ps1 text eol=crlf
+*.png binary

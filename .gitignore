@@ -1,0 +1,54 @@
+# Nada do jogo, do firmware, nem nada gerado a partir deles.
+# Cada jogador gera isso da própria cópia (docs/COMO_GERAR.md).
+
+# arquivos do jogo e do firmware
+jogo/
+vfs/
+fw/
+*.elf
+*.ELF
+*.self
+*.SELF
+*.sprx
+*.prx
+EBOOT.BIN
+PARAM.SFO
+*.PUP
+*.pkg
+*.rap
+*.edat
+*.sdat
+*.iso
+
+# código gerado a partir do jogo
+port/recompiled*/
+port/spu/*
+!port/spu/gowanat_tspm/
+port/*.inc
+port/*.inc.*
+port/lle_libsre/
+
+# builds, perfis, caches, saídas
+port/build*/
+port/pgo/
+*.profdata
+*.exe
+*.dll
+*.pdb
+*.lib
+*.map
+*.obj
+*.bin
+scratch/
+out/
+saves/
+
+# ferramentas e fontes de terceiros baixados localmente
+dl/
+ghidra-proj/
+rpcs3/
+ref-rpcs3/
+
+# Python
+__pycache__/
+*.pyc
