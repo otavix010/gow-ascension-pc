@@ -11394,6 +11394,12 @@ int rsx_live_draw_init(void* hwnd, u32 width, u32 height,
     }
     sc1->lpVtbl->QueryInterface(sc1, &IID_IDXGISwapChain3, (void**)&g.swap);
     sc1->lpVtbl->Release(sc1);
+    /* GOWA: sem o Alt+Enter do DXGI. Ele trocava para a tela cheia exclusiva, que
+     * este port não trata (os buffers continuam do tamanho da janela, e
+     * ALLOW_TEARING é proibido nela): os Present falhavam e a imagem congelava com
+     * o som seguindo (relato de jogador, 25/10). A tela cheia é a sem bordas da
+     * janela (rsx_null_backend.c: Alt+Enter, F11, maximizar). */
+    factory->lpVtbl->MakeWindowAssociation(factory, (HWND)hwnd, DXGI_MWA_NO_ALT_ENTER);
     factory->lpVtbl->Release(factory);
 
     /* RTV heap: [0..1] backbuffers, [2..] surface cache */
