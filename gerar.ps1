@@ -17,10 +17,12 @@
   Pasta com a cópia do disco BCUS98232 (a que contém PS3_GAME).
 .PARAMETER Update
   O update 1.04: o arquivo .pkg, ou a pasta BCUS98232 já instalada no RPCS3
-  (RPCS3\dev_hdd0\game\BCUS98232).
+  (RPCS3\dev_hdd0\game\BCUS98232). Sem ele, o gerador baixa o update oficial
+  do servidor da PlayStation (gratuito, 235 MB) e confere o SHA-1.
 .PARAMETER Firmware
-  A pasta do RPCS3 com o firmware oficial instalado (File > Install Firmware),
-  ou o arquivo libsre.sprx.
+  O arquivo PS3UPDAT.PUP do site da PlayStation, a pasta do RPCS3 com o firmware
+  instalado (File > Install Firmware) ou o arquivo libsre.sprx. Sem ele, o gerador
+  baixa o PS3UPDAT.PUP oficial do servidor de atualização do PS3 (gratuito, ~200 MB).
 .PARAMETER ChavesRpcs3
   Pasta com key_vault.cpp e key_vault.h do código-fonte do RPCS3. Se não for dada,
   os dois arquivos são baixados do repositório do RPCS3 para dl\rpcs3_chaves.
@@ -34,6 +36,8 @@
   gerar.cmd     (clique duas vezes: pede as pastas em janelas)
 .EXAMPLE
   .\gerar.ps1 -Disco D:\GOWA -Update C:\RPCS3\dev_hdd0\game\BCUS98232 -Firmware C:\RPCS3
+.EXAMPLE
+  .\gerar.ps1 -Disco D:\GOWA     (baixa o update 1.04 e o firmware oficiais sozinho)
 #>
 param(
     [string]$Disco = '',
@@ -53,6 +57,13 @@ if (-not $Jobs) { $Jobs = [Environment]::ProcessorCount }
 $SHA_GOWA = '813723ac4e091d79ea20ad2500b2e86cb0fd25f3736541431921273e7a77246d'
 $FFMPEG_NOME = 'ffmpeg-n9.0-latest-win64-lgpl-shared-9.0'
 $FFMPEG_URL = "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/$FFMPEG_NOME.zip"
+# Arquivos gratuitos da Sony, baixados dos servidores oficiais dela quando o jogador não
+# indica os seus (nada deles vem neste repositório)
+$UPDATE_URL = 'http://b0.ww.np.dl.playstation.net/tppkg/np/BCUS98232/BCUS98232_T76/5525fbb7b6b5456d/UP9000-BCUS98232_00-GOWABDPATCH00001-A0104-V0100-PE.pkg'
+$UPDATE_SHA1 = '5a94c17aa07cb5181a505d3429c88ea3d9f4e4d0'   # do arquivo inteiro
+$PUP_LISTA = 'http://fus01.ps3.update.playstation.net/update/ps3/list/us/ps3-updatelist.txt'
+# libsre.prx decriptado: o mesmo nos firmwares 4.x até o 4.93; a etapa 3 usa endereços fixos dele
+$SHA_LIBSRE = '9e7ee6edc99b1d372686cf927b883b18f19ed4d32d1faf35e214cca4ae0737b6'
 $OUT = Join-Path $R 'out\gerar'
 New-Item -ItemType Directory -Force $OUT | Out-Null
 # -RefazerDe N: refaz da etapa N em diante (ex.: 4 depois de atualizar o port; o jogo e o
@@ -74,29 +85,28 @@ function Escolher-Pasta([string]$texto) {
         return ''
     } catch { return (Read-Host $texto) }
 }
-function Escolher-Pkg([string]$texto) {
-    try {
-        Add-Type -AssemblyName System.Windows.Forms
-        $d = New-Object System.Windows.Forms.OpenFileDialog
-        $d.Title = $texto
-        $d.Filter = 'Pacote do PS3 (*.pkg)|*.pkg'
-        if ($d.ShowDialog() -eq 'OK') { return $d.FileName }
-        return ''
-    } catch { return (Read-Host $texto) }
-}
-$marcaJogo = Join-Path $OUT '2_jogo.ok'; $marcaFw = Join-Path $OUT '3_firmware.ok'
+$marcaJogo = Join-Path $OUT '2_jogo.ok'
 if (-not $Disco -and ($Refazer -or -not (Test-Path $marcaJogo))) {
     $Disco = Escolher-Pasta 'Escolha a pasta com a cópia do DISCO do God of War: Ascension (BCUS98232) -- a que contém PS3_GAME'
     if (-not $Disco) { throw 'sem a pasta do disco' }
 }
-if (-not $Update -and ($Refazer -or -not (Test-Path $marcaJogo))) {
-    $Update = Escolher-Pasta 'Escolha a pasta do UPDATE 1.04 instalado no RPCS3 (RPCS3\dev_hdd0\game\BCUS98232). Se você tem o arquivo .pkg, clique em Cancelar.'
-    if (-not $Update) { $Update = Escolher-Pkg 'Escolha o arquivo .pkg do update 1.04 (BCUS98232)' }
-    if (-not $Update) { throw 'sem o update 1.04' }
-}
-if (-not $Firmware -and ($Refazer -or -not (Test-Path $marcaFw))) {
-    $Firmware = Escolher-Pasta 'Escolha a pasta do RPCS3 com o firmware oficial do PS3 instalado (File > Install Firmware)'
-    if (-not $Firmware) { throw 'sem o firmware' }
+# sem -Update / -Firmware: baixa os oficiais (etapas 2 e 3)
+if (-not $Update) { $Update = 'auto' }
+if (-not $Firmware) { $Firmware = 'auto' }
+# baixa um arquivo grande (curl.exe do Windows; senão Invoke-WebRequest), por um .part
+function Baixar([string]$url, [string]$destino) {
+    New-Item -ItemType Directory -Force (Split-Path $destino) | Out-Null
+    $part = "$destino.part"
+    Remove-Item $part -ErrorAction SilentlyContinue
+    $curl = Get-Command curl.exe -ErrorAction SilentlyContinue
+    if ($curl) {
+        & $curl.Source -L --fail --retry 3 --silent --show-error -o $part $url
+        if ($LASTEXITCODE -ne 0) { throw "falhou o download de $url (curl $LASTEXITCODE)" }
+    } else {
+        $ProgressPreference = 'SilentlyContinue'
+        Invoke-WebRequest -Uri $url -OutFile $part -UseBasicParsing
+    }
+    Move-Item $part $destino -Force
 }
 # roda um comando nativo pelo cmd (stdout e stderr no log da etapa); falha = exceção com o log
 function Exec([string]$log, [string]$linha) {
@@ -164,6 +174,17 @@ Etapa '2_jogo' {
     $pg = Join-Path $vfs 'PS3_GAME'
     if (-not (Test-Path $pg)) { Exec $LOG "mklink /J `"$pg`" `"$(Join-Path $Disco 'PS3_GAME')`"" }   # sem copiar 34 GB
 
+    if ($Update -eq 'auto') {
+        $Update = Join-Path $R 'dl\BCUS98232_update_1.04.pkg'
+        if (-not (Test-Path $Update) -or (Get-FileHash $Update -Algorithm SHA1).Hash.ToLower() -ne $UPDATE_SHA1) {
+            Msg 'baixando o update 1.04 oficial do servidor da PlayStation (235 MB)'
+            Baixar $UPDATE_URL $Update
+        }
+        if ((Get-FileHash $Update -Algorithm SHA1).Hash.ToLower() -ne $UPDATE_SHA1) {
+            Remove-Item $Update -Force
+            throw 'o update baixado não confere (SHA-1); rode de novo'
+        }
+    }
     $upd = $Update
     if ((Test-Path $Update -PathType Leaf) -and $Update -match '\.pkg$') {
         $tmp = Join-Path $R 'out\update_pkg'
@@ -192,15 +213,32 @@ Etapa '2_jogo' {
 
 # ---------------------------------------------------------------------------- firmware (libsre por LLE)
 Etapa '3_firmware' {
+    $fw = Join-Path $R 'fw'; $lle = Join-Path $fw 'lle'
+    New-Item -ItemType Directory -Force $lle | Out-Null
+    $ch = $ChavesRpcs3; if (-not $ch) { $ch = Join-Path $R 'dl\rpcs3_chaves' }
+    if ($Firmware -eq 'auto') {
+        $Firmware = Join-Path $R 'dl\PS3UPDAT.PUP'
+        if (-not (Test-Path $Firmware)) {
+            $lista = Join-Path $R 'dl\ps3-updatelist.txt'
+            Baixar $PUP_LISTA $lista
+            $url = [regex]::Match((Get-Content $lista -Raw), 'CDN=([^;\s]+/PS3UPDAT\.PUP)').Groups[1].Value
+            if (-not $url) { throw "a lista de atualização do PS3 não trouxe o PS3UPDAT.PUP ($PUP_LISTA)" }
+            Msg "baixando o firmware oficial do PS3 (PS3UPDAT.PUP, ~200 MB) de $url"
+            Baixar $url $Firmware
+        }
+    }
     $sprx = $Firmware
     if (Test-Path $Firmware -PathType Container) {
         $sprx = Get-ChildItem $Firmware -Recurse -Filter libsre.sprx -ErrorAction SilentlyContinue | Select-Object -First 1 -ExpandProperty FullName
         if (-not $sprx) { throw "não achei libsre.sprx em $Firmware (instale o firmware no RPCS3: File > Install Firmware)" }
+    } elseif ($Firmware -match '\.pup$') {
+        # o arquivo do site da PlayStation: o libsre.sprx sai dos pacotes do dev_flash de dentro dele
+        $sprx = Join-Path $fw 'libsre.sprx'
+        Exec $LOG "python `"$R\scripts\gpl\pup_libsre.py`" `"$Firmware`" `"$sprx`" --vault `"$ch`" --baixar"
     }
-    $fw = Join-Path $R 'fw'; $lle = Join-Path $fw 'lle'
-    New-Item -ItemType Directory -Force $lle | Out-Null
-    $ch = $ChavesRpcs3; if (-not $ch) { $ch = Join-Path $R 'dl\rpcs3_chaves' }
     Exec $LOG "python `"$R\scripts\gpl\unself.py`" `"$sprx`" `"$fw\libsre.prx`" --vault `"$ch`" --baixar"
+    $h = (Get-FileHash "$fw\libsre.prx" -Algorithm SHA256).Hash.ToLower()
+    if ($h -ne $SHA_LIBSRE) { throw "libsre.prx diferente do esperado (sha256 $h). Rode sem -Firmware para o gerador baixar o firmware oficial." }
     Push-Location (Join-Path $R 'ps3recomp')
     try {
         Exec $LOG "python tools\lift_prx.py `"$fw\libsre.prx`" --base 0x30000000 --output `"$lle`""

@@ -24,14 +24,13 @@ O [Otavix Launcher](https://github.com/otavix010/otavix-launcher/releases/latest
 
 ### À mão
 
-**1. O que você precisa ter** (o update e o firmware são gratuitos e vêm dos servidores oficiais da Sony)
+**1. O que você precisa ter:** só a sua cópia do jogo. O update 1.04 e o firmware do PS3 são gratuitos, e o gerador baixa os dois sozinho dos servidores oficiais da Sony (o RPCS3 não é mais necessário).
 
 | O quê | Onde conseguir |
 |---|---|
 | **O jogo**: a cópia do disco do *God of War: Ascension* **BCUS98232** (EUA) | A sua cópia, numa pasta que contenha `PS3_GAME`. |
-| **O update 1.04** (grátis, ~235 MB) | **[Baixar o update 1.04 do servidor da Sony](http://b0.ww.np.dl.playstation.net/tppkg/np/BCUS98232/BCUS98232_T76/5525fbb7b6b5456d/UP9000-BCUS98232_00-GOWABDPATCH00001-A0104-V0100-PE.pkg)** (o arquivo `.pkg`; SHA-1 do arquivo `5a94c17aa07cb5181a505d3429c88ea3d9f4e4d0`). Tem que ser a **1.04**: as versões 1.05 em diante não servem. Se você já instalou a 1.04 no RPCS3, serve também a pasta `RPCS3\dev_hdd0\game\BCUS98232`. |
-| **O RPCS3** (grátis) | [rpcs3.net/download](https://rpcs3.net/download). Ele só é usado para instalar o firmware. |
-| **O firmware oficial do PS3** (grátis) | Na [página oficial da PlayStation](https://www.playstation.com/pt-br/support/hardware/ps3/system-software/), botão **"Baixar atualização do PS3"** (o arquivo `PS3UPDAT.PUP`). Instale no RPCS3 em ***File > Install Firmware***. |
+| **O update 1.04** (grátis, ~235 MB) | **Baixado sozinho pelo gerador.** Se preferir baixar você mesmo: **[o update 1.04 no servidor da Sony](http://b0.ww.np.dl.playstation.net/tppkg/np/BCUS98232/BCUS98232_T76/5525fbb7b6b5456d/UP9000-BCUS98232_00-GOWABDPATCH00001-A0104-V0100-PE.pkg)** (o arquivo `.pkg`; SHA-1 do arquivo `5a94c17aa07cb5181a505d3429c88ea3d9f4e4d0`). Tem que ser a **1.04**: as versões 1.05 em diante não servem. Se você já instalou a 1.04 no RPCS3, serve também a pasta `RPCS3\dev_hdd0\game\BCUS98232`. |
+| **O firmware oficial do PS3** (grátis, ~200 MB) | **Baixado sozinho pelo gerador**, do servidor de atualização do PS3. Se preferir baixar você mesmo: na [página oficial da PlayStation](https://www.playstation.com/pt-br/support/hardware/ps3/system-software/), botão **"Baixar atualização do PS3"** (o arquivo `PS3UPDAT.PUP`, que o gerador aceita direto). Também serve a pasta do RPCS3 com o firmware instalado. |
 
 **2. Instale as ferramentas (uma vez só)**, num terminal:
 ```
@@ -41,8 +40,9 @@ winget install Microsoft.VisualStudio.2022.BuildTools --override "--quiet --wait
 
 **3. Baixe este repositório** (botão *Code > Download ZIP*, ou `git clone`) e extraia numa pasta **sem espaços no caminho**, por exemplo `C:\gow-ascension-pc`.
 
-**4. Clique duas vezes em `gerar.cmd`** e escolha, nas janelas, a pasta do disco, a do update (ou o `.pkg`) e a do RPCS3. Ele faz o resto sozinho:
+**4. Clique duas vezes em `gerar.cmd`** e escolha a pasta do disco. Ele faz o resto sozinho:
 - confere as ferramentas e baixa o FFmpeg;
+- baixa o update 1.04 e o firmware oficiais (ou usa os seus: `-Update` e `-Firmware`);
 - prepara os arquivos do jogo, sem copiar os 34 GB do disco;
 - decripta o executável;
 - traduz e compila, escolhendo a build certa para a sua CPU.
@@ -114,7 +114,7 @@ O que medimos num PC fraco (4 núcleos, sem AVX-512), o que ajudou, o que não a
 
 - **Nosso código e ferramentas: [MIT](LICENSE).** O RPCS3 (GPL-2.0) foi usado como referência de comportamento; o código foi revisado linha a linha contra o do RPCS3 e nenhum trecho foi copiado. A única coincidência literal são duas tabelas de valores medidos do hardware, herdadas do ps3recomp.
 - **[ps3recomp](https://github.com/sp00nznet/ps3recomp)**, de Ned Heller (sp00nznet), MIT: o tradutor, o runtime e o motor de desenho em que o port se apoia. Ele vem dentro deste repositório, em `ps3recomp/`: o primeiro commit importa a v0.15.0 sem mudanças, e as nossas alterações vêm em commits separados logo depois.
-- **`scripts/gpl/unself.py` é GPL-2.0** (`scripts/gpl/COPYING`): o decriptador de SELF, que segue o `unself.cpp` do [RPCS3](https://github.com/RPCS3/rpcs3) e roda como programa separado.
+- **`scripts/gpl/unself.py` e `scripts/gpl/pup_libsre.py` são GPL-2.0** (`scripts/gpl/COPYING`): o decriptador de SELF, que segue o `unself.cpp` do [RPCS3](https://github.com/RPCS3/rpcs3), e o que tira o `libsre.sprx` do `PS3UPDAT.PUP`, que segue o instalador de firmware do RPCS3. Os dois rodam como programas separados.
 - **Chaves**: nenhuma chave foi criada por nós. As de decriptação de executáveis são lidas do código-fonte do RPCS3: o `gerar.ps1` baixa dois arquivos dele (`key_vault.cpp/.h`, numa versão fixa) para `dl\rpcs3_chaves`, ou usa os que você indicar com `-ChavesRpcs3`. A KLIC do jogo sai da sua própria cópia. O `ps3recomp` embutido traz, como o original, chaves públicas de formatos do PS3.
 - **[FFmpeg](https://ffmpeg.org)** (LGPL), baixado pelo `gerar.ps1` dos builds do BtbN, para os vídeos.
 - God of War e God of War: Ascension são marcas da Sony Interactive Entertainment. Este projeto não é afiliado nem endossado pela Sony.
@@ -125,8 +125,8 @@ O que medimos num PC fraco (4 núcleos, sem AVX-512), o que ajudou, o que não a
 
 A **native PC port** of *God of War: Ascension* (PS3), made by **static recompilation**: the game's PPU and SPU code is translated to C/C++ and compiled for x86-64 on top of [ps3recomp](https://github.com/sp00nznet/ps3recomp). The GPU command stream is rendered with Direct3D 12, and SPURS runs the official libsre module (LLE).
 
-**Easiest: the [Otavix Launcher](https://github.com/otavix010/otavix-launcher/releases/latest)**, which downloads this port, asks for your folders, generates the game for your CPU and starts it. **Bring your own disc**: no game code or data and no firmware here. You need your own copy of the game (BCUS98232). Update 1.04 and the official PS3 firmware are free from Sony: [update 1.04 .pkg](http://b0.ww.np.dl.playstation.net/tppkg/np/BCUS98232/BCUS98232_T76/5525fbb7b6b5456d/UP9000-BCUS98232_00-GOWABDPATCH00001-A0104-V0100-PE.pkg) (must be exactly 1.04), and the firmware on [PlayStation's PS3 system software page](https://www.playstation.com/en-us/support/hardware/ps3/system-software/), installed in [RPCS3](https://rpcs3.net/download) with *File > Install Firmware*. Install Python and the Visual Studio 2022 Build Tools with Clang (commands above), download this repository to a path without spaces, double-click **`gerar.cmd`** (it asks for the folders, then decrypts your copy, translates and builds; ~4 minutes on an 8-core Ryzen 7 9800X3D), then play with **`jogar.cmd`**.
+**Easiest: the [Otavix Launcher](https://github.com/otavix010/otavix-launcher/releases/latest)**, which downloads this port, asks for your folders, generates the game for your CPU and starts it. **Bring your own disc**: no game code or data and no firmware here. You need your own copy of the game (BCUS98232). Update 1.04 and the official PS3 firmware are free from Sony, and `gerar.cmd` downloads both from Sony's servers by itself (or use your own: [update 1.04 .pkg](http://b0.ww.np.dl.playstation.net/tppkg/np/BCUS98232/BCUS98232_T76/5525fbb7b6b5456d/UP9000-BCUS98232_00-GOWABDPATCH00001-A0104-V0100-PE.pkg) (must be exactly 1.04), and `PS3UPDAT.PUP` from [PlayStation's PS3 system software page](https://www.playstation.com/en-us/support/hardware/ps3/system-software/); RPCS3 is no longer needed). Install Python and the Visual Studio 2022 Build Tools with Clang (commands above), download this repository to a path without spaces, double-click **`gerar.cmd`** (it asks for the disc folder, then downloads the update and firmware, decrypts your copy, translates and builds; ~4 minutes on an 8-core Ryzen 7 9800X3D), then play with **`jogar.cmd`**.
 
 Status: boots, menus, chapter 1 and chapter 16 play with correct image, 60 FPS locked on a Ryzen 7 9800X3D; the full game is not verified yet. Performance is CPU-bound and much better with AVX-512: ~68 FPS uncapped in chapter 16 on a 9800X3D, ~32 on an i5-11400F, ~8 on a 4-core laptop without AVX-512. The build `gerar.cmd` produces includes the same performance passes as ours (`scripts/otimizar.py`); only PGO is left out. Thread pinning is now off on CPUs with fewer than 12 logical processors (+4% on the laptop), and the GPU command reader no longer hangs on slow PCs.
 
-License: our code is MIT; ps3recomp is MIT (Ned Heller); `scripts/gpl/unself.py` is GPL-2.0 (follows RPCS3's unself.cpp). Decryption keys are read from RPCS3's source (downloaded at a pinned commit). *God of War* is a trademark of Sony Interactive Entertainment; this is a non-commercial fan project, not affiliated with or endorsed by Sony.
+License: our code is MIT; ps3recomp is MIT (Ned Heller); `scripts/gpl/unself.py` and `scripts/gpl/pup_libsre.py` are GPL-2.0 (they follow RPCS3's unself.cpp and firmware installer). Decryption keys are read from RPCS3's source (downloaded at a pinned commit). *God of War* is a trademark of Sony Interactive Entertainment; this is a non-commercial fan project, not affiliated with or endorsed by Sony.
