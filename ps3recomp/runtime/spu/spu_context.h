@@ -288,7 +288,17 @@ typedef struct spu_context {
     struct {
         uint32_t lsa, size, source_ea;
         int image_id;
+        /* GOWA: 128-byte LS lines inside the span that a later GET left
+         * different from the image (data streamed into the module's own
+         * buffers, or code loaded over part of it). A function whose bytes up
+         * to the next function touch a dirty line is not dispatched natively. */
+        uint32_t ndirty;
+        uint8_t  dirty[SPU_LS_SIZE / 128 / 8];
+        uint32_t dgen;      /* GOWA: bumped on every change of dirty[] / the span */
     } resident_code[4];
+    /* GOWA: spu_resident_fn_dirty results, by function address, valid while
+     * the slot's dgen is unchanged (spu_channels.c) */
+    struct { uint32_t lsa1, gen; uint8_t slot, res; } rfd_memo[64];
 
     /* Resident SPURS-taskset TASK image id (0 = none) retires the id-0 wildcard
      * for co-resident tasks. A taskset may hold several tasks that all lift at the
@@ -391,6 +401,18 @@ typedef struct spu_context {
      * manager then ran its buffer loop a second time on the job's registers
      * and died in its own assert (the song-freeze). */
     uint32_t drain_ret_pc;
+
+    /* GOWA: this context's private MFC engine, cached on first use
+     * (spu_channels.c, mfc_for). The registry lookup took a shared SRW lock
+     * on every channel access, an atomic on a line all SPU threads share:
+     * ~15% of each SPU thread in God of War Ascension. Cleared by
+     * spu_mfc_release. */
+    void*    mfc_engine_cache;
+
+    /* GOWA: direct cross-function transfers this drain step may still take as
+     * host tail calls (SPU_TAIL, scripts/tail_calls.py); reloaded by the drain
+     * loops before each step. 0 = every transfer goes through the loop. */
+    uint32_t tail_budget;
 } spu_context;
 
 /* Reserved LS addresses (inside the kernel area, below the 0xA00 policy-module
@@ -433,15 +455,28 @@ static inline void spu_context_init(spu_context* ctx, uint32_t spu_id)
 /* ---------------------------------------------------------------------------
  * Local store access helpers
  * -----------------------------------------------------------------------*/
+/* GOWA: SPU_LS_DIRECT (defined for the lifted SPU code of a title without raw
+ * SPUs -- God of War Ascension calls sys_spu_initialize(6, 0)): address the
+ * context's own ls_store, which is what ctx->ls points at for every non-raw
+ * context. Through the pointer, every LS store could (to the compiler) have
+ * changed ctx->ls and any register in ctx->gpr, so both were reloaded after
+ * each store; ls_store at a fixed offset with the index masked to 256 KB
+ * provably misses gpr[]. A raw SPU (spu_raw.c) repoints ctx->ls at guest
+ * memory and must not run lifted code built this way. */
+#ifdef SPU_LS_DIRECT
+#define SPU_LS_BASE(ctx) ((ctx)->ls_store)
+#else
+#define SPU_LS_BASE(ctx) ((ctx)->ls)
+#endif
 static inline uint8_t* spu_ls_ptr(spu_context* ctx, uint32_t lsa)
 {
-    return &ctx->ls[lsa & SPU_LS_MASK];
+    return &SPU_LS_BASE(ctx)[lsa & SPU_LS_MASK];
 }
 
 static inline uint32_t spu_ls_read32(const spu_context* ctx, uint32_t lsa)
 {
     lsa &= SPU_LS_MASK;
-    const uint8_t* p = &ctx->ls[lsa];
+    const uint8_t* p = &SPU_LS_BASE(ctx)[lsa];
     /* SPU local store is big-endian */
     return ((uint32_t)p[0] << 24) | ((uint32_t)p[1] << 16) |
            ((uint32_t)p[2] << 8)  | (uint32_t)p[3];
@@ -450,7 +485,7 @@ static inline uint32_t spu_ls_read32(const spu_context* ctx, uint32_t lsa)
 static inline void spu_ls_write32(spu_context* ctx, uint32_t lsa, uint32_t val)
 {
     lsa &= SPU_LS_MASK;
-    uint8_t* p = &ctx->ls[lsa];
+    uint8_t* p = &SPU_LS_BASE(ctx)[lsa];
     p[0] = (uint8_t)(val >> 24);
     p[1] = (uint8_t)(val >> 16);
     p[2] = (uint8_t)(val >> 8);
@@ -536,15 +571,49 @@ static __attribute__((noinline, cold)) void spu_ls_read_probe(const spu_context*
     }
 }
 
+static inline u128 spu_ls_read128(const spu_context* ctx, uint32_t lsa);
+/* GOWA_SPU_NUM_REMAP=1 (with GOWA_SPURS_NSPU=8): the SPURS kernel context's
+ * quadword at LS 0x1C0 as the WWS job manager and its jobs see it -- spuNum
+ * (word 2, LS 0x1C8) of SPUs 6/7 reads as 4/5 (=1) or 0/1 (=2, GOWA_SPU_SPLIT
+ * in ppu_hle.cpp). g_spu_num_remap holds the amount taken off. Every Wws_Job list header has
+ * one u16 per SPU for exactly 6 SPUs, and the extra SPUs only get workloads
+ * SPUs 4/5 never run (EDGE0-2), so they take those free slots. The kernel
+ * itself keeps reading the real number. scripts/spu_num_remap.py points the
+ * lifted job manager / jobs / plugins here; the interpreter does the same
+ * for code above the kernel in a user workload (spu_interp.c). */
+extern int g_spu_num_remap;
+static inline u128 spu_ls_read128_kc(const spu_context* ctx)
+{
+    u128 v = spu_ls_read128(ctx, 0x1C0);
+    if (__builtin_expect(g_spu_num_remap, 0) && v._u32[2] - 6u < 2u) v._u32[2] -= (uint32_t)g_spu_num_remap;
+    return v;
+}
+/* the same for a register-based read that may hit the context (lqd $r,
+ * 0xC0($base) with $base = 0x100, the context pointer the kernel passes) */
+static inline u128 spu_ls_read128_kcx(const spu_context* ctx, uint32_t lsa)
+{
+    u128 v = spu_ls_read128(ctx, lsa);
+    if (__builtin_expect(g_spu_num_remap, 0) && (lsa & SPU_LS_MASK & ~0xFu) == 0x1C0u &&
+        v._u32[2] - 6u < 2u)
+        v._u32[2] -= (uint32_t)g_spu_num_remap;
+    return v;
+}
 static inline u128 spu_ls_read128(const spu_context* ctx, uint32_t lsa)
 {
     u128 v;
+    /* SPU_LS_NO_PROBES (GOWA, defined for the lifted SPU sources only): no
+     * diagnostic checks on the hot LS path -- four tests and loads in front of
+     * every access in the lifted code; the interpreter and runtime keep them. */
+#ifndef SPU_LS_NO_PROBES
     if (__builtin_expect(g_spu_ls_probe != 0, 0) || (ctx->image_id == 2 && ctx->policy_mode))
         spu_ls_read_probe(ctx, lsa);
+#endif
     lsa &= SPU_LS_MASK & ~0xFu;
-    const uint8_t* p = &ctx->ls[lsa];
+    const uint8_t* p = &SPU_LS_BASE(ctx)[lsa];
+#ifndef SPU_LS_NO_PROBES
     spu_ls_watch_hit2(lsa, 0, p, (uint32_t)ctx->pc & SPU_LS_MASK,
                       ctx->gpr[0]._u32[0] & SPU_LS_MASK);
+#endif
 #if SPU_LS_FAST
     uint32_t w0, w1, w2, w3;
     memcpy(&w0, p,      4); memcpy(&w1, p + 4,  4);
@@ -560,6 +629,31 @@ static inline u128 spu_ls_read128(const spu_context* ctx, uint32_t lsa)
     }
 #endif
     return v;
+}
+
+/* GOWA: a load from a fixed LS address inside a job module's own image (its
+ * constant pool: shufb controls, masks), with the bytes the module was built
+ * from (scripts/ls_const_fold.py puts these in the lifted code). As a constant
+ * the C compiler folds it into its users -- a shufb whose control it knows is
+ * one shuffle instead of the full selector logic. SPU_LS_CONST_CHECK (CMake
+ * GOWA_LS_CONST_CHECK) reads the LS as before and reports any quadword that
+ * differs from the image, which would mean the job writes there. */
+void spu_ls_const_mismatch(const spu_context* ctx, uint32_t lsa, u128 got, uint32_t w0, uint32_t w1,
+                           uint32_t w2, uint32_t w3);
+static inline u128 spu_ls_const128(const spu_context* ctx, uint32_t lsa,
+                                   uint32_t w0, uint32_t w1, uint32_t w2, uint32_t w3)
+{
+#ifdef SPU_LS_CONST_CHECK
+    const u128 v = spu_ls_read128(ctx, lsa);
+    if (__builtin_expect(v._u32[0] != w0 || v._u32[1] != w1 || v._u32[2] != w2 || v._u32[3] != w3, 0))
+        spu_ls_const_mismatch(ctx, lsa, v, w0, w1, w2, w3);
+    return v;
+#else
+    (void)ctx; (void)lsa;
+    u128 v;
+    v._u32[0] = w0; v._u32[1] = w1; v._u32[2] = w2; v._u32[3] = w3;
+    return v;
+#endif
 }
 
 static __attribute__((noinline, cold)) void spu_ls_write_probe_pre(spu_context* ctx, uint32_t lsa, u128 val)
@@ -618,15 +712,17 @@ static __attribute__((noinline, cold)) void spu_ls_write_probe_smc(spu_context* 
 static inline void spu_ls_write128(spu_context* ctx, uint32_t lsa, u128 val)
 {
     lsa &= SPU_LS_MASK & ~0xFu;
-    uint8_t* p = &ctx->ls[lsa];
+    uint8_t* p = &SPU_LS_BASE(ctx)[lsa];
     /* WWS code-buffer probe: LBP's ChangeLoadToRunJob dispatches to LS[0x1320]
      * (= lsaJobCodeBuffer in LBP's layout) + entryOffset. When TecRunJob writes
      * that code-buffer LS address, dump the RunJob decision inputs so we can see
      * why it resolves to an empty buffer: the resolved address, the whole
      * bufferSetArray (0xDF0), and the live loadCommands (0xC00) whose RunJob
      * command (commandNum==5) names the code buffer set. */
+#ifndef SPU_LS_NO_PROBES
     if (lsa == 0x1320 && ctx->image_id == 2 && ctx->policy_mode)
         spu_ls_write_probe_pre(ctx, lsa, val);
+#endif
 #if SPU_LS_FAST
     uint32_t w0 = SPU_BSWAP32(val._u32[0]), w1 = SPU_BSWAP32(val._u32[1]);
     uint32_t w2 = SPU_BSWAP32(val._u32[2]), w3 = SPU_BSWAP32(val._u32[3]);
@@ -641,10 +737,23 @@ static inline void spu_ls_write128(spu_context* ctx, uint32_t lsa, u128 val)
         p[i*4 + 3] = (uint8_t)w;
     }
 #endif
+#if defined(SPU_SX_CRU_CHECK)
+    /* GOWA: checagem do achatamento preguiçoso -- no modo de checagem cada
+     * resultado cru leva o veneno 0x007BAD5A (um denormal: as contas o leem
+     * como zero); ele nunca deve chegar a uma gravação na LS. */
+    { extern void spu_cru_check_store(spu_context*, uint32_t, const u128*);
+      for (int _i = 0; _i < 4; _i++)
+          /* só o positivo: o veneno nunca ganha sinal sem passar por um
+           * consumidor inseguro (xor de sinal), que força o achatamento; o
+           * 0x807BAD5A apareceu como dado comum (bloco comprimido) */
+          if (__builtin_expect(val._u32[_i] == 0x007BAD5Au, 0)) { spu_cru_check_store(ctx, lsa, &val); break; } }
+#endif
+#ifndef SPU_LS_NO_PROBES
     spu_ls_watch_hit2(lsa, 1, p, (uint32_t)ctx->pc & SPU_LS_MASK,
                       ctx->gpr[0]._u32[0] & SPU_LS_MASK);
     if (__builtin_expect(g_spu_smc_watch != 0, 0))
         spu_ls_write_probe_smc(ctx, lsa, p);
+#endif
 }
 
 /* ---------------------------------------------------------------------------
@@ -782,6 +891,114 @@ extern SPU_THREAD_LOCAL unsigned g_spu_pch_n;
 /* Central per-transfer hooks (stubbed in spu_drain.c until their milestones). */
 void yz_lockstep_tick(spu_context* ctx);             /* round-robin token gate */
 void spu_task_launch_check(spu_context* ctx, void* fn); /* SPURS task-launch    */
+void spu_task_launch_ls0_end(spu_context* ctx);      /* job returned to LS 0  */
+
+/* GOWA: the per-step hooks of the drain loops, with their "nothing to do"
+ * case inline. Out of line, yz_lockstep_tick (lockstep off) and
+ * spu_task_launch_check cost a full prologue, the /GS cookie and a TLS ring
+ * write on every trampoline step -- ~10% of each SPU thread in God of War
+ * Ascension. The full functions still run whenever there is something to
+ * check: lockstep armed or undecided, diagnostics (g_spu_tlc_slow), the PM
+ * flow trace, a registered stack-reset entry pc, or a job back at LS 0. */
+extern volatile int g_yz_lockstep_on;          /* spu_lockstep.c: -1 undecided */
+extern int g_spu_tlc_slow;                     /* spu_drain.c: -1 undecided    */
+extern volatile unsigned g_spu_stack_reset_count;
+extern uint32_t g_spu_stack_reset_pc[16];      /* spu_channels.c               */
+extern void* volatile g_pm_flow_ctx;
+/* GOWA: always inline -- with PGO (GOWA_PGO=use) clang outlined it, a call
+ * with a prologue and pushes on every trampoline step (~1.4% of the SPU
+ * threads by instruction samples, 19/10). */
+#if defined(__clang__) || defined(__GNUC__)
+#  define SPU_ALWAYS_INLINE inline __attribute__((always_inline))
+#elif defined(_MSC_VER)
+#  define SPU_ALWAYS_INLINE __forceinline
+#else
+#  define SPU_ALWAYS_INLINE inline
+#endif
+static SPU_ALWAYS_INLINE void spu_drain_step_hooks(spu_context* ctx, void* fn)
+{
+    if (__builtin_expect(g_yz_lockstep_on != 0, 0))
+        yz_lockstep_tick(ctx);
+    if (__builtin_expect(g_spu_tlc_slow != 0, 0) || g_pm_flow_ctx == (void*)ctx) {
+        spu_task_launch_check(ctx, fn);
+        return;
+    }
+    for (unsigned i = 0, n = g_spu_stack_reset_count; i < n; i++)
+        if (ctx->pc == g_spu_stack_reset_pc[i]) {
+            spu_task_launch_check(ctx, fn);
+            return;
+        }
+    if (ctx->steps++ && (ctx->pc & SPU_LS_MASK) == 0 && !ctx->policy_mode && ctx->image_id > 0)
+        spu_task_launch_ls0_end(ctx);
+}
+
+/* GOWA: SPU_TAIL(ctx, pc, F) -- a direct transfer to the lifted function F as
+ * a host tail call (musttail) instead of a trampoline step: no return to the
+ * drain loop and no indirect call. Only while the step's budget lasts, and
+ * never where the drain loop has work at the transfer: a pending interrupt,
+ * a job going back to LS 0, a registered stack-reset entry. Budget per step:
+ * GOWA_SPU_TAIL (default 32; 0 = off), read once into g_spu_tail_budget. */
+extern uint32_t g_spu_tail_budget;   /* spu_drain.c */
+static inline int spu_tail_ok(spu_context* ctx, uint32_t pc)
+{
+    if (__builtin_expect(ctx->tail_budget == 0, 0)) return 0;
+    /* Any pending event, interrupts enabled or not: the lifted-path interrupt
+     * delay (GOWA_IRQ_DELAY_LIFTED, spu_drain.c) counts drain steps, and a
+     * tail-called transfer is not one -- with tails on regardless, the WWS job
+     * manager's interrupts came far later in real time and gameplay fell from
+     * ~34 to ~22 FPS while menus got faster (A/B abtail). */
+    if (ctx->event_status & ctx->event_mask) return 0;
+    if ((pc & SPU_LS_MASK) == 0) return 0;
+    for (unsigned i = 0, n = g_spu_stack_reset_count; i < n; i++)
+        if (pc == g_spu_stack_reset_pc[i]) return 0;
+    ctx->tail_budget--;
+    return 1;
+}
+#if defined(__clang__)
+#define SPU_TAIL(ctx, pcv, F) do {                                         \
+        if (spu_tail_ok((ctx), (pcv))) {                                   \
+            __attribute__((musttail)) return F(ctx);                       \
+        }                                                                  \
+        g_spu_trampoline_fn = F; return;                                   \
+    } while (0)
+#else
+#define SPU_TAIL(ctx, pcv, F) do { g_spu_trampoline_fn = F; return; } while (0)
+#endif
+/* GOWA (21/10): SPU_TAILX(ctx, pc, Fbody, Fpub) -- the lean direct transfer, for
+ * putting at EVERY lifted transfer site (the full SPU_TAIL check, ~15 instructions
+ * inline at 29 thousand sites, cost more in instruction cache than the jumps saved,
+ * 18/10). Only the step budget is tested here: every producer of an SPU event zeroes
+ * the target context's tail_budget (spu_channels.c, spu_coherency.c, spu_dma.h, and
+ * WrEventMask), and the drain loop re-arms the budget only when no event is pending,
+ * so "an event is pending" already reads as budget 0 -- the transfer then goes back
+ * to the drain loop, which counts the interrupt delay and takes the interrupt as
+ * before. A producer on another thread can race the decrement and be lost; the
+ * budget still runs out within GOWA_SPU_TAIL transfers. Targets the lean form must
+ * not take: LS 0 (a job's end, checked by the drain's step hook; excluded by the
+ * converter) and the stack-reset entries (none registered in this port). */
+#if defined(__clang__)
+#define SPU_TAILX(ctx, pcv, FB, FP) do {                                    \
+        (ctx)->pc = (pcv);                                                 \
+        if ((ctx)->tail_budget) {                                          \
+            (ctx)->tail_budget--;                                          \
+            __attribute__((musttail)) return FB(ctx);                      \
+        }                                                                  \
+        g_spu_trampoline_fn = FP; return;                                  \
+    } while (0)
+#else
+#define SPU_TAILX(ctx, pcv, FB, FP) do { (ctx)->pc = (pcv); g_spu_trampoline_fn = FP; return; } while (0)
+#endif
+/* GOWA: calling convention of the lifted function BODIES (scripts/
+ * spu_cc_interno.py): preserve_none -- the callee saves nothing, so a direct
+ * call between lifted functions costs no Win64 save/restore of rbx..r15 and
+ * xmm6-15. Bodies are static and reached only by direct calls; every pointer
+ * (trampoline, registry, tables) keeps a default-convention wrapper.
+ * SPU_NO_PRESERVE_NONE turns it into a plain static function. */
+#if defined(__clang__) && !defined(SPU_NO_PRESERVE_NONE)
+#define SPU_PN __attribute__((preserve_none))
+#else
+#define SPU_PN
+#endif
 /* Restore image_id after a call-bracket (adopt-on-serve); re-applies the
  * persistent LS-0xA00 workload module if one is set. */
 void spu_img_restore(spu_context* ctx, int32_t saved_img);
@@ -792,9 +1009,25 @@ void spu_ch_wake(spu_context* ctx);
  * transfer recurses until the host stack dies -- surfacing as a bare
  * STACKOVERFLOW backtrace of unsymbolised RVAs that says nothing about which
  * SPU code is looping. Report the SPU pc/image once and halt instead.
- * SPU_HOST_DEPTH_MAX overrides the limit. */
-void spu_depth_guard(spu_context* ctx);
+ * SPU_HOST_DEPTH_MAX overrides the limit.
+ * GOWA: one inline compare. It was an out-of-line call that wrote a ring of
+ * recent drain pcs to thread-local storage before testing the depth, on every
+ * drain (~0.6% of all samples in God of War Ascension). g_spu_depth_max is 0
+ * until the slow path has read the env, and stays 0 with SPU_DEPTH_RING=1,
+ * which keeps the ring (every drain then takes the slow path). */
+extern uint32_t g_spu_depth_max;
+void spu_depth_guard_slow(spu_context* ctx);
+static inline void spu_depth_guard(spu_context* ctx)
+{
+    if (__builtin_expect(ctx->host_depth >= g_spu_depth_max, 0)) spu_depth_guard_slow(ctx);
+}
 int  spu_tailret_enabled(void);
+extern int g_spu_tailret_on;   /* -1 = not read yet; set by spu_tailret_enabled */
+static inline int spu_tailret_on(void)
+{
+    const int v = g_spu_tailret_on;
+    return __builtin_expect(v >= 0, 1) ? v : spu_tailret_enabled();
+}
 /* Take a pending SPU interrupt (spu_drain.c): srr0 <- ctx->pc, int_enable <- 0,
  * decode the guest-planted branch at LS 0 into ctx->pc, and return the
  * dispatcher to run instead of the interrupted transfer. Returns `tf`
@@ -804,6 +1037,31 @@ void (*spu_take_interrupt(spu_context* ctx,
 
 /* Drain a translated call up to its explicit architectural return PC. */
 void spu_drain_call(spu_context* ctx, uint32_t return_pc);
+
+/* GOWA: the common case of a lifted call site -- the callee returned through
+ * SPU_RET to exactly return_pc, no transfer pending -- decided inline. The
+ * out-of-line drain did only bookkeeping for it (depth-guard ring, an irq
+ * frame on the stack, drain_ret_pc = 0) and was ~5% of each SPU thread in God
+ * of War Ascension. Same for the image restore after the call. Lifted SPU
+ * code only (SPU_LS_DIRECT); GOWA_DRAIN_INLINE=0 sends every call to the
+ * out-of-line drain again. */
+extern int g_spu_drain_inline;
+#ifdef SPU_LS_DIRECT
+static inline void spu_drain_call_inl(spu_context* ctx, uint32_t return_pc)
+{
+    if (__builtin_expect(!g_spu_trampoline_fn && !((ctx->pc ^ return_pc) & SPU_LS_MASK) && g_spu_drain_inline, 1)) {
+        ctx->drain_ret_pc = 0;
+        return;
+    }
+    spu_drain_call(ctx, return_pc);
+}
+static inline void spu_img_restore_inl(spu_context* ctx, int32_t saved_img)
+{
+    ctx->image_id = ctx->module_img_a00 ? ctx->module_img_a00 : saved_img;
+}
+#define spu_drain_call(c, r) spu_drain_call_inl((c), (r))
+#define spu_img_restore(c, s) spu_img_restore_inl((c), (s))
+#endif
 /* SPU_PCHIST=1: bucket SPU execution by the GPU module's own symbols.
  *
  * SPU_VRAMPC showed 3.7M VRAM writes from Host2Local_Body and ZERO from
@@ -816,39 +1074,13 @@ void spu_drain_call(spu_context* ctx, uint32_t return_pc);
  *
  * Extents from the .symtab embedded in ps1_netemu (firmware file offset
  * 0x171100), so they are exact rather than guessed. */
+/* (GOWA: the check stays inline -- the whole function was not inlined and
+ * cost a call per trampoline hop; the counting lives in spu_drain.c) */
+extern int g_spu_pchist_on;   /* -1 = not read yet */
+void spu_pchist_tick_slow(const spu_context* ctx);
 static inline void spu_pchist_tick(const spu_context* ctx)
 {
-    static int en = -1;
-    if (en < 0) en = getenv("SPU_PCHIST") ? 1 : 0;
-    if (!en) return;
-    static unsigned long long b[8][8], n;
-    const unsigned sp = (unsigned)(ctx->spu_id & 7u);
-    const uint32_t pc = (uint32_t)ctx->pc & SPU_LS_MASK;
-    const int k = pc < 0x00188u ? 0
-                : pc < 0x00350u ? 1     /* BlockClear */
-                : pc < 0x00758u ? 2     /* Host2Local_Body */
-                : pc < 0x00928u ? 3     /* Host2Local */
-                : pc < 0x010F8u ? 4     /* Local2Local */
-                : pc < 0x051E8u ? 5     /* main */
-                : pc < 0x08700u ? 6     /* DrawRect */
-                : pc < 0x1493Cu ? 7     /* DrawEdge */
-                : 0;
-    b[sp][k]++;
-    if ((++n % 4000000ull) == 0) {
-        static const char* nm[8] = { "other", "BlockClear", "H2L_Body",
-            "Host2Local", "Local2Local", "main", "DrawRect", "DrawEdge" };
-        fprintf(stderr, "[pchist] %llu hops\n", n);
-        for (unsigned q = 0; q < 8; q++) {
-            int any = 0;
-            for (int j = 0; j < 8; j++) if (b[q][j]) any = 1;
-            if (!any) continue;
-            fprintf(stderr, "   spu%u", q);
-            for (int j = 0; j < 8; j++)
-                if (b[q][j]) fprintf(stderr, " %s=%llu", nm[j], b[q][j]);
-            fprintf(stderr, "\n");
-        }
-        fflush(stderr);
-    }
+    if (__builtin_expect(g_spu_pchist_on != 0, 0)) spu_pchist_tick_slow(ctx);
 }
 
 /* Drain the pending trampoline chain: run each queued transfer target until
@@ -863,7 +1095,7 @@ static inline void spu_pchist_tick(const spu_context* ctx)
              * matching brsl/bisl never pops and a poll loop nests a frame \
              * per iteration until the host stack dies. Off by default --  \
              * this changes core dispatch for every title. */              \
-            if (spu_tailret_enabled() && (ctx)->host_depth > 0 &&          \
+            if (spu_tailret_on() && (ctx)->host_depth > 0 &&               \
                 (((uint32_t)(ctx)->pc & SPU_LS_MASK) ==                    \
                  ((ctx)->gpr[0]._u32[0] & SPU_LS_MASK))) {                 \
                 g_spu_trampoline_fn = 0;                                   \
@@ -871,14 +1103,14 @@ static inline void spu_pchist_tick(const spu_context* ctx)
             }                                                              \
             void (*_tf)(spu_context*) = g_spu_trampoline_fn;    \
             g_spu_trampoline_fn = 0;                            \
-            yz_lockstep_tick(ctx);                             \
-            spu_task_launch_check((ctx), (void*)_tf);          \
+            spu_drain_step_hooks((ctx), (void*)_tf);           \
             if ((ctx)->int_enable &&                            \
                 ((ctx)->event_status & (ctx)->event_mask))      \
                 _tf = spu_take_interrupt((ctx), _tf);          \
             spu_pchist_tick(ctx);                              \
             g_spu_pch[g_spu_pch_n++ & 7u] =                    \
                 (uint32_t)((ctx)->pc & SPU_LS_MASK);           \
+            (ctx)->tail_budget = g_spu_tail_budget;            \
             _tf(ctx);                                          \
         }                                                      \
     } while (0)
@@ -901,6 +1133,73 @@ static inline void spu_pchist_tick(const spu_context* ctx)
  * never match -- it restarts dispatch from r0's stale value instead. Same
  * host-frame return as SPU_RET, publishing the register actually branched. */
 #define SPU_RET_REG(ctx, n) do {                                       (ctx)->pc = (ctx)->gpr[n]._u32[0];                             if ((ctx)->host_depth == 0)                                        g_spu_trampoline_fn = spu_indirect_branch;                 return;                                                    } while (0)
+
+/* GOWA (23/10): the MFC parameter channels written straight into the context
+ * by the lifted code (SPU_LS_DIRECT = lifted sources only). Every DMA is five
+ * or six wrch -- LSA, EAH, EAL, Size, TagID, Cmd -- and spu_wrch did a call
+ * (the u128 passed through the stack), the SPU_CHHIST check, the channel
+ * classification, the atomic-command check and the engine lookup just to store
+ * one word for each parameter; ~2% of every SPU thread. Same effect as
+ * spu_wrch -> mfc_channel_write for those channels (the command itself and
+ * every other channel still go through spu_wrch). SPU_WRCH_SLOW turns it off. */
+#if defined(SPU_LS_DIRECT) && !defined(SPU_WRCH_SLOW)
+void spu_wrch(spu_context* ctx, uint32_t channel, u128 value);
+/* the command: plain GET/PUT by the lean path (spu_channels.c), else spu_wrch */
+int spu_mfc_cmd_lean(spu_context* ctx, uint32_t cmd);
+void spu_wrch_tagupdate(spu_context* ctx, uint32_t v);   /* MFC_WrTagUpdate without the probes */
+static inline __attribute__((always_inline)) void spu_wrch_param(spu_context* ctx, uint32_t channel, u128 value)
+{
+    if (__builtin_constant_p(channel)) {
+        switch (channel) {
+        case MFC_Cmd:
+#ifndef SPU_MFC_CMD_SLOW
+            if (spu_mfc_cmd_lean(ctx, value._u32[0])) return;
+#endif
+            break;
+        case MFC_WrTagUpdate:
+#ifndef SPU_MFC_CMD_SLOW
+            spu_wrch_tagupdate(ctx, value._u32[0]); return;
+#endif
+            break;
+        case MFC_LSA:       ctx->mfc_lsa = value._u32[0]; return;
+        case MFC_EAH:       ctx->mfc_eah = value._u32[0]; return;
+        case MFC_EAL:       ctx->mfc_eal = value._u32[0]; return;
+        case MFC_Size:      ctx->mfc_size = value._u32[0]; return;
+        case MFC_TagID:     ctx->mfc_tag = value._u32[0] & 0x1Fu; return;
+        case MFC_WrTagMask: ctx->mfc_tag_mask = value._u32[0]; return;
+        default: break;
+        }
+    }
+    spu_wrch(ctx, channel, value);
+}
+#define spu_wrch(c, ch, v) spu_wrch_param(c, ch, v)   /* sem parênteses: também vale na declaração dos spu_recomp.h */
+/* The same for the status reads the job manager and the PM poll around every
+ * DMA wait and interrupt-off section: RdTagStat, RdAtomicStat, RdMachStat are
+ * plain context fields in spu_rdch (no wait, no side effect). */
+u128 spu_rdch(spu_context* ctx, uint32_t channel);
+static inline __attribute__((always_inline)) u128 spu_rdch_stat(spu_context* ctx, uint32_t channel)
+{
+    if (__builtin_constant_p(channel)) {
+        switch (channel) {
+        case MFC_RdTagStat:    return spu_make_preferred_u32(ctx->mfc_tag_status);
+        case MFC_RdAtomicStat: return spu_make_preferred_u32(ctx->atomic_stat);
+        case SPU_RdMachStat:   return spu_make_preferred_u32(ctx->int_enable & 1u);
+        default: break;
+        }
+    }
+    return spu_rdch(ctx, channel);
+}
+#define spu_rdch(c, ch) spu_rdch_stat(c, ch)
+/* rchcnt of the tag channels: always 1 in spu_rchcnt (synchronous DMA) */
+uint32_t spu_rchcnt(spu_context* ctx, uint32_t channel);
+static inline __attribute__((always_inline)) uint32_t spu_rchcnt_tag(spu_context* ctx, uint32_t channel)
+{
+    if (__builtin_constant_p(channel) && (channel == MFC_WrTagUpdate || channel == MFC_RdTagStat))
+        return 1;
+    return spu_rchcnt(ctx, channel);
+}
+#define spu_rchcnt(c, ch) spu_rchcnt_tag(c, ch)
+#endif
 
 #ifdef __cplusplus
 } /* extern "C" */

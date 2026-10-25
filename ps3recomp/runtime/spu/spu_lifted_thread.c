@@ -147,6 +147,31 @@ void spu_lifted_thread_run(spu_context* ctx, spu_lifted_thread_result* out)
             "-> status=%d%s%s\n",
             ctx->spu_id, ctx->status, ctx->pc, ctx->stop_code, r.exit_status,
             r.group_exit ? " group-exit" : "", r.faulted ? " FAULT" : "");
+    /* Still RUNNING when the dispatcher came back: no stop and no halt -- a
+     * lifted function returned on the host with nothing above it (a guest
+     * return to a pc that has no host frame). Say where from. */
+    if (ctx->status == SPU_STATUS_RUNNING) {
+        const uint32_t p = ctx->pc & SPU_LS_MASK, sp = ctx->gpr[1]._u32[0] & SPU_LS_MASK;
+        fprintf(stderr, "      img=%d lr=0x%05X sp=0x%05X ovl=%d last dispatched PCs (oldest first):",
+                ctx->image_id, ctx->gpr[0]._u32[0] & SPU_LS_MASK, sp, ctx->resident_ovl);
+        for (unsigned q = 0; q < 8; q++) {
+            const unsigned idx = (g_spu_pch_n + q) & 7u;
+            if (g_spu_pch_n > q || g_spu_pch[idx]) fprintf(stderr, " 0x%05X", g_spu_pch[idx]);
+        }
+        fprintf(stderr, "\n      LS[pc]:");
+        for (uint32_t o = 0; o < 32 && p + o + 3 < SPU_LS_SIZE; o += 4)
+            fprintf(stderr, " %02X%02X%02X%02X", ctx->ls[p+o], ctx->ls[p+o+1], ctx->ls[p+o+2], ctx->ls[p+o+3]);
+        /* the guest back chain: [sp] = caller's sp, [sp+16] = saved lr */
+        fprintf(stderr, "\n      back chain:");
+        for (uint32_t s = sp, k = 0; k < 8 && s && s + 32 <= SPU_LS_SIZE; k++) {
+            const uint32_t nsp = ((uint32_t)ctx->ls[s] << 24 | ctx->ls[s+1] << 16 | ctx->ls[s+2] << 8 | ctx->ls[s+3]) & SPU_LS_MASK;
+            const uint32_t lr  = ((uint32_t)ctx->ls[nsp+16] << 24 | ctx->ls[nsp+17] << 16 | ctx->ls[nsp+18] << 8 | ctx->ls[nsp+19]) & SPU_LS_MASK;
+            fprintf(stderr, " sp=0x%05X(lr 0x%05X)", nsp, nsp + 20 <= SPU_LS_SIZE ? lr : 0);
+            if (nsp <= s) break;
+            s = nsp;
+        }
+        fprintf(stderr, "\n");
+    }
     fflush(stderr);
 
     /* This thread run has ended; remove observer references and release its

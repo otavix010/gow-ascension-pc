@@ -42,6 +42,11 @@ extern "C" {
  * reserved. The critical sections are two 128-byte memcpy and a memcmp. */
 void spu_lockline_lock(void);
 void spu_lockline_unlock(void);
+/* GOWA (23/10): the lock of ONE line's stripe -- every transaction confined
+ * to the 128-byte line of `ea`. spu_lockline_lock() takes every stripe (for
+ * the multi-line ones and the reserving-set removals); see spu_coherency.c. */
+void spu_lockline_lock_ea(uint32_t ea);
+void spu_lockline_unlock_ea(uint32_t ea);
 
 /* Mark `ea`'s 128-byte line as SPU-reserved and remember `ctx` as a possible
  * reservation holder. Called from the SPU's GETLLAR with the lock held.

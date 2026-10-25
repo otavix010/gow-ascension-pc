@@ -234,6 +234,9 @@ static DWORD WINAPI raw_spu_thread(LPVOID arg)
 {
     raw_spu* s = (raw_spu*)arg;
     spu_context* c = s->ctx;
+    /* GOWA: MXCSR.DAZ -- the lifted SPU code built with SPU_SX_DAZ relies on
+     * the hardware reading denormal operands as zero (spu_helpers.h). */
+    { extern void spu_daz_enter(void); spu_daz_enter(); }
 
     c->status = SPU_STATUS_RUNNING;
     publish(s);
@@ -304,6 +307,8 @@ static void raw_spu_start(raw_spu* s)
     /* THE point of this whole file: local store is the guest window, not a copy.
      * The PPU keeps writing command buffers into it while the SPU runs. */
     s->ctx->ls       = vm_base + s->base;
+    /* GOWA: lifted SPU code built with SPU_LS_DIRECT reads ls_store, not this. */
+    { static int _w = 0; if (!_w++) fprintf(stderr, "[SPU] raw SPU %u: LS in guest memory -- lifted code built with SPU_LS_DIRECT would not see it\n", (unsigned)n); }
     s->ctx->image_id = s_pending_image_id;
     s->entry         = s_pending_entry;
     s->ctx->gpr[1]._u32[0] = SPU_LS_SIZE - 0x10;      /* SPU ABI stack top */

@@ -9,6 +9,7 @@
 #include "spu_lifted_job.h"   /* spu_run_lifted_job */
 #include "../ps3_log.h"      /* ps3_log_verbose */
 #include <stdio.h>
+#include <wchar.h>   /* GOWA: swprintf (thread names) */
 #include <stdlib.h>
 #include <string.h>
 #ifdef _WIN32
@@ -794,6 +795,10 @@ static DWORD WINAPI spu_async_thread(LPVOID p) {
      * runaway brsl recursion) can actually reach the STACKOVERFLOW reporter
      * instead of killing the process silently with 0x80000001. */
     { ULONG g = 256 * 1024; SetThreadStackGuarantee(&g); }
+    /* GOWA: MXCSR.DAZ -- the lifted SPU code built with SPU_SX_DAZ relies on
+     * the hardware reading denormal operands as zero (spu_helpers.h). */
+    { extern void spu_daz_enter(void); spu_daz_enter(); }
+    { wchar_t nm[24]; swprintf(nm, 24, L"SPU-img%d", ((spu_async_job*)p)->image_id); SetThreadDescription(GetCurrentThread(), nm); }   /* GOWA: [pin] */
     spu_async_run((spu_async_job*)p);
     /* Nothing on this stack may stay in the lock-line reserver set. */
     { ULONG_PTR lo, hi; GetCurrentThreadStackLimits(&lo, &hi);

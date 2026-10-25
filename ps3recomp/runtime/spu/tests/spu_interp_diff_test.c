@@ -549,7 +549,10 @@ typedef int (*backend_fn)(spu_context* ctx, uint32_t insn, uint32_t pc, void* us
 static int backend_interp(spu_context* ctx, uint32_t insn, uint32_t pc, void* user) {
     (void)user; uint32_t m = pc & 0x3FFFC;
     ctx->ls[m] = insn >> 24; ctx->ls[m+1] = insn >> 16; ctx->ls[m+2] = insn >> 8; ctx->ls[m+3] = insn;
-    ctx->pc = pc; return spu_step(ctx);
+    /* through the decode cache (run twice per trial site in practice: the
+     * same pc gets different words, which must re-decode) */
+    static spu_dc_ent* dc; if (!dc) dc = (spu_dc_ent*)calloc(SPU_LS_SIZE / 4, sizeof *dc);
+    ctx->pc = pc; return spu_step(ctx, dc);
 }
 
 static long g_total_trials, g_total_fail, g_total_skip, g_total_hand, g_total_audit;
@@ -675,6 +678,12 @@ static int run_lifted_cases(long scale) {
             memset(&st, 0, sizeof st); printed = 0; cur_op = op; if (op > 0) lname(op, nm);
         }
         if (ci == LC_NCASES) break;
+        /* SPU_DIFF_SKIP_CH=1: skip channel ops (a harness whose oracle is stubbed has no channel model). */
+        { static int sk = -1; if (sk < 0) sk = getenv("SPU_DIFF_SKIP_CH") ? 1 : 0;
+          if (sk && (op == R_RDCH || op == R_RCHCNT || op == R_WRCH)) continue; }
+        /* SPU_DIFF_ONLY=<name>: only that op (lower case, e.g. cbd). */
+        { static const char* only = (const char*)-1; if (only == (const char*)-1) only = getenv("SPU_DIFF_ONLY");
+          if (only && op > 0) { char b[32]; lname(op, b); if (strcmp(b, only)) continue; } }
         uint32_t insn = g_lc_cases[ci].insn, pc = g_lc_cases[ci].pc; int kind = op_kind(op);
         for (long t = 0; t < 24 * scale * (kind ? 3 : 1); t++) {
             int ra = (insn >> 7) & 0x7F, rb = (insn >> 14) & 0x7F, rt = insn & 0x7F, rt4 = (insn >> 21) & 0x7F;

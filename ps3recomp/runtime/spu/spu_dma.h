@@ -166,9 +166,15 @@ static inline int mfc_is_fence(uint32_t cmd)
  * Execute a single DMA transfer between local store and main memory.
  * Returns 0 on success, -1 on error.
  */
+/* GOWA_DMA_EA_LOG=lo-hi (hex EAs): counts the transfers into that window per
+ * EA (16-byte granules) and prints the top ones every ~5 s -- an SPU polling a
+ * label by DMA shows up here. */
+void gowa_dma_ea_note(uint64_t ea, uint32_t size, uint32_t cmd);
+extern int g_gowa_dma_ea_log;
 static inline int mfc_do_transfer(spu_context* spu, uint32_t lsa, uint64_t ea,
                                    uint32_t size, uint32_t cmd)
 {
+    if (__builtin_expect(g_gowa_dma_ea_log, 0)) gowa_dma_ea_note(ea, size, cmd);
     /* Upper16 command-channel bits carry replacement/transfer class IDs. */
     if ((cmd & 0xFFFFu) == MFC_SDCRZ_CMD) {
         /* CBEA 1.02 section 7.7.3: SDCRZ writes zeros in EA space, without an
@@ -219,6 +225,22 @@ static inline int mfc_do_transfer(spu_context* spu, uint32_t lsa, uint64_t ea,
                               " size=%u covers 0x%08X\n",
                       (uint32_t)spu->pc & SPU_LS_MASK, cmd, lsa, (uint32_t)ea, size,
                       (uint32_t)s_w); } }
+    /* GOWA: a PUT into the executable's code or OPD table (gowa_image_protected,
+     * ppu_fs.cpp) is always a bug -- report and drop it. Some writer put DXT
+     * blocks on God of War Ascension's OPD at 0x833840; this is one of the
+     * candidates. GOWA_DMA_IMAGE_GUARD=0 lets it through (report only). */
+    if (mfc_is_put(cmd)) {
+        extern int gowa_image_protected(uint32_t ea, uint64_t n);
+        if (gowa_image_protected((uint32_t)ea, size)) {
+            static int s_blk = -1; if (s_blk < 0) { const char* e = getenv("GOWA_DMA_IMAGE_GUARD"); s_blk = !(e && e[0] == '0'); }
+            static volatile long _n = 0;
+            if (_n++ < 32)
+                fprintf(stderr, "[dma-img] PUT na imagem do executavel: spu%u img=%d pc=0x%05X wid=%u cmd=0x%X lsa=0x%05X ea=0x%08X size=%u%s\n",
+                        (unsigned)(spu->spu_id & 7u), spu->image_id, (uint32_t)spu->pc & SPU_LS_MASK, spu->ls[0x1DF],
+                        cmd, lsa, (uint32_t)ea, size, s_blk ? " -- DESCARTADO" : "");
+            if (s_blk) return 0;
+        }
+    }
     /* SPU_DMA_RANGE=<lo>-<hi> (hex EAs): log transfers touching [lo,hi), first
      * 64 -- who reads or writes a buffer the RSX shares with the SPUs. */
     { static uint32_t s_lo = 1, s_hi;
@@ -227,8 +249,10 @@ static inline int mfc_do_transfer(spu_context* spu, uint32_t lsa, uint64_t ea,
       if (s_hi && (uint32_t)ea < s_hi && (uint32_t)ea + size > s_lo) {
           static int _n = 0;
           if (_n++ < 64)
-              fprintf(stderr, "[dma-range] pc=0x%05X cmd=0x%X lsa=0x%05X ea=0x%08X size=%u\n",
-                      (uint32_t)spu->pc & SPU_LS_MASK, cmd, lsa, (uint32_t)ea, size);
+              fprintf(stderr, "[dma-range] pc=0x%05X cmd=0x%X lsa=0x%05X ea=0x%08X size=%u wid=%u ls4000=%02X%02X%02X%02X%02X%02X%02X%02X\n",
+                      (uint32_t)spu->pc & SPU_LS_MASK, cmd, lsa, (uint32_t)ea, size, spu->ls[0x1DF],
+                      spu->ls[0x4000], spu->ls[0x4001], spu->ls[0x4002], spu->ls[0x4003],
+                      spu->ls[0x4004], spu->ls[0x4005], spu->ls[0x4006], spu->ls[0x4007]);
           /* ...and every 5 s, the bytes PUT into / GOT from the range. */
           { static volatile long long s_put, s_get; static unsigned long long s_t0;
             extern unsigned long long ps3_ms_now(void);
@@ -239,6 +263,51 @@ static inline int mfc_do_transfer(spu_context* spu, uint32_t lsa, uint64_t ea,
                 fprintf(stderr, "[dma-range] %.0f B/s put, %.0f B/s get\n",
                         s_put * 1000.0 / (now - s_t0), s_get * 1000.0 / (now - s_t0));
                 s_put = s_get = 0; s_t0 = now; } } } }
+    /* GOWA_RACECHK=<lo>-<hi> (hex, <= 64 KB): a job that GETs a shared table,
+     * edits it in LS and PUTs it back loses every change another agent made
+     * to main memory in between. Snapshot the bytes at GET (per SPU); at PUT
+     * report the 16-byte lines that changed in memory since then AND that the
+     * PUT is about to overwrite with the pre-change value ("lost": the job did
+     * not touch them, it just restores what it read). */
+    { static uint32_t r_lo = 1, r_hi;
+      if (r_lo == 1) { const char* e = getenv("GOWA_RACECHK"); r_lo = 0;
+          if (e) { char* d; r_lo = (uint32_t)strtoul(e, &d, 16); if (*d == '-') r_hi = (uint32_t)strtoul(d + 1, 0, 16);
+                   if (r_hi - r_lo > 0x10000u) r_hi = r_lo + 0x10000u; } }
+      if (r_hi && (uint32_t)ea < r_hi && (uint32_t)ea + size > r_lo && size >= 16 && !(ea & 15) && !(size & 15)) {
+          static uint8_t* snap[8]; static uint8_t* have[8];
+          const unsigned s = (unsigned)spu->spu_id & 7u;
+          if (!snap[s]) { snap[s] = (uint8_t*)calloc(1, r_hi - r_lo); have[s] = (uint8_t*)calloc(1, (r_hi - r_lo) / 16 + 1); }
+          if (snap[s]) {
+              const uint32_t a0 = (uint32_t)ea > r_lo ? (uint32_t)ea : r_lo;
+              const uint32_t a1 = (uint32_t)ea + size < r_hi ? (uint32_t)ea + size : r_hi;
+              if ((cmd & 0xF0) == 0x40) {                         /* GET: remember what was read */
+                  memcpy(snap[s] + (a0 - r_lo), vm_base + a0, a1 - a0);
+                  for (uint32_t a = a0; a < a1; a += 16) have[s][(a - r_lo) / 16] = 1;
+              } else if ((cmd & 0xF0) == 0x20) {                  /* PUT: what changed meanwhile? */
+                  unsigned changed = 0, lost = 0; uint32_t first = 0;
+                  for (uint32_t a = a0; a < a1; a += 16) {
+                      const uint32_t k = a - r_lo;
+                      if (!have[s][k / 16]) continue;
+                      if (memcmp(vm_base + a, snap[s] + k, 16)) {
+                          changed++;
+                          if (!memcmp(spu->ls + ((lsa + (a - (uint32_t)ea)) & SPU_LS_MASK), snap[s] + k, 16)) { if (!lost) first = a; lost++; }
+                      }
+                      have[s][k / 16] = 0;
+                  }
+                  static volatile long n_put, n_race, n_lost;
+                  __atomic_add_fetch(&n_put, 1, __ATOMIC_RELAXED);
+                  if (lost) { __atomic_add_fetch(&n_race, 1, __ATOMIC_RELAXED); __atomic_add_fetch(&n_lost, lost, __ATOMIC_RELAXED); }
+                  static volatile long n_rep;
+                  if (lost && n_rep < 24) { n_rep++;
+                      fprintf(stderr, "[racechk] spu%u wid=%u cnt9AA4A4=%02X%02X PUT ea=0x%08X size=%u: %u linhas mudaram desde o GET, %u PERDIDAS (1a 0x%08X: mem %08X%08X agora, PUT devolve %08X%08X)\n",
+                              s, spu->ls[0x1DF], vm_base[0x9AA4A4], vm_base[0x9AA4A5], (uint32_t)ea, size, changed, lost, first,
+                              *(uint32_t*)(vm_base + first), *(uint32_t*)(vm_base + first + 4),
+                              *(uint32_t*)(snap[s] + (first - r_lo)), *(uint32_t*)(snap[s] + (first - r_lo) + 4)); }
+                  if ((n_put % 2000) == 0)
+                      fprintf(stderr, "[racechk] %ld PUTs, %ld com perda, %ld linhas perdidas\n", n_put, n_race, n_lost);
+              }
+          }
+      } }
     /* Malformed transfers are REJECTED, as the hardware MFC does. The rules
      * are the ones the SDK's own dma.h asserts: a non-zero size, at most
      * 16 KB, a multiple of 16 once >= 16 bytes, and LSA/EA sharing 16-byte
@@ -566,6 +635,38 @@ static inline int mfc_do_transfer(spu_context* spu, uint32_t lsa, uint64_t ea,
         }
     }
     if (mfc_is_get(cmd)) {
+        { extern void gowa_mailbox_on_get(uint32_t, uint32_t); gowa_mailbox_on_get((uint32_t)ea, size); }
+        /* GOWA_GETWATCH_EA=<lo>:<hi> (EA, hex): GETs from that range, any
+         * workload (which RSX render targets the SPUs read). */
+        { static int s_ge = -1; static uint32_t s_ge_lo, s_ge_hi;
+          if (s_ge < 0) { const char* e = getenv("GOWA_GETWATCH_EA"); s_ge = 0;
+              if (e && *e) { char* q = 0; s_ge_lo = (uint32_t)strtoul(e, &q, 16);
+                             if (q && *q == ':') { s_ge_hi = (uint32_t)strtoul(q + 1, 0, 16); s_ge = 1; } } }
+          static int s_ge_wid = -2; if (s_ge_wid == -2) { const char* e = getenv("GOWA_GETWATCH_EA_WID"); s_ge_wid = e ? (int)strtoul(e, 0, 0) : -1; }
+          if (s_ge && (uint32_t)ea < s_ge_hi && (uint32_t)ea + size > s_ge_lo &&
+              (s_ge_wid < 0 || spu->ls[0x1DF] == (uint8_t)s_ge_wid)) {
+              static int s_gen = 0;
+              if (s_gen++ < 3000) {
+                  extern unsigned long long ps3_ms_now(void);
+                  fprintf(stderr, "[getwatch-ea] t=%llu spu=%u wid=%u pc=0x%05X ea=0x%08X size=0x%X lsa=0x%05X\n",
+                          ps3_ms_now(), (unsigned)(spu->spu_id & 7u), (unsigned)spu->ls[0x1DF],
+                          (unsigned)(spu->pc & 0x3FFFF), (uint32_t)ea, size, lsa);
+              } } }
+        /* GOWA_GETWATCH=<wid>:<size> (hex): log GETs of that size by that
+         * workload -- where the taskset tasks read their per-round mailbox. */
+        { static int s_gw = -1; static uint32_t s_gw_wid, s_gw_size;
+          if (s_gw < 0) { const char* e = getenv("GOWA_GETWATCH"); s_gw = 0;
+              if (e && *e) { char* q = 0; s_gw_wid = (uint32_t)strtoul(e, &q, 16);
+                             if (q && *q == ':') { s_gw_size = (uint32_t)strtoul(q + 1, 0, 16); s_gw = 1; } } }
+          if (s_gw && spu->ls[0x1DF] == (uint8_t)s_gw_wid && size == s_gw_size) {
+              static int s_gwn = 0;
+              if (s_gwn++ < 400) {
+                  extern unsigned long long ps3_ms_now(void);
+                  const uint8_t* m = vm_base + (uint32_t)ea;
+                  fprintf(stderr, "[getwatch] t=%llu spu=%u wid=%u pc=0x%05X ea=0x%08X lsa=0x%05X data=%02X%02X%02X%02X %02X%02X%02X%02X %02X%02X%02X%02X %02X%02X%02X%02X\n",
+                          ps3_ms_now(), (unsigned)(spu->spu_id & 7u), (unsigned)spu->ls[0x1DF], (unsigned)(spu->pc & 0x3FFFF), (uint32_t)ea, lsa,
+                          m[0],m[1],m[2],m[3],m[4],m[5],m[6],m[7],m[8],m[9],m[10],m[11],m[12],m[13],m[14],m[15]);
+              } } }
         /* LBP overlay-load diagnosis: a GET of the FMOD overlay descriptor
          * (32B from ~0x94Fxxx) then a large GET from a NULL source = the
          * overlay never loads. Dump the descriptor content to see where the
@@ -670,6 +771,28 @@ static inline int mfc_do_transfer(spu_context* spu, uint32_t lsa, uint64_t ea,
             extern void spu_lockline_lock(void);
             extern void spu_lockline_unlock(void);
             extern void spu_lockguard_check(spu_context*, uint32_t, const uint8_t*, uint32_t, const char*);
+            { extern void gowa_mailbox_on_put(const spu_context*, uint32_t, uint32_t); gowa_mailbox_on_put(spu, (uint32_t)ea, size); }
+            /* GOWA_PUTWATCH=<lo>:<hi> (EA, hex): log SPU PUTs into that range
+             * -- who links the RSX command segments (patches the parks). */
+            { static int s_pw = -1; static uint32_t s_pw_lo, s_pw_hi;
+              if (s_pw < 0) { const char* e = getenv("GOWA_PUTWATCH"); s_pw = 0;
+                  if (e && *e) { char* q = 0; s_pw_lo = (uint32_t)strtoul(e, &q, 16);
+                                 if (q && *q == ':') { s_pw_hi = (uint32_t)strtoul(q + 1, 0, 16); s_pw = 1; } } }
+              static int s_pw_wid = -2; if (s_pw_wid == -2) { const char* e = getenv("GOWA_PUTWATCH_WID"); s_pw_wid = e ? (int)strtoul(e, 0, 0) : -1; }
+              if (s_pw && (uint32_t)ea < s_pw_hi && (uint32_t)ea + size > s_pw_lo &&
+                  (s_pw_wid < 0 || spu->ls[0x1DF] == (uint8_t)s_pw_wid)) {
+                  static int s_pwn = 0;
+                  if (s_pwn++ < 3000) {
+                      extern unsigned long long ps3_ms_now(void);
+                      const uint8_t* d = (const uint8_t*)ls_ptr;
+                      fprintf(stderr, "[putwatch] t=%llu img=%d spu=%u wid=%u pc=0x%05X ea=0x%08X size=0x%X w0=%02X%02X%02X%02X wlast=%02X%02X%02X%02X\n",
+                              ps3_ms_now(), spu->image_id, (unsigned)spu->spu_id, (unsigned)spu->ls[0x1DF],
+                              (unsigned)(spu->pc & 0x3FFFF), (uint32_t)ea, size,
+                              d[0], d[1], d[2], d[3],
+                              size >= 4 ? d[size-4] : 0, size >= 4 ? d[size-3] : 0, size >= 4 ? d[size-2] : 0, size >= 4 ? d[size-1] : 0);
+                  } } }
+            { extern void gowa_putring_note(const spu_context*, uint32_t, uint32_t, const uint8_t*);
+              gowa_putring_note(spu, (uint32_t)ea, size, (const uint8_t*)ls_ptr); }   /* GOWA_PUTRING */
             spu_lockguard_check(spu, (uint32_t)ea, (const uint8_t*)ls_ptr, size, "PUT");
             uint32_t a0 = (uint32_t)ea & ~127u;
             uint32_t a1 = ((uint32_t)ea + size - 1u) & ~127u;
@@ -679,20 +802,23 @@ static inline int mfc_do_transfer(spu_context* spu, uint32_t lsa, uint64_t ea,
                 if (a == a1) break;
             }
             if (span_reserved) {
-                spu_lockline_lock();
+                /* GOWA: one line -> its stripe; several -> every stripe */
+                extern void spu_lockline_lock_ea(uint32_t); extern void spu_lockline_unlock_ea(uint32_t);
+                if (a0 == a1) spu_lockline_lock_ea(a0); else spu_lockline_lock();
                 memcpy(ea_ptr, ls_ptr, size);
                 for (uint32_t a = a0; ; a += 128u) {
                     if (spu_coh_is_reserved(a)) spu_coh_notify_write_except(a, spu);
                     if (a == a1) break;
                 }
-                spu_lockline_unlock();
+                if (a0 == a1) spu_lockline_unlock_ea(a0); else spu_lockline_unlock();
             } else {
                 memcpy(ea_ptr, ls_ptr, size);
                 for (uint32_t a = a0; ; a += 128u) {
                     if (spu_coh_is_reserved(a)) {
-                        spu_lockline_lock();
+                        extern void spu_lockline_lock_ea(uint32_t); extern void spu_lockline_unlock_ea(uint32_t);
+                        spu_lockline_lock_ea(a);
                         spu_coh_notify_write_except(a, spu);
-                        spu_lockline_unlock();
+                        spu_lockline_unlock_ea(a);
                     }
                     if (a == a1) break;
                 }
@@ -727,8 +853,13 @@ static inline int mfc_do_transfer(spu_context* spu, uint32_t lsa, uint64_t ea,
         /* POISON-DMA detector: does an SPU PUT write the singleton object region
          * (0x40003000-0x40005000) or carry the 0xC708C708 poison? This host-side
          * memcpy bypasses vm_write32/AWATCH, so it's the prime suspect for the
-         * garbage fn-ptr fields that cause the 0xC708C708 vcall crash. */
-        { uint32_t e = (uint32_t)ea;
+         * garbage fn-ptr fields that cause the 0xC708C708 vcall crash.
+         * GOWA: opt-in (SPU_POISON_DMA=1): it scanned every byte of every SPU
+         * PUT, ~1% of all samples in God of War Ascension (inside
+         * mfc_do_transfer). */
+        static int s_poison_dma = -1;
+        if (__builtin_expect(s_poison_dma < 0, 0)) s_poison_dma = getenv("SPU_POISON_DMA") ? 1 : 0;
+        if (s_poison_dma) { uint32_t e = (uint32_t)ea;
           int hitregion = (e < 0x40005000u && e + size > 0x40003000u);
           int haspoison = 0;
           for (uint32_t o = 0; o + 4 <= size; o += 4) {
@@ -795,6 +926,7 @@ static inline int mfc_run_list(spu_context* spu, uint32_t elem_lsa,
             spu->list_stall_mask |= (1u << t);  /* this tag now has a parked list */
             spu->list_stall_stat |= (1u << t);  /* accumulate into the notify mask */
             spu->event_status    |= 0x2u;       /* SPU_EVENT_SN stall-and-notify */
+            spu->tail_budget = 0;               /* SPU_TAILX: event pending */
             /* Real MFC runs a queued list asynchronously, so the notify lands
              * AFTER the arming code finishes. We run it inline here, so hold the
              * resulting interrupt off for a few drain ticks -- otherwise the WWS
@@ -912,6 +1044,13 @@ static inline int mfc_enqueue(mfc_engine* mfc, spu_context* spu)
  */
 static inline int mfc_submit(mfc_engine* mfc, spu_context* spu, uint32_t cmd)
 {
+    /* GOWA: comandos de DMA no rastro do PM (GOWA_PM_TRACE). */
+    { extern FILE* gowa_pmtrace_file(spu_context*);
+      FILE* tf = gowa_pmtrace_file(spu);
+      if (tf) { fprintf(tf, "MFC pc=0x%05X cmd=0x%02X lsa=0x%05X ea=0x%08X size=0x%X tag=%u\n",
+                        (unsigned)(spu->pc & 0x3FFFF), cmd, spu->mfc_lsa, spu->mfc_eal, spu->mfc_size,
+                        spu->mfc_tag & 0x1F);
+                fflush(tf); } }
     /* SPU_CMDHIST=1: every MFC command that reaches the engine, by opcode and
      * SPU image. Catches list DMAs (putl/getl) that never reach
      * mfc_do_transfer's per-element path. */
@@ -1223,17 +1362,23 @@ static inline int mfc_submit(mfc_engine* mfc, spu_context* spu, uint32_t cmd)
      * pages on demand the counter never advanced and a spinning job simply hung
      * the chain walker instead. Count repeats whether or not the transfer
      * succeeds, and halt at a known pc rather than hanging silently. */
-    { static uint32_t s_last_ea, s_last_lsa, s_rep;
-      static uint32_t s_limit = 0;
-      if (!s_limit) { const char* e = getenv("SPU_DMA_REPEAT_LIMIT");
-                      s_limit = e ? (uint32_t)strtoul(e, 0, 0) : 256u; }
-      if ((uint32_t)ea == s_last_ea && lsa == s_last_lsa) {
+    /* GOWA: per thread, and SPU_DMA_REPEAT_LIMIT=0 turns it off. Shared, the
+     * counter reset whenever another SPU issued any DMA in between; once the
+     * idle SPUs sleep (SPU_CH_BLOCK) nothing interleaves, and an SPU polling
+     * an RSX label (God of War Ascension: ea 0x20000530 from the SPURS kernel,
+     * pc 0x49E0 -- legitimate, it waits for the GPU) was halted after 256
+     * polls, losing its work and hanging the frame. */
+    { static SPU_THREAD_LOCAL uint32_t s_last_ea, s_last_lsa, s_rep;
+      static int64_t s_limit = -1;
+      if (s_limit < 0) { const char* e = getenv("SPU_DMA_REPEAT_LIMIT");
+                         s_limit = e ? (int64_t)strtoul(e, 0, 0) : 256; }
+      if (s_limit > 0 && (uint32_t)ea == s_last_ea && lsa == s_last_lsa) {
           if (++s_rep >= s_limit) {
               s_rep = 0;   /* re-arm: the chain may run this job again */
               extern void spu_halt(spu_context*);
               fprintf(stderr, "[spu-dma] img=%d pc=0x%05X: %u identical "
                       "transfers to ea=0x%08X -- halting the SPU\n",
-                      spu->image_id, (uint32_t)spu->pc & SPU_LS_MASK, s_limit,
+                      spu->image_id, (uint32_t)spu->pc & SPU_LS_MASK, (unsigned)s_limit,
                       (uint32_t)ea);
               fflush(stderr);
               spu_halt(spu);
@@ -1420,9 +1565,15 @@ static inline int mfc_submit(mfc_engine* mfc, spu_context* spu, uint32_t cmd)
                     cmd, lsa, (unsigned long long)ea, size, tag);
         } else if (_pn == 96)
             fprintf(stderr, "[spurs-pm] DMA trace suppressed from here\n");
-        _pn++;
+        if (_pn <= 96) _pn++;   /* GOWA: no store per PM transfer once past the cap */
     }
 
+    /* GOWA_JOBDMA (21/10, port/gowa_offline.cpp): map of a job's inputs/outputs */
+    { extern int g_gowa_jobdma_on;
+      if (__builtin_expect(g_gowa_jobdma_on != 0, 0)) {
+          extern void gowa_jobdma_note(void*, uint32_t, uint32_t, uint64_t, uint32_t, uint32_t);
+          gowa_jobdma_note(spu, cmd, lsa, ea, size, tag);
+      } }
     /* Execute the transfer.
      * List commands (GETL/PUTL...): per CBEA the LIST's local-store address is
      * carried in MFC_EAL (the PM writes EAL=list, LSA=dest) and each element
@@ -1598,6 +1749,10 @@ static inline void mfc_channel_write(mfc_engine* mfc, spu_context* spu,
     case MFC_WrListStallAck:
         /* Acknowledge a stalled list element's tag group: resume the parked
          * list from the element after the stall point (may stall again). */
+        { extern FILE* gowa_pmtrace_file(spu_context*);
+          FILE* tf = gowa_pmtrace_file(spu);
+          if (tf) { fprintf(tf, "STALLACK pc=0x%05X tag=%u stall_mask=0x%X\n",
+                            (unsigned)(spu->pc & 0x3FFFF), value, spu->list_stall_mask); fflush(tf); } }
         mfc_list_stall_ack(mfc, spu, value);
         break;
     default:
@@ -1619,6 +1774,9 @@ static inline uint32_t mfc_channel_read(mfc_engine* mfc, spu_context* spu,
          * handler's IhcLoop then drains every set bit, acking each via ch26. */
         uint32_t m = spu->list_stall_stat;
         spu->list_stall_stat = 0;
+        { extern FILE* gowa_pmtrace_file(spu_context*);
+          FILE* tf = gowa_pmtrace_file(spu);
+          if (tf) { fprintf(tf, "RDSTALL pc=0x%05X -> 0x%X\n", (unsigned)(spu->pc & 0x3FFFF), m); fflush(tf); } }
         return m;
     }
     case MFC_RdAtomicStat:
