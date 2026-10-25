@@ -101,11 +101,53 @@ static volatile int s_flip_pending = 0;
  * derive it from the observed per-frame volume if a title outgrows it. */
 #define GCM_FLIP_WRAP_BYTES 0x40000u
 
+/* GOWA_FLIP_HZ=<n> (default 60; 0 = off): at most n presented flips a
+ * second. God of War Ascension flips in HSYNC mode (SetFlipMode(2)) and does
+ * not pace itself: with this host's RSX its menus ran at 100-230 FPS, and the
+ * menu interface -- produced at its own rate -- was missing from ~half the
+ * presented frames (the menu text blinked on screen). A flip that comes early
+ * is held: the walker does not drain past it (cellGcm_rsx_process_fifo), so
+ * the game waits as it would for a vblank, and the present thread wakes at
+ * the due time (cellGcm_flip_hold_us). */
+static volatile int s_flip_held;
+static LARGE_INTEGER s_flip_qpf, s_flip_last;
+static double gcm_flip_hz(void)
+{
+    static double hz = -1.0;
+    if (hz < 0.0) {
+        const char* e = getenv("GOWA_FLIP_HZ");
+        hz = e ? atof(e) : 60.0;
+        QueryPerformanceFrequency(&s_flip_qpf);
+    }
+    return hz;
+}
+int cellGcm_flip_hold_us(void)
+{
+    if (!s_flip_pending || !s_flip_held) return -1;
+    const double hz = gcm_flip_hz();
+    if (hz <= 0.0) return -1;
+    LARGE_INTEGER now; QueryPerformanceCounter(&now);
+    const LONGLONG due = s_flip_last.QuadPart + (LONGLONG)((double)s_flip_qpf.QuadPart / hz);
+    return now.QuadPart >= due ? 0 : (int)((due - now.QuadPart) * 1000000 / s_flip_qpf.QuadPart);
+}
 int cellGcm_take_flip_pending(void)
 {
-    int v = s_flip_pending;
+    if (!s_flip_pending) return 0;
+    const double hz = gcm_flip_hz();
+    if (hz > 0.0) {
+        LARGE_INTEGER now; QueryPerformanceCounter(&now);
+        const LONGLONG per = (LONGLONG)((double)s_flip_qpf.QuadPart / hz);
+        if (s_flip_last.QuadPart && now.QuadPart - s_flip_last.QuadPart < per) {
+            s_flip_held = 1;
+            return 0;
+        }
+        /* keep the cadence: advance by one period unless far behind */
+        s_flip_last.QuadPart = (s_flip_last.QuadPart && now.QuadPart - s_flip_last.QuadPart < 2 * per)
+                             ? s_flip_last.QuadPart + per : now.QuadPart;
+    }
+    s_flip_held = 0;
     s_flip_pending = 0;
-    return v;
+    return 1;
 }
 
 /* The flip now names this buffer. The shared draw engine presents on the
@@ -340,6 +382,21 @@ static int s_gcm_syscall_mode = 0;
  * Internal helpers
  * -----------------------------------------------------------------------*/
 
+/* Keep the guest-visible copy of the offset tables (cellGcmGetOffsetTable)
+ * in step with every map/unmap. It used to be written only when the title
+ * called GetOffsetTable, so a title that fetches the table once at init and
+ * maps more memory later -- God of War Ascension: cellGcmMapMainMemory of
+ * 80 MB after init, then cellGcmAddressToOffset done INLINE through the table
+ * -- read 0xFFFF for the new pages, computed offset -1 and waited forever for
+ * the FIFO get pointer to reach it. */
+static int s_offset_tables_published = 0;
+static void gcm_publish_offset_entry(u32 ea_page, u32 io_page)
+{
+    if (!s_offset_tables_published || !vm_base) return;   /* full copy happens on first GetOffsetTable */
+    if (ea_page < 4096u) vm_write16(GCM_OFFSET_TABLE_IO_ADDR + ea_page * 2, s_io_address_table[ea_page]);
+    if (io_page < 4096u) vm_write16(GCM_OFFSET_TABLE_EA_ADDR + io_page * 2, s_ea_address_table[io_page]);
+}
+
 /* Populate the offset table entries for an IO mapping */
 static void populate_offset_table(u32 ea, u32 io, u32 size)
 {
@@ -360,6 +417,7 @@ static void populate_offset_table(u32 ea, u32 io, u32 size)
     for (u32 i = 0; i < pages && (ea_page + i) < 65536 && (io_page + i) < 65536; i++) {
         s_io_address_table[ea_page + i] = (u16)(io_page + i);
         s_ea_address_table[io_page + i] = (u16)(ea_page + i);
+        gcm_publish_offset_entry(ea_page + i, io_page + i);
     }
 }
 
@@ -373,6 +431,7 @@ static void clear_offset_table(u32 ea, u32 io, u32 size)
     for (u32 i = 0; i < pages && (ea_page + i) < 65536 && (io_page + i) < 65536; i++) {
         s_io_address_table[ea_page + i] = 0xFFFF;
         s_ea_address_table[io_page + i] = 0xFFFF;
+        gcm_publish_offset_entry(ea_page + i, io_page + i);
     }
 }
 
@@ -450,6 +509,11 @@ s32 cellGcmInit(u32 cmdSize, u32 ioSize, u32 ioAddress)
      */
     s_config.localAddress    = 0xC0000000;  /* typical RSX local mem base */
     s_config.localSize       = 256 * 1024 * 1024;  /* 256 MB */
+    /* PS3_GCM_LOCAL_SIZE=<hex>: the local memory size cellGcmGetConfiguration
+     * reports. A retail console reports 0x0F900000 (249 MB: the top is the
+     * system's), as RPCS3 does; 256 MB stays the default for the other ports. */
+    { const char* e = getenv("PS3_GCM_LOCAL_SIZE");
+      if (e && *e) s_config.localSize = (u32)strtoul(e, NULL, 16); }
     s_config.ioAddress       = ioAddress;
     s_config.ioSize          = ioSize;
     s_config.memoryFrequency = 650000000;   /* 650 MHz */
@@ -505,7 +569,9 @@ s32 cellGcmInit(u32 cmdSize, u32 ioSize, u32 ioAddress)
       void gcm_note_spu_put(u32 ea, u32 size);       /* defined with the walker */
       void gcm_forget_spu_blocks(void);
       gcm_forget_spu_blocks();
-      g_spu_put_hook = gcm_note_spu_put; }
+      /* GOWA_SPU_PUT_HOOK=0: off (a title that never resyncs pays it on every PUT) */
+      { const char* e = getenv("GOWA_SPU_PUT_HOOK");
+        g_spu_put_hook = (e && *e == '0') ? NULL : gcm_note_spu_put; } }
 
     s_gcm_initialized = 1;
     return CELL_OK;
@@ -726,6 +792,19 @@ void ppu_gcm_pump(void)
                if ((calls % 20000) == 0)
                    fprintf(stderr, "[gcm-pump] calls=%u vblank=%u flip=%u vcount=%u%c",
                            calls, nv, nf, s_vblank_count, 10); } }
+    /* GOWA_GCM_USER_FIRST (default on): a user command comes out of the FIFO
+     * and is older than any vblank pending with it, so deliver it first. God
+     * of War Ascension's vblank handler waits for the GPU, and with the user
+     * handler queued behind it the frame-buffer release it performs never ran
+     * -- the main loop waited on it forever. GOWA_GCM_USER_FIRST=0 restores
+     * the old vblank -> flip -> user order. */
+    { static int uf = -1; if (uf < 0) { const char* e = getenv("GOWA_GCM_USER_FIRST"); uf = !(e && e[0] == '0'); }
+      if (uf && user) {
+          u32 cmd = (u32)user;
+          if (s_user_handler_opd && g_ps3_guest_caller)
+              g_ps3_guest_caller(s_user_handler_opd, (uint64_t)cmd, 0, 0, 0, 0, 0, 0, 0);
+          user = 0;
+      } }
     if ((p & 1) && s_vblank_handler_opd && g_ps3_guest_caller) {
         ydkj_restore_handler_opd(s_vblank_handler_opd, s_vblank_handler_code);
         g_ps3_guest_caller(s_vblank_handler_opd, (uint64_t)s_vblank_count,
@@ -785,6 +864,19 @@ static u32 gcm_io2ea(u32 io)
     return ((u32)ea_page << 20) | (io & 0xFFFFFu);
 }
 
+/* GOWA (24/10): a FIFO word read straight from guest memory. vm_read32 is the PPU
+ * loader's checked read (bounds, read watches, raw-SPU registers, the reference-poll
+ * hook, debug hooks), out of line -- the walker called it 2-4 times per command word,
+ * ~600 thousand words a frame in chapter 16. An IO-mapped command word (the EA comes
+ * from gcm_io2ea) needs none of that. */
+static inline u32 gcm_fifo_rd32(u32 ea)
+{
+    extern u8* vm_base;
+    u32 v;
+    memcpy(&v, vm_base + ea, 4);
+    return __builtin_bswap32(v);
+}
+
 /* RSX get pointer (IO offset) + one-deep CALL return slot. The FIFO-wrap
  * recycle path teleports these when it resets a ring without a JUMP command. */
 /* Milliseconds on a monotonic clock, for the runtime's own timeouts and rate
@@ -805,10 +897,147 @@ static u32 s_sema_offset = 0;   /* NV406E semaphore offset (label window) */
 /* Backlog past which the drain stops honouring one-flip-per-tick and
  * catches up instead. Sized well above a frame's command list so a
  * title that keeps up never sees this path. */
-#define GCM_FIFO_CATCHUP_BYTES 0x10000u
+/* GOWA (21/10): GCM_FIFO_CATCHUP_KB=<KB> overrides it (default 64). A God of War Ascension
+ * frame in chapter 16 is far above 64 KB of commands (~900 draws), so the walker lived in
+ * catch-up, drained past flips and the frames in between were never presented: ~25 of
+ * 40 a second reached the screen. Flips passed in catch-up are counted
+ * (cellGcm_flip_catchup_count, GOWA_PRESENT_LOG). */
+static u32 gcm_fifo_catchup_bytes(void)
+{
+    static u32 b = 0;
+    if (!b) { const char* e = getenv("GCM_FIFO_CATCHUP_KB"); b = (e && atoi(e) > 0) ? (u32)atoi(e) * 1024u : 0x10000u; }
+    return b;
+}
+#define GCM_FIFO_CATCHUP_BYTES gcm_fifo_catchup_bytes()
+static volatile long s_flip_catchup;
+long cellGcm_flip_catchup_count(void) { return s_flip_catchup; }
 /* How long a self-JUMP park may stand with `put` somewhere else before the
  * drain gives up on it being patched and follows `put` instead. */
 #define GCM_PARK_GRACE_MS 50ull
+/* GCM_PARK_GRACE_MS=<ms> overrides it (God of War Ascension leaves its park
+ * standing with put in another segment for longer than 50 ms). */
+static unsigned long long gcm_park_grace_ms(void)
+{
+    static long long v = -1;
+    if (v < 0) { const char* e = getenv("GCM_PARK_GRACE_MS"); v = e ? atoll(e) : (long long)GCM_PARK_GRACE_MS; }
+    return (unsigned long long)v;
+}
+/* GOWA_REPORT_PACE_MS=<ms> (0 = off): minimum time between two main-memory
+ * GET_REPORT writes. The walker executes a whole frame's commands at once, so
+ * every report of a frame lands in the same instant; on the RSX they are
+ * spread over the frame by the rendering between them. God of War Ascension's
+ * WWS job list waits on those reports to signal its SPURS tasks, one round per
+ * report -- all rounds arriving together coalesce in the tasks' signal bits
+ * and the frame's dependency counter never reaches zero. */
+/* Pace in MICROseconds on a high-resolution clock: ps3_ms_now() is
+ * GetTickCount64, whose ~15.6 ms granularity turned every "1 ms" pace into a
+ * full tick (God of War's menu: ~50 reports per frame -> ~1 fps).
+ * GOWA_REPORT_PACE_US overrides GOWA_REPORT_PACE_MS. */
+static unsigned long long gcm_report_pace_us(void)
+{
+    static long long v = -1;
+    if (v < 0) {
+        const char* e = getenv("GOWA_REPORT_PACE_US");
+        if (e) v = atoll(e);
+        else { e = getenv("GOWA_REPORT_PACE_MS"); v = e ? atoll(e) * 1000 : 0; }
+    }
+    return (unsigned long long)v;
+}
+static unsigned long long gcm_us_now(void)
+{
+#ifdef _WIN32
+    static LARGE_INTEGER f; LARGE_INTEGER c;
+    if (!f.QuadPart) QueryPerformanceFrequency(&f);
+    QueryPerformanceCounter(&c);
+    return (unsigned long long)((c.QuadPart / f.QuadPart) * 1000000ull + ((c.QuadPart % f.QuadPart) * 1000000ull) / f.QuadPart);
+#else
+    struct timespec ts; clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (unsigned long long)ts.tv_sec * 1000000ull + (unsigned long long)ts.tv_nsec / 1000ull;
+#endif
+}
+static unsigned long long s_report_pace_until;
+static int s_report_pace_hit;
+/* GOWA_REPORT_PACE_RANGE=<lo>:<hi> limits the PACE to that report range:
+ * God of War's menu writes dozens of other main-memory reports per frame
+ * (queries/timers) and pacing all of them cost ~0.5 s per frame. */
+static int gcm_report_in_pace_range(u32 off)
+{
+    static int init; static u32 lo, hi;
+    if (!init) { init = 1; const char* e = getenv("GOWA_REPORT_PACE_RANGE");
+        if (e && *e) { char* q = NULL; lo = (u32)strtoul(e, &q, 16); if (q && *q == ':') hi = (u32)strtoul(q + 1, NULL, 16); } }
+    return !hi || (off >= lo && off < hi);
+}
+/* For the present thread: a report pace is pending -> wait ~1 ms, not 4. */
+static int s_report_hold_active;
+int cellGcm_report_pace_pending(void) { return s_report_pace_until != 0 || s_report_hold_active; }
+/* GOWA_REPORT_HOLD=<ea>:<mask>[:<max_us>] (hex, hex, decimal): keep a
+ * main-memory GET_REPORT in the FIFO while (u32 at ea) & mask != 0, for at
+ * most max_us (default 50000). God of War Ascension: ea = the taskset's
+ * `signalled` word -- each report releases a WWS job that signals the taskset
+ * tasks again, and a signal sent while the previous one is still pending is
+ * one bit, so it is lost and the frame's dependency never completes. On the
+ * RSX the rendering between two reports gives the tasks that time; holding
+ * the report until the bits are consumed reproduces exactly that ordering. */
+/* Handshake (GOWA_REPORT_HOLD_RANGE=<lo>:<hi>, report-area offsets, hex): a
+ * report in that range is released only after the signal round released by
+ * the PREVIOUS one has landed (g_gowa_sig_rounds advanced, counted at the
+ * PUTLLC in spu_channels.c) and been consumed (signalled bits clear). Without
+ * the first half, two reports released back to back while the bits are still
+ * clear let two WWS jobs signal in a row -- the second round is lost. */
+extern volatile long g_gowa_sig_rounds;
+static int gcm_report_hold(u32 report_off)
+{
+    static int init; static u32 ea, mask, lo, hi; static unsigned long long max_us, since;
+    static long rounds_at_release; static int expect_round;
+    if (!init) {
+        init = 1;
+        const char* e = getenv("GOWA_REPORT_HOLD");
+        if (e && *e) {
+            char* q = NULL;
+            ea = (u32)strtoul(e, &q, 16);
+            if (q && *q == ':') mask = (u32)strtoul(q + 1, &q, 16);
+            if (q && *q == ':') max_us = strtoull(q + 1, NULL, 10);
+        }
+        if (!max_us) max_us = 50000;
+        e = getenv("GOWA_REPORT_HOLD_RANGE");
+        if (e && *e) { char* q = NULL; lo = (u32)strtoul(e, &q, 16); if (q && *q == ':') hi = (u32)strtoul(q + 1, NULL, 16); }
+    }
+    /* GOWA_REPORT_GATE=<ea>,<ea>,...:<full> (hex; full decimal): hold while
+     * any u16 counter at those EAs is part-way down (0 < v < full) -- the
+     * previous round of dependency work has not finished. God of War
+     * Ascension: 0xA03204/8/C (full 6), one per frame in flight; a report
+     * released while the tasks are still on the previous frame makes them
+     * skip a frame's counter (it never reaches 0: the 4th-frame hang). */
+    static int g_init; static u32 g_ea[8]; static int g_n; static u32 g_full;
+    if (!g_init) {
+        g_init = 1;
+        const char* e = getenv("GOWA_REPORT_GATE");
+        if (e && *e) {
+            char buf[160]; strncpy(buf, e, sizeof buf - 1); buf[sizeof buf - 1] = 0;
+            char* c = strchr(buf, ':'); g_full = c ? (u32)strtoul(c + 1, NULL, 10) : 6; if (c) *c = 0;
+            for (char* t = strtok(buf, ","); t && g_n < 8; t = strtok(NULL, ",")) g_ea[g_n++] = (u32)strtoul(t, NULL, 16);
+        }
+        if (g_n && !getenv("GOWA_REPORT_HOLD")) { const char* m = getenv("GOWA_REPORT_GATE_MAX_US"); max_us = m ? strtoull(m, NULL, 10) : 1000000ull; }
+    }
+    if (hi && (report_off < lo || report_off >= hi)) return 0;
+    int gate = 0;
+    for (int k = 0; k < g_n; k++) { const u32 v = vm_read32(g_ea[k]) >> 16; if (v > 0 && v < g_full) { gate = 1; break; } }
+    if (!g_n && (!ea || !mask)) return 0;
+    const long rounds = __atomic_load_n(&g_gowa_sig_rounds, __ATOMIC_ACQUIRE);
+    const int bits = (ea && mask) ? (vm_read32(ea) & mask) != 0 : 0;
+    const int round_done = !(ea && mask) || !expect_round || rounds != rounds_at_release;
+    int hold = gate || bits || !round_done;
+    if (hold) {
+        const unsigned long long now = gcm_us_now();
+        if (!since) since = now;
+        if (now - since < max_us) { s_report_hold_active = 1; return 1; }
+        { static int tn = 0; if (tn++ < 40) fprintf(stderr, "[report-hold] timeout off=0x%X gate=%d bits=%d round_done=%d rounds=%ld t=%llums%c", report_off, gate, bits, round_done, rounds, (unsigned long long)ps3_ms_now(), 10); }
+    }
+    /* release this report: the next one in range waits for its round */
+    since = 0; s_report_hold_active = 0;
+    rounds_at_release = rounds; expect_round = hi ? 1 : 0;
+    return 0;
+}
 /* How close `current` must get to `end` before the runtime will recycle a ring
  * on the title's behalf. One gcmReserve is 8 bytes; a page of slack keeps a
  * title that is merely near the end from being touched. */
@@ -818,7 +1047,28 @@ static u32 s_sema_offset = 0;   /* NV406E semaphore offset (label window) */
  * this is the amount of already-consumed head room it gets. */
 #define GCM_RECYCLE_MARGIN 0x20000u
 static u32 gcm_ea2io(u32 ea);   /* defined with the wrap callback below */
+/* GOWA: deferred flips (see _cellGcmSetFlipCommand): the IO offset of the
+ * title's ctx->current when it asked for the flip, and the buffer. The walker
+ * performs the flip when it reaches that offset -- what the in-FIFO marker
+ * does -- instead of the immediate flip, which showed the buffer before the
+ * rest of its frame (the menu interface) had been drawn. */
+#define GCM_DEFFLIP_Q 8
+static u32 s_defflip_io[GCM_DEFFLIP_Q], s_defflip_buf[GCM_DEFFLIP_Q];
+static volatile u32 s_defflip_head, s_defflip_tail;
 static u32 s_fifo_getoff  = 0;
+/* GOWA_TL (22/10, linha do tempo): onde está o walker do FIFO, quantas palavras de flip ele
+ * já decodificou e se está estacionado num self-JUMP (esperando o EDGE escrever o próximo
+ * trecho). Lido sem trava pelo amostrador; só diagnóstico. */
+static volatile u32 s_tl_flips;
+u32 gowa_tl_rsx(u32* getoff, u32* flips)
+{
+    const u32 g = s_fifo_getoff;
+    *getoff = g; *flips = s_tl_flips;
+    const u32 ea = gcm_io2ea(g);
+    if (!ea) return 0;
+    const u32 w = vm_read32(ea);
+    return (w & 0xE0000003u) == 0x20000000u && (w & 0x1FFFFFFCu) == g;
+}
 static u32 s_last_ring_off = 0;   /* last offset the walker actually consumed */
 static u32 s_fifo_calloff = 0;
 
@@ -1037,6 +1287,63 @@ static void nv3089_blit(void)
     u32 src = cellGcmResolveLocated(src_local, s_nv3089.in_off);
     u32 dst = cellGcmResolveLocated(dst_local, s_gcm2d.dst_offset);
     u32 u0 = s_nv3089.in_uv & 0xFFFF, v0 = s_nv3089.in_uv >> 16;   /* 12.4 start */
+    /* GOWA: SET_CONTEXT_SURFACE (0x0198) names the destination object. With
+     * the swizzled-surface handle (libgcm CELL_GCM_CONTEXT_SWIZZLE2D) the blit
+     * writes into the NV309E texture, swizzled, for ANY rectangle -- the path
+     * above only took the whole-texture, format-3 case, and every other blit
+     * into a swizzled texture went linearly to the NV3062 destination, i.e.
+     * wherever the last linear transfer pointed. In God of War Ascension's
+     * gameplay that was guest 0x10000+: texture data over the executable (the
+     * OPD at 0x833840 -> NpService jumps through garbage) while the texture it
+     * was meant for stayed empty (colour noise). GOWA_NV3089_SWZ=0 disables. */
+    { static int swz_on = -1;
+      if (swz_on < 0) { const char* e = getenv("GOWA_NV3089_SWZ"); swz_on = !(e && e[0] == '0'); }
+      if (swz_on && s_nv3089.dst_surf == 0x31337A73u && s_nv309e.active && s_nv309e.offset) {
+        const u32 l2w = (s_nv309e.fmt >> 16) & 0xFF, l2h = (s_nv309e.fmt >> 24) & 0xFF;
+        const u32 tw = 1u << l2w, th = 1u << l2h;
+        const u32 dfmt = s_nv309e.fmt & 0xFFFF;
+        const u32 bpp2 = (dfmt == 4u /* R5G6B5 */) ? 2u : (dfmt == 1u /* Y8 */) ? 1u : 4u;
+        const u32 sbpp2 = (f == 7) ? 2u : (f == 8) ? 1u : 4u;
+        const u32 dst2 = cellGcmResolveLocated(1, s_nv309e.offset);
+        const u32 cx0s = s_nv3089.clip_pt & 0xFFFF, cy0s = s_nv3089.clip_pt >> 16;
+        const u32 cx1s = (s_nv3089.clip_sz & 0xFFFF) ? cx0s + (s_nv3089.clip_sz & 0xFFFF) : 0xFFFFFFFFu;
+        const u32 cy1s = (s_nv3089.clip_sz >> 16)    ? cy0s + (s_nv3089.clip_sz >> 16)    : 0xFFFFFFFFu;
+        if (bpp2 == sbpp2) {
+            for (u32 y = 0; y < out_h; y++) {
+                const u32 dy = out_y + y;
+                if (dy >= th || dy < cy0s || dy >= cy1s) continue;
+                const u32 sy = (u32)((((u64)v0 << 8) + (u64)y * s_nv3089.dt_dy) >> 20);
+                for (u32 x = 0; x < out_w; x++) {
+                    const u32 dx = out_x + x;
+                    if (dx >= tw || dx < cx0s || dx >= cx1s) continue;
+                    const u32 sx = (u32)((((u64)u0 << 8) + (u64)x * s_nv3089.ds_dx) >> 20);
+                    const u32 s2 = src + sy * in_pitch + sx * bpp2;
+                    const u32 d2 = dst2 + nv309e_swz(dx, dy, l2w, l2h) * bpp2;
+                    if (bpp2 == 4)      vm_write32(d2, vm_read32(s2));
+                    else if (bpp2 == 2) vm_write16(d2, vm_read16(s2));
+                    else                vm_write8(d2, vm_read8(s2));
+                }
+            }
+        }
+        { static int _n = 0; if (_n++ < 8)
+            printf("[NV3089] swizzled %ux%u at %u,%u into %ux%u NV309E dst=0x%08X fmt=0x%X/0x%X%s%c",
+                   out_w, out_h, out_x, out_y, tw, th, dst2, f, dfmt,
+                   bpp2 == sbpp2 ? "" : " (formatos diferentes: pulado)", 10); }
+        return;
+      } }
+    /* GOWA: a linear destination inside the executable image is a blit aimed
+     * at stale NV3062 state -- never write it (gowa_image_protected). */
+    { extern int gowa_image_protected(uint32_t ea, uint64_t n);
+      const u64 span = (u64)(out_y + out_h) * dst_pitch;
+      if (gowa_image_protected(dst, span)) {
+          static int _n = 0; if (_n++ < 16)
+              printf("[NV3089] DESCARTADO: destino 0x%08X (+0x%llX) na imagem do executavel -- fmt=0x%X %ux%u at %u,%u "
+                     "dst_surf=0x%08X dst_dma=0x%X dst_off=0x%X pitch=%u src=0x%08X nv309e(active=%d off=0x%X fmt=0x%X)%c",
+                     dst, (unsigned long long)span, f, out_w, out_h, out_x, out_y, s_nv3089.dst_surf,
+                     s_gcm2d.dst_dma, s_gcm2d.dst_offset, dst_pitch, src, s_nv309e.active, s_nv309e.offset,
+                     s_nv309e.fmt, 10);
+          return;
+      } }
     /* Clip to SET_CLIP_POINT/SIZE (destination coordinates). A title tiling a
      * resolve in 512x512 blocks relies on it to stop at the surface edge:
      * Tornado Outbreak's bottom band is 512 rows tall with 208 left in the
@@ -1055,6 +1362,28 @@ static void nv3089_blit(void)
              : (s_gcm2d.color_fmt == 1u /* Y8 */)     ? 1u : 4u;
     u32 bpp = (sbpp == dbpp) ? sbpp : 4u;
     if (bpp == 4) nv3089_engine_read(in_pitch, out_w, out_h);
+    /* GOWA: an unscaled copy moves whole rows verbatim (the two byte swaps of
+     * vm_read32/vm_write32 cancel): God of War Ascension copies its 1280x720
+     * frame for the SPU MLAA every frame, and the per-pixel loop cost ~11% of
+     * the RSX thread. GOWA_NV3089_FAST=0 restores the loop. */
+    { static int fast = -1;
+      if (fast < 0) { const char* e = getenv("GOWA_NV3089_FAST"); fast = !(e && *e == '0'); }
+      if (fast && s_nv3089.ds_dx == 0x100000u && s_nv3089.dt_dy == 0x100000u) {
+          extern u8* vm_base;
+          const u32 x0 = out_x > cx0 ? out_x : cx0;
+          const u32 x1 = (out_x + out_w < cx1) ? out_x + out_w : cx1;
+          if (x1 > x0) {
+              const u32 sx0 = (u32)(((u64)u0 << 8) >> 20) + (x0 - out_x);   /* as the loop below */
+              for (u32 y = 0; y < out_h; y++) {
+                  const u32 dy = out_y + y;
+                  if (dy < cy0 || dy >= cy1) continue;
+                  const u32 sy = (u32)(((u64)v0 << 8) >> 20) + y;
+                  memmove(vm_base + dst + dy * dst_pitch + x0 * bpp,
+                          vm_base + src + sy * in_pitch + sx0 * bpp, (size_t)(x1 - x0) * bpp);
+              }
+          }
+          goto nv3089_copied;
+      } }
     for (u32 y = 0; y < out_h; y++) {
         u32 dy = out_y + y;
         if (dy < cy0 || dy >= cy1) continue;
@@ -1072,6 +1401,7 @@ static void nv3089_blit(void)
             else               vm_write8(d, vm_read8(s));
         }
     }
+nv3089_copied:
     if (bpp == 4) {
         const u32 x0 = out_x > cx0 ? out_x : cx0, y0 = out_y > cy0 ? out_y : cy0;
         const u32 x1 = (out_x + out_w < cx1) ? out_x + out_w : cx1;
@@ -1174,7 +1504,11 @@ static void gcm_2d_method(u32 subch, u32 method, u32 data)
     if (subch == 6 || subch == 7) {
         switch (method) {
         case 0x0184: s_nv3089.src_dma   = data; return;
-        case 0x0198: s_nv3089.dst_surf  = data; return;
+        case 0x0198: s_nv3089.dst_surf  = data;
+            { static u32 seen[8]; static int ns = 0; int f2 = 0;
+              for (int i = 0; i < ns; i++) if (seen[i] == data) f2 = 1;
+              if (!f2 && ns < 8) { seen[ns++] = data; printf("[NV3089] SET_CONTEXT_SURFACE 0x%08X (subch %u)%c", data, subch, 10); } }
+            return;
         case 0x0300: s_nv3089.fmt       = data; return;
         case 0x0304: s_nv3089.op        = data; return;
         case 0x0308: s_nv3089.clip_pt   = data; return;
@@ -1288,7 +1622,18 @@ static int s_spu_blk_w = 0;
 /* EA -> IO through the mapping list (range lookup; the by-ea helper is exact). */
 static u32 gcm_ea2io_range(u32 ea, u32* room)
 {
-    for (int i = 0; i < CELL_GCM_MAX_IO_MAPPINGS; i++) {
+    /* GOWA (23/10): only up to the highest active slot -- this runs on every SPU
+     * PUT, and a PUT outside RSX-visible memory scanned all 512 slots (8 KB).
+     * Every activation/removal changes s_io_mapping_count, which re-derives it. */
+    static volatile int s_hw = CELL_GCM_MAX_IO_MAPPINGS, s_hw_count = -1;
+    if (s_hw_count != s_io_mapping_count) {
+        const int cnt = s_io_mapping_count;
+        int hw = 0;
+        for (int i = 0; i < CELL_GCM_MAX_IO_MAPPINGS; i++) if (s_io_mappings[i].active) hw = i + 1;
+        s_hw = hw; s_hw_count = cnt;
+    }
+    const int n = s_hw;
+    for (int i = 0; i < n; i++) {
         IoMapping* m = &s_io_mappings[i];
         if (!m->active || !m->size) continue;
         if (ea >= m->ea && ea < m->ea + m->size) {
@@ -1391,6 +1736,47 @@ static void gcm_fifo_resync_why(const char* why, u32* getoff, u32 put)
     *getoff = land;
 }
 
+static void gcm_jh_dump(const char* why, u32 get, u32 put);
+/* GOWA (24/10): park release check (see the walker loop). Decodes, with no side
+ * effect, the headers of the block that starts at `off` until it ends: a JUMP
+ * (the next park, or the link to the next segment) or a RET; a CALL into mapped
+ * IO is stepped over, since the block goes on after it. 0 = a branch to
+ * unmapped IO on the way -- the words there are not the block's yet. */
+static u32 s_park_at = 0xFFFFFFFFu, s_park_hold_off;
+static int s_settle_need = 1;
+static unsigned long long s_park_hold_since, s_park_n_held, s_park_n_timeout;
+static u32 s_settle_bad_off, s_settle_bad_w;   /* the word the last refusal stopped at */
+/* a plausible branch target for a command stream: mapped, and in the command IO
+ * region of cellGcmInit (MapMainMemory offsets for vertex/texture data start past
+ * it) or in the 1 MB page put points into (the load ring at 0x06200000) -- the
+ * garbage reads branched to 0x0EAEAEAC and 0x127FF580, mapped data (24/10) */
+static int gcm_cmd_target_ok(u32 t, u32 put)
+{
+    return gcm_io2ea(t) && (t < s_config.ioSize || (t >> 20) == (put >> 20));
+}
+static int gcm_park_block_ok(u32 off, u32 put)
+{
+    /* nothing at or past put runs anyway: where the title uses put (its 0x06200000
+     * ring during the load) the words after it are old ones, not a block being written */
+    const u32 lim = (put > off && put - off < 0x10000u) ? put - off : 0x10000u;
+    u32 o = off;
+    for (int n = 0; n < 8192 && o - off < lim; n++) {
+        const u32 ea = gcm_io2ea(o);
+        if (!ea) { s_settle_bad_off = o; s_settle_bad_w = 0xDEADDEADu; return 0; }
+        const u32 w = gcm_fifo_rd32(ea);
+        const u32 type = w >> 29;
+        if ((w & 0xFFFF0000u) == 0xFEAD0000u) { o += 4; continue; }
+        if (type == 1) { if (gcm_cmd_target_ok(w & 0x1FFFFFFCu, put)) return 1; s_settle_bad_off = o; s_settle_bad_w = w; return 0; }
+        if ((w & 3u) == 2u) { if (!gcm_cmd_target_ok(w & 0x1FFFFFFCu, put)) { s_settle_bad_off = o; s_settle_bad_w = w; return 0; } o += 4; continue; }
+        if (w == 0x00020000u) return 1;
+        if (type == 0 || type == 2) {
+            if (w & 3u) { s_settle_bad_off = o; s_settle_bad_w = w; return 0; }   /* a method header has bits 1:0 clear (0x4020007F, 24/10) */
+            o += 4u + ((w >> 18) & 0x7FFu) * 4u; continue;
+        }
+        s_settle_bad_off = o; s_settle_bad_w = w; return 0;   /* types 3-7: the walker skips them as unknown words; not a header */
+    }
+    return 1;
+}
 static void gcm_fifo_dump_around(u32 getoff)
 {
     /* Only ever called on a recovery (bad branch, stuck get), and capped, so
@@ -1412,6 +1798,115 @@ static void gcm_fifo_dump_around(u32 getoff)
         if (!ea) continue;
         fprintf(stderr, "[FIFODUMP] %+3d io=%08X w=%08X%s\n",
                 k, io, vm_read32(ea), k ? "" : "   <-- bad word");
+    }
+    /* GOWA (24/10): GOWA_FIFO_BADDBG=1 -- on a slow machine (i5-10300H) the walker,
+     * ~350 KB behind put, read a stretch whose headers matched the previous frame
+     * and lost sync where the contents diverged: was the title still writing there?
+     * The recent put changes (with get at the time), and the words around get read
+     * again 30 ms later, the ones that changed marked. */
+    { static int bd = -1; if (bd < 0) bd = getenv("GOWA_FIFO_BADDBG") ? 1 : 0;
+      if (bd) {
+          extern void gcm_put_hist_dump(void);
+          gcm_put_hist_dump();
+          gcm_jh_dump("bad branch", getoff, vm_read32(GCM_CONTROL_GUEST_ADDR + 0));
+          { extern void gcm_ctx_note(const char*, u32); gcm_ctx_note("bad branch", getoff); }
+          { extern void gowa_putring_dump(uint32_t, uint32_t); const u32 ea0 = gcm_io2ea(getoff);
+            if (ea0) gowa_putring_dump(ea0 - 0x1000u, ea0 + 0x200u); }
+          u32 w0[96];
+          for (int k = 0; k < 96; k++) { u32 ea = gcm_io2ea(getoff + (u32)((k - 64) * 4)); w0[k] = ea ? vm_read32(ea) : 0xDEADDEADu; }
+          Sleep(30);
+          int changed = 0;
+          for (int k = 0; k < 96; k++) {
+              u32 ea = gcm_io2ea(getoff + (u32)((k - 64) * 4)); u32 w1 = ea ? vm_read32(ea) : 0xDEADDEADu;
+              if (w1 != w0[k]) changed++;
+              fprintf(stderr, "[FIFOBAD] %+4d io=%08X w=%08X%s%s\n", (k - 64) * 4, getoff + (u32)((k - 64) * 4), w1,
+                      w1 != w0[k] ? "  MUDOU" : "", k == 64 ? "   <-- bad word" : "");
+          }
+          fprintf(stderr, "[FIFOBAD] %d palavras mudaram em 30 ms; put agora 0x%08X\n", changed, vm_read32(GCM_CONTROL_GUEST_ADDR + 0));
+      } }
+}
+/* GOWA_FIFO_BADDBG: the last 128 changes of put seen by the walker (ms, put, get) */
+static u32 s_ph_put[128], s_ph_get[128]; static unsigned long long s_ph_ms[128]; static unsigned s_ph_n;
+static void gcm_put_hist_note(u32 put, u32 get)
+{
+    static int on = -1; if (on < 0) on = getenv("GOWA_FIFO_BADDBG") ? 1 : 0;
+    if (!on) return;
+    if (s_ph_n && s_ph_put[(s_ph_n - 1) & 127] == put) return;
+    extern unsigned long long ps3_ms_now(void);
+    s_ph_ms[s_ph_n & 127] = ps3_ms_now(); s_ph_put[s_ph_n & 127] = put; s_ph_get[s_ph_n & 127] = get; s_ph_n++;
+}
+void gcm_put_hist_dump(void)
+{
+    unsigned from = s_ph_n > 128 ? s_ph_n - 128 : 0;
+    for (unsigned i = from; i < s_ph_n; i++)
+        fprintf(stderr, "[FIFOPUT] t=%llums put=%08X get=%08X atraso=%u\n", s_ph_ms[i & 127], s_ph_put[i & 127], s_ph_get[i & 127],
+                s_ph_put[i & 127] - s_ph_get[i & 127]);
+}
+/* GOWA (24/10): the title's command context (gCellGcmCurrentContext -> {begin, end,
+ * current, callback}) at the end of each drain pass, next to where the walker
+ * stopped -- does `current` track the PPU's write head in God of War's 8 MB ring,
+ * so the walker can stop there the way the RSX stops at put? Kept with
+ * GOWA_FIFO_BADDBG, dumped on a bad branch. */
+static unsigned long long s_cx_us[128]; static u32 s_cx_get[128], s_cx_cur[128], s_cx_ctx[128]; static char s_cx_why[128]; static unsigned s_cx_n;
+static u32 gcm_ctx_cur_ea(u32* ctx_out)
+{
+    const u32 cp = s_gcm_ctx_out_ea ? vm_read32(s_gcm_ctx_out_ea) : 0;
+    if (ctx_out) *ctx_out = cp;
+    return cp ? vm_read32(cp + 8) : 0;
+}
+void gcm_ctx_pass_note(u32 get, const char* why)
+{
+    static int on = -1; if (on < 0) on = getenv("GOWA_FIFO_BADDBG") ? 1 : 0;
+    if (!on) return;
+    const unsigned i = s_cx_n++ & 127u;
+    s_cx_us[i] = gcm_us_now(); s_cx_get[i] = get; s_cx_cur[i] = gcm_ctx_cur_ea(&s_cx_ctx[i]); s_cx_why[i] = why ? why[0] : '?';
+}
+/* GOWA (24/10): God of War writes its 8 MB ring through a context of its own, not
+ * gCellGcmCurrentContext (that one stays on the 64 KB default buffer). On a bad
+ * branch, look through committed guest memory for words pointing near the block
+ * the walker broke in -- the writer's {begin, end, current} should be among them. */
+static void gcm_ctx_scan(u32 ea)
+{
+    extern u8* vm_base;
+    if (!vm_base || !ea) return;
+    const u32 lo = (ea & ~0x3FFFu) - 0x8000u, hi = (ea & ~0x3FFFu) + 0xC000u;
+    fprintf(stderr, "[FIFOCTX] palavras da memória do guest entre 0x%08X e 0x%08X:\n", lo, hi);
+    int hits = 0;
+    MEMORY_BASIC_INFORMATION mbi;
+    for (unsigned long long off = 0x10000ull; off < 0x40000000ull && hits < 64; ) {
+        if (!VirtualQuery(vm_base + off, &mbi, sizeof mbi)) break;
+        const unsigned long long fim = (unsigned long long)((u8*)mbi.BaseAddress + mbi.RegionSize - vm_base);
+        if (mbi.State == MEM_COMMIT && !(mbi.Protect & (PAGE_NOACCESS | PAGE_GUARD))) {
+            const u32* p = (const u32*)(vm_base + off);
+            const unsigned long long n = (fim - off) / 4;
+            for (unsigned long long k = 0; k < n && hits < 64; k++) {
+                const u32 w = _byteswap_ulong(p[k]);
+                if (w < lo || w >= hi) continue;
+                const u32 a = (u32)(off + k * 4);
+                hits++;
+                fprintf(stderr, "[FIFOCTX]   0x%08X%s: %08X %08X [%08X] %08X %08X %08X\n", a,
+                        (a >= s_config.ioAddress && a < s_config.ioAddress + s_config.ioSize) ? " (IO)" : "",
+                        vm_read32(a - 8), vm_read32(a - 4), w, vm_read32(a + 4), vm_read32(a + 8), vm_read32(a + 12));
+            }
+        }
+        off = fim;
+    }
+    if (!hits) fprintf(stderr, "[FIFOCTX]   nenhuma\n");
+}
+void gcm_ctx_note(const char* what, u32 getoff)
+{
+    gcm_ctx_scan(gcm_io2ea(getoff));
+    u32 cp = 0; const u32 cur = gcm_ctx_cur_ea(&cp);
+    const u32 ioa = s_config.ioAddress;
+    fprintf(stderr, "[FIFOCTX] %s: get=0x%08X (ea 0x%08X); contexto atual 0x%08X begin=%08X end=%08X current=%08X (io %08X); HLE 0x%08X current=%08X\n",
+            what, getoff, gcm_io2ea(getoff), cp, cp ? vm_read32(cp) : 0, cp ? vm_read32(cp + 4) : 0, cur, cur - ioa,
+            s_gcm_context_ea, s_gcm_context_ea ? vm_read32(s_gcm_context_ea + 8) : 0);
+    const unsigned n = s_cx_n < 128u ? s_cx_n : 128u;
+    const unsigned long long agora = gcm_us_now();
+    for (unsigned k = 0; k < n; k++) {
+        const unsigned i = (s_cx_n - n + k) & 127u;
+        fprintf(stderr, "[FIFOCTX]   -%lluus passe parou em get=%08X (%c) | contexto %08X current io %08X (%+d bytes)\n",
+                agora - s_cx_us[i], s_cx_get[i], s_cx_why[i], s_cx_ctx[i], s_cx_cur[i] - ioa, (int)(s_cx_cur[i] - ioa - s_cx_get[i]));
     }
 }
 
@@ -1496,13 +1991,84 @@ void* cellGcm_fifo_kick_event(void)
  * starved guest still paid the full tick. Waiting here instead costs nothing
  * when no one kicks (the timeout is the old sleep) and drains immediately when
  * someone does. */
+/* GOWA_PUT_KICK (default on; =0 off): a guest store to `put` wakes the present
+ * thread while it sleeps here, so the walker sees new commands at once instead
+ * of up to 4 ms later (the RSX consumes them as they are flushed; reports and
+ * labels that release SPU jobs were landing a whole idle tick late).
+ * ppu_loader.cpp calls the hook for out-of-line stores into the control line,
+ * which ppu_recomp.h keeps out of the inline store path.
+ * GOWA_PUT_KICK_LOG=1 prints the put writes and wake-ups every ~5 s. */
+static volatile LONG s_fifo_sleeping;
+/* GOWA_PARK_POLL_US=<us> (default 200; 0 = off): while the walker stands on a
+ * self-JUMP park, the present thread sleeps that long (high-resolution timer)
+ * instead of the 1/4 ms idle wait. God of War Ascension releases its RSX by
+ * rewriting those parks (put stays at the ring end), ~20 times a second in
+ * the level. 19/10 morning: no change; afternoon (same game, more SET_REFERENCE
+ * waiters -- the main thread waits on ref in func_0039C640, and ref advances
+ * one fence per tick of this loop): 40.3 -> 51.1 FPS at 200 us. */
+volatile int g_gcm_fifo_parked;
+static volatile LONG s_put_writes, s_put_kicks;
+static void gcm_put_hook(uint32_t a)
+{
+    if (a != GCM_CONTROL_GUEST_ADDR) return;
+    InterlockedIncrement(&s_put_writes);
+    if (s_fifo_sleeping && s_gcm_kick_ev) {
+        s_fifo_sleeping = 0;
+        InterlockedIncrement(&s_put_kicks);
+        SetEvent(s_gcm_kick_ev);
+    }
+}
 void cellGcm_fifo_kick_wait(unsigned ms)
 {
-    static int on = -1;
+    /* GOWA (22/10): the walker stops at every flip (one flip per drain, so the present shows
+     * exactly that frame) and the RSX-present loop then slept here up to 4 ms -- the game
+     * never writes put, so nothing kicked it -- with the frame to present AND the next
+     * frame's commands already in the FIFO. GOWA_TL: the RSX thread idle ~3 ms after every
+     * flip (57% of the samples in cellGcm_fifo_kick_wait) while the main thread later waited
+     * on its reference (func_0039C640). A pending flip returns at once. GOWA_FLIP_NOWAIT=0
+     * restores the wait. */
+    { static int nw = -1; if (nw < 0) { const char* e = getenv("GOWA_FLIP_NOWAIT"); nw = !(e && *e == '0'); }
+      if (nw && s_flip_pending) return; }
+    static int on = -1, put_kick = -1, put_log;
     if (on < 0) { const char* e = getenv("GCM_FIFO_KICK"); on = (e && *e == '0') ? 0 : 1; }
+    if (put_kick < 0) {
+        const char* e = getenv("GOWA_PUT_KICK"); put_kick = on && !(e && *e == '0');
+        put_log = getenv("GOWA_PUT_KICK_LOG") ? 1 : 0;
+        if (put_kick) { extern void (*g_gcm_put_hook)(uint32_t a); cellGcm_fifo_kick_event(); g_gcm_put_hook = gcm_put_hook; }
+    }
     HANDLE ev = on ? (HANDLE)cellGcm_fifo_kick_event() : NULL;
-    if (ev) WaitForSingleObject(ev, ms);
-    else    Sleep(ms);
+    static long park_us = -1; static HANDLE park_timer;
+    if (park_us < 0) {
+        const char* e = getenv("GOWA_PARK_POLL_US"); park_us = e ? atol(e) : 200;
+        if (park_us > 0) park_timer = CreateWaitableTimerExW(NULL, NULL, 0x00000002 /* HIGH_RESOLUTION */, TIMER_ALL_ACCESS);
+        if (!park_timer) park_us = 0;
+    }
+    /* GOWA_IDLE_POLL=1: the same short timer for every idle wait, not only on
+     * a standing park (A/B; the game never writes put, so an empty FIFO
+     * only wakes on this timeout) */
+    static int idle_poll = -1;
+    if (idle_poll < 0) { const char* e = getenv("GOWA_IDLE_POLL"); idle_poll = e && *e == '1'; }
+    if (ev && park_us > 0 && (g_gcm_fifo_parked || idle_poll)) {
+        LARGE_INTEGER due; due.QuadPart = -(LONGLONG)park_us * 10;
+        if (SetWaitableTimer(park_timer, &due, 0, NULL, NULL, FALSE)) {
+            HANDLE hs[2] = { ev, park_timer };
+            if (put_kick) s_fifo_sleeping = 1;
+            WaitForMultipleObjects(2, hs, FALSE, ms);
+            s_fifo_sleeping = 0;
+            return;
+        }
+    }
+    if (ev) {
+        if (put_kick) s_fifo_sleeping = 1;
+        WaitForSingleObject(ev, ms);
+        s_fifo_sleeping = 0;
+    } else Sleep(ms);
+    if (put_log) {
+        static ULONGLONG last; const ULONGLONG now = GetTickCount64();
+        if (now - last >= 5000) { last = now;
+            fprintf(stderr, "[put-kick] 5 s: %ld escritas de put, %ld despertares\n",
+                    InterlockedExchange(&s_put_writes, 0), InterlockedExchange(&s_put_kicks, 0)); }
+    }
 }
 
 
@@ -1525,6 +2091,12 @@ void cellGcm_ref_on_poll(void)
     if (!s_freq.QuadPart) QueryPerformanceFrequency(&s_freq);
     LARGE_INTEGER now; QueryPerformanceCounter(&now);
     LONGLONG min_gap = s_freq.QuadPart / 5000;          /* ~200us */
+    /* GOWA_REF_GAP_US=<us>: that pacing instead (God of War Ascension's main
+     * thread waits ref >= target in func_0039C640, a >= wait, so several
+     * queued fences each cost it one gap) */
+    { static long gap_us = -2;
+      if (gap_us == -2) { const char* e = getenv("GOWA_REF_GAP_US"); gap_us = e ? atol(e) : -1; }
+      if (gap_us >= 0) min_gap = s_freq.QuadPart * gap_us / 1000000; }
     int dry = 0;
     if (now.QuadPart - s_last_pub >= min_gap) {
         gcm_ref_publish_one();
@@ -1538,11 +2110,56 @@ void cellGcm_ref_on_poll(void)
 
 void cellGcm_rsx_process_fifo(void)
 {
+    if (s_flip_pending && s_flip_held) return;   /* GOWA_FLIP_HZ: hold at the flip */
     AcquireSRWLockExclusive(&s_gcm_fifo_lock);
     gcm_rsx_process_fifo_unlocked();
     ReleaseSRWLockExclusive(&s_gcm_fifo_lock);
 }
 
+/* GOWA: the walker's last 64 control transfers (JUMP that is not a park, CALL,
+ * RET) with the time, dumped once when a drain first burns its whole budget --
+ * the run-up to the intermittent "circling" stall at the start of play
+ * (19/10-21/10: always put=0x00AF8800, right after the load). */
+#include <intrin.h>
+static u32 s_sema_wait_off = 0xFFFFFFFFu;                 /* GCM_SEMA_ACQUIRE_US */
+static unsigned long long s_sema_n_ok, s_sema_n_timeout;
+/* GOWA (24/10): how long the met ACQUIREs waited -- buckets < 0.25/1/4/16/64/256/1024 ms
+ * and above, printed every 10 s next to the timeouts */
+static unsigned long long s_sema_w_since, s_sema_hist[8], s_sema_hist_t;
+static void gcm_sema_hist_note(unsigned long long now, int timeout)
+{
+    if (!timeout) {
+        const unsigned long long w = now - s_sema_w_since;
+        int b = 0;
+        for (unsigned long long lim = 250; b < 7 && w >= lim; lim *= 4) b++;
+        s_sema_hist[b]++;
+    }
+    if (!s_sema_hist_t) s_sema_hist_t = now;
+    else if (now - s_sema_hist_t >= 10000000ull) {
+        s_sema_hist_t = now;
+        fprintf(stderr, "[sema] esperas cumpridas <0,25/1/4/16/64/256/1024/mais ms: %llu %llu %llu %llu %llu %llu %llu %llu; estouradas %llu\n",
+                s_sema_hist[0], s_sema_hist[1], s_sema_hist[2], s_sema_hist[3], s_sema_hist[4], s_sema_hist[5], s_sema_hist[6],
+                s_sema_hist[7], s_sema_n_timeout);
+    }
+}
+static u32 s_jh_src[64], s_jh_dst[64]; static unsigned long long s_jh_t[64]; static unsigned s_jh_n;
+static void gcm_jh_note(u32 src, u32 dst)
+{
+    const unsigned i = s_jh_n++ & 63u;
+    s_jh_src[i] = src; s_jh_dst[i] = dst;
+    s_jh_t[i] = __rdtsc();
+}
+static void gcm_jh_dump(const char* why, u32 get, u32 put)
+{
+    fprintf(stderr, "[fifo-hist] %s: get=0x%08X put=0x%08X; last control transfers (oldest first):\n", why, get, put);
+    const unsigned long long agora = __rdtsc();   /* 24/10: kc antes de agora, como o [putring] */
+    const unsigned n = s_jh_n < 64u ? s_jh_n : 64u;
+    for (unsigned k = 0; k < n; k++) {
+        const unsigned i = (s_jh_n - n + k) & 63u;
+        fprintf(stderr, "[fifo-hist]   -%llukc %08X -> %08X%s\n", (agora - s_jh_t[i]) / 1000ull, s_jh_src[i], s_jh_dst[i],
+                s_jh_dst[i] == 0xFFFFFFFFu ? " (RET)" : "");
+    }
+}
 static void gcm_rsx_process_fifo_unlocked(void)
 {
     { static unsigned _n = 0; static unsigned long long _t0 = 0;
@@ -1584,12 +2201,16 @@ static void gcm_rsx_process_fifo_unlocked(void)
      * then runs off the end of the previous frame's bytes until it meets a
      * word that is not a command, and parks there forever. */
     atomic_thread_fence(memory_order_acquire);
+    gcm_put_hist_note(put, s_fifo_getoff);   /* GOWA_FIFO_BADDBG */
 
     /* GCM_CTXDBG=1: which context the title is actually driving. Ours is written
      * once at init; if the title repoints gCellGcmCurrentContext at a buffer of
      * its own, every field below moves with it and the FIFO the runtime walks
      * stops being the one the title fills. Reported on change, not per tick. */
-    if (getenv("GCM_CTXDBG") && s_gcm_ctx_out_ea) {
+    /* GOWA: getenv once -- this runs every drain pass (thousands per second) */
+    static int s_ctxdbg = -1, s_draindbg = -1;
+    if (s_ctxdbg < 0) { s_ctxdbg = getenv("GCM_CTXDBG") ? 1 : 0; s_draindbg = getenv("GCM_DRAINDBG") ? 1 : 0; }
+    if (s_ctxdbg && s_gcm_ctx_out_ea) {
         static u32 last_ptr = 0xFFFFFFFFu, last_cur = 0xFFFFFFFFu;
         u32 ptr = vm_read32(s_gcm_ctx_out_ea);
         u32 cur = ptr ? vm_read32(ptr + 0x8) : 0;
@@ -1605,7 +2226,7 @@ static void gcm_rsx_process_fifo_unlocked(void)
     }
 
     u32 start_off = s_fifo_getoff;
-    if (getenv("GCM_DRAINDBG")) {
+    if (s_draindbg) {
         static int n = 0;
         if (n++ % 60 == 0)
             printf("[DRAIN] getoff=%08X put=%08X ref=%08X ctx.current=%08X\n",
@@ -1659,7 +2280,27 @@ static void gcm_rsx_process_fifo_unlocked(void)
      * short of `put` every tick is the signature of a FIFO that can never
      * catch up, and the reason is the whole diagnosis. */
     const char* why = "caught-up";
-    while (s_fifo_getoff != put && budget-- > 0) {
+    /* Report pacing (see gcm_report_pace_us): the GPU stays on the command
+     * after a main-memory GET_REPORT until the pace interval has elapsed. */
+    int paced = 0;
+    if (s_report_pace_until) {
+        extern unsigned long long ps3_ms_now(void);
+        if (gcm_us_now() < s_report_pace_until) { paced = 1; why = "report-pace"; }
+        else s_report_pace_until = 0;
+    }
+    s_settle_need = 1;   /* GOWA (24/10): what this pass runs is decoded to its end first */
+    while (!paced && s_fifo_getoff != put && budget-- > 0) {
+        /* GOWA: a deferred flip whose position is reached: everything the
+         * title wrote before asking for it has been processed */
+        if (s_defflip_head != s_defflip_tail &&
+            s_defflip_io[s_defflip_head % GCM_DEFFLIP_Q] == s_fifo_getoff) {
+            gcm_set_current_display_buffer(s_defflip_buf[s_defflip_head % GCM_DEFFLIP_Q]);
+            s_defflip_head++;
+            s_flip_pending = 1;
+            s_flip_request_count++;
+            why = "deferred-flip";
+            break;   /* one flip per drain, like the marker */
+        }
         u32 ea = gcm_io2ea(s_fifo_getoff);
         if (!ea) {
             /* get is sitting on an IO offset with no mapping -- the title
@@ -1682,7 +2323,7 @@ static void gcm_rsx_process_fifo_unlocked(void)
             why = "no-io-mapping";
             break;
         }
-        u32 w = vm_read32(ea);
+        u32 w = gcm_fifo_rd32(ea);
         /* Only remember offsets BELOW put -- those are positions in the
          * ring the title is writing. A park in another region is where the
          * walker gave up, not how far it got through the ring. */
@@ -1691,6 +2332,47 @@ static void gcm_rsx_process_fifo_unlocked(void)
         s_tr_w[s_tr_i % GCM_TRACE_N] = w;
         s_tr_i++;
         u32 type = w >> 29;
+        /* GOWA (24/10): the park the walker sat on has opened. God of War's PPU
+         * writes the next draw block starting AT the park word, so the park goes
+         * away with the block's first header; with more busy threads than CPUs
+         * the writer can be preempted right there, and the walker ran on into
+         * words still holding the previous lap -- a float read as a JUMP to
+         * unmapped IO, resync, the game waiting forever (the notebook, ~1 run in
+         * 3; the dump taken microseconds later already held the right words).
+         * Decode the block's headers to an end first; a branch to unmapped IO on
+         * the way means it is still being written: stay parked and look again
+         * next pass, for at most GOWA_PARK_SETTLE_MS (default 2000, like the ACQUIRE
+         * bound -- an SPU job on the notebook takes more than 50; 0 = off).
+         * The walker does not have to sit on the park to hit this: arriving just
+         * after the title overwrote it is the same window (two of three cases on
+         * the notebook, always right after the 0x0394 x2 of a draw block -- the
+         * title writes the block in two steps, each ending in a new park). So the
+         * check also runs at the start of every pass and after every JUMP, CALL
+         * and RET (s_settle_need): what follows is decoded to the next park or
+         * branch before any of it runs. */
+        if (s_settle_need || (s_fifo_getoff == s_park_at && !(type == 1 && (w & 0x1FFFFFFCu) == s_fifo_getoff))) {
+            static long long settle_ms = -1;
+            if (settle_ms < 0) { const char* e = getenv("GOWA_PARK_SETTLE_MS"); settle_ms = e ? atoll(e) : 2000; }
+            s_settle_need = 0;
+            if (settle_ms > 0 && !gcm_park_block_ok(s_fifo_getoff, put)) {
+                const unsigned long long now = gcm_us_now();
+                if (!s_park_hold_since || s_park_hold_off != s_fifo_getoff) {
+                    s_park_hold_since = now; s_park_hold_off = s_fifo_getoff; s_park_n_held++;
+                    if (s_park_n_held <= 24)
+                        fprintf(stderr, "[park-settle] retém em 0x%08X: palavra 0x%08X em 0x%08X (+%u)\n", s_fifo_getoff,
+                                s_settle_bad_w, s_settle_bad_off, s_settle_bad_off - s_fifo_getoff);
+                }
+                if (now - s_park_hold_since < (unsigned long long)settle_ms * 1000ull) { s_settle_need = 1; why = "parked"; break; }
+                s_park_n_timeout++;
+                fprintf(stderr, "[park-settle] bloco em 0x%08X não fechou em %lld ms; segue como antes\n", s_fifo_getoff, settle_ms);
+            } else if (s_park_hold_since) {
+                const unsigned long long waited = gcm_us_now() - s_park_hold_since;
+                if (s_park_n_held <= 16 || (s_park_n_held & (s_park_n_held - 1)) == 0)
+                    fprintf(stderr, "[park-settle] #%llu: bloco em 0x%08X fechou depois de %llu us (estouros %llu)\n",
+                            s_park_n_held, s_fifo_getoff, waited, s_park_n_timeout);
+            }
+            s_park_at = 0xFFFFFFFFu; s_park_hold_since = 0;
+        }
 
         if ((w & 0xFFFF0000u) == 0xFEAD0000u) {
             /* lv1 driver flip: statically-linked libgcm cellGcmSetFlip writes
@@ -1700,6 +2382,8 @@ static void gcm_rsx_process_fifo_unlocked(void)
              * on would mix the next frame's head into the batch (wave: every
              * frame split across 4 presents, layout flashing/zooming). */
             extern s32 cellGcmSetFlipCommand(u32 bufferId);
+            { extern void rsx_live_draw_mtrace_note(const char*, u32);
+              rsx_live_draw_mtrace_note("FLIPWORD", w); }
             s_fifo_getoff += 4;
             /* Count the flip WORDS the title actually writes into the FIFO,
              * separately from the presents that result. When a title stops
@@ -1708,7 +2392,7 @@ static void gcm_rsx_process_fifo_unlocked(void)
              * problem, both stopping together is the guest's. */
             { static unsigned long long flips = 0; static int dbg = -1;
               if (dbg < 0) dbg = getenv("GCM_FLIPCOUNT") ? 1 : 0;
-              ++flips;
+              ++flips; s_tl_flips++;
               if (dbg && (flips <= 8ull || (flips % 200ull) == 0))
                   fprintf(stderr, "[flipword] %llu FIFO flip words decoded%c",
                           flips, 10); }
@@ -1733,6 +2417,7 @@ static void gcm_rsx_process_fifo_unlocked(void)
             if (put < s_fifo_getoff ||
                 put - s_fifo_getoff < GCM_FIFO_CATCHUP_BYTES)
                 { why = "flip"; break; }
+            s_flip_catchup++;   /* a frame that will not be presented */
             continue;
         }
 
@@ -1749,7 +2434,29 @@ static void gcm_rsx_process_fifo_unlocked(void)
                * times in one Twisted Metal run, which is the drain burning the
                * CPU the guest needs. Stop this pass instead; the next one
                * re-reads the word, so a patched jump is still followed. */
+              /* GOWA_PARK_LOG=<n>: log up to n park releases (how long the
+               * walker sat on a self-JUMP before the title patched it) and,
+               * once, dump the words around a park that stands > 3 s. */
+              { static int pl = -1; static u32 pk_off = 0xFFFFFFFFu; static unsigned long long pk_since; static int pk_dumped;
+                if (pl < 0) { const char* e = getenv("GOWA_PARK_LOG"); pl = e ? atoi(e) : 0; }
+                if (pl) {
+                    const unsigned long long nu = gcm_us_now();
+                    if (tgt == s_fifo_getoff) {
+                        if (pk_off != s_fifo_getoff) { pk_off = s_fifo_getoff; pk_since = nu; }
+                        else if (!pk_dumped && nu - pk_since > 3000000ull) {
+                            pk_dumped = 1;
+                            fprintf(stderr, "[park] STANDING off=0x%08X ea=0x%08X put=0x%08X for %llums%c", s_fifo_getoff, gcm_io2ea(s_fifo_getoff), put, (nu - pk_since) / 1000, 10);
+                            for (int k = -24; k <= 4; k++) { u32 io = s_fifo_getoff + (u32)(k * 4); u32 ea = gcm_io2ea(io);
+                                fprintf(stderr, "[park]   %+4d io=%08X ea=%08X w=%08X%c", k * 4, io, ea, ea ? vm_read32(ea) : 0xDEADDEADu, 10); }
+                        }
+                    } else if (pk_off == s_fifo_getoff) {
+                        static int n = 0;
+                        if (n++ < pl) fprintf(stderr, "[park] t=%llums off=0x%08X -> 0x%08X waited %lluus%c", (unsigned long long)ps3_ms_now(), pk_off, tgt, nu - pk_since, 10);
+                        pk_off = 0xFFFFFFFFu;
+                    }
+                } }
               if (tgt == s_fifo_getoff) {
+                  s_park_at = s_fifo_getoff;   /* GOWA (24/10): checked when it opens (gcm_park_block_ok) */
                   /* Parked. If the title has meanwhile moved `put` somewhere
                    * else, it has switched to its other segment and left this
                    * park standing -- it only patches a park when it reuses that
@@ -1774,7 +2481,7 @@ static void gcm_rsx_process_fifo_unlocked(void)
                       const unsigned long long now = ps3_ms_now();
                       if (park_off != s_fifo_getoff || park_put != put) {
                           park_off = s_fifo_getoff; park_put = put; park_since = now;
-                      } else if (now - park_since >= GCM_PARK_GRACE_MS) {
+                      } else if (now - park_since >= gcm_park_grace_ms()) {
                           park_off = 0;
                           gcm_fifo_dump_around(s_fifo_getoff);
                           gcm_fifo_resync_why("jump-park", &s_fifo_getoff, put);
@@ -1783,19 +2490,23 @@ static void gcm_rsx_process_fifo_unlocked(void)
                   why = "parked";
                   break;
               }
-              s_fifo_getoff = tgt; }
+              gcm_jh_note(s_fifo_getoff, tgt);
+              s_fifo_getoff = tgt; s_settle_need = 1; }
             continue;
         }
         if ((w & 3) == 2) {                    /* CALL: offset | 2 */
             { u32 tgt = w & 0x1FFFFFFCu;
-              if (!gcm_io2ea(tgt)) { gcm_fifo_bad_branch("CALL", tgt, w); gcm_fifo_resync_why("unmapped-CALL", &s_fifo_getoff, put); break; }
+              if (!gcm_io2ea(tgt)) { gcm_fifo_bad_branch("CALL", tgt, w); gcm_fifo_dump_around(s_fifo_getoff); gcm_fifo_resync_why("unmapped-CALL", &s_fifo_getoff, put); break; }
               s_fifo_calloff = s_fifo_getoff + 4;
-              s_fifo_getoff  = tgt; }
+              gcm_jh_note(s_fifo_getoff | 2u, tgt);
+              s_fifo_getoff  = tgt; s_settle_need = 1; }
             continue;
         }
         if (w == 0x00020000u) {                /* RET */
+            gcm_jh_note(s_fifo_getoff, 0xFFFFFFFFu);
             s_fifo_getoff = s_fifo_calloff;
             s_fifo_calloff = 0;
+            s_settle_need = 1;
             continue;
         }
         if (type == 0 || type == 2) {          /* method (incrementing / NI) */
@@ -1839,12 +2550,28 @@ static void gcm_rsx_process_fifo_unlocked(void)
                     u32 dea = gcm_io2ea(s_fifo_getoff + 4 + i * 4);
                     if (!dea) break;
                     u32 m = (type == 0) ? method + i * 4 : method;
-                    u32 v = vm_read32(dea);
+                    u32 v = gcm_fifo_rd32(dea);
                     u32 la = GCM_LABEL_GUEST_BASE + (s_sema_offset & 0xFFFFu);
-                    { static int sn = 0; if (getenv("GCM_RECDBG") && sn++ < 12)
+                    { static int sn = 0, rd = -1; if (rd < 0) rd = getenv("GCM_RECDBG") ? 1 : 0;
+                      if (rd && sn++ < 12)
                         fprintf(stderr, "[SEMA] m=0x%02X v=0x%08X off=0x%X\n", m, v, s_sema_offset); }
+                    /* GOWA_SEMA_STATS=1: how many ACQUIREs the title issues and how
+                     * many would have blocked on hardware (label != value). */
+                    { static int ss = -1; static unsigned long long n_acq, n_blk;
+                      if (ss < 0) ss = getenv("GOWA_SEMA_STATS") ? 1 : 0;
+                      if (ss && m == 0x68u) {
+                          const u32 cur = vm_read32(la);
+                          n_acq++;
+                          if (cur != v) {
+                              n_blk++;
+                              if (n_blk <= 12) fprintf(stderr, "[sema] ACQUIRE off=0x%X want=0x%08X label=0x%08X at get=0x%08X\n",
+                                                        s_sema_offset, v, cur, s_fifo_getoff);
+                          }
+                          if ((n_acq & (n_acq - 1)) == 0 && n_acq >= 64)
+                              fprintf(stderr, "[sema] %llu ACQUIRE, %llu with label != value\n", n_acq, n_blk);
+                      } }
                     if (m == 0x64u)      s_sema_offset = v;
-                    else if (m == 0x6Cu) vm_write32(la, v);
+                    else if (m == 0x6Cu) { if (rsx_live_draw_enabled()) rsx_live_draw_sync_mainmem(); vm_write32(la, v); }
                     else if (m == 0x68u && vm_read32(la) != v) {
             /* GCM_SEMA_ACQUIRE=1 makes ACQUIRE actually block, which is what
              * the hardware does. Off by default: a title whose label nothing
@@ -1853,16 +2580,87 @@ static void gcm_rsx_process_fifo_unlocked(void)
             static int blk = -1;
             if (blk < 0) { const char* e = getenv("GCM_SEMA_ACQUIRE"); blk = e ? atoi(e) : 0; }
             if (blk) { sem_blocked = 1; break; }
+            /* GOWA: GCM_SEMA_ACQUIRE_US=<us> -- block, but at most that long per
+             * ACQUIRE, then go on as before. God of War's ACQUIREs (labels
+             * 0x510/0x520) wait for the MeshProc tasks, which run after a
+             * GET_REPORT of this same FIFO: blocking for good wedges at the first
+             * one (21/10), so this measures how many are met within the bound.
+             * 24/10: with the report ordering fixes since, none times out (2 s
+             * bound) and the walker no longer reads the segment before MeshProc
+             * writes it -- on by default in the GoW boot (boot_main_gowa.cpp). */
+            { static long long acq_us = -2; static u32 w_off = 0xFFFFFFFFu, w_val; static unsigned long long w_since;
+              if (acq_us == -2) { const char* e = getenv("GCM_SEMA_ACQUIRE_US"); acq_us = e ? atoll(e) : -1; }
+              if (acq_us >= 0) {
+                  const unsigned long long now = gcm_us_now();
+                  if (w_off != s_fifo_getoff || w_val != v) { w_off = s_fifo_getoff; w_val = v; w_since = now; s_sema_w_since = now; }
+                  if (now - w_since < (unsigned long long)acq_us) { sem_blocked = 1; s_sema_wait_off = s_fifo_getoff; break; }
+                  s_sema_n_timeout++; w_off = 0xFFFFFFFFu; s_sema_wait_off = 0xFFFFFFFFu;
+                  if ((s_sema_n_timeout & (s_sema_n_timeout - 1)) == 0)
+                      fprintf(stderr, "[sema] limite: %llu ACQUIRE cumpridos esperando, %llu estouraram %lld us\n", s_sema_n_ok, s_sema_n_timeout, acq_us);
+                  if (s_sema_n_timeout <= 12)
+                      fprintf(stderr, "[sema] estourou: t=%llums get=0x%08X rótulo 0x%X = 0x%08X, quer 0x%08X, report retido %d\n",
+                              (unsigned long long)ps3_ms_now(), s_fifo_getoff, s_sema_offset, vm_read32(la), v, s_report_hold_active);
+                  gcm_sema_hist_note(now, 1);
+              } }
         }
+                    else if (m == 0x68u && s_sema_wait_off == s_fifo_getoff) {
+                        s_sema_wait_off = 0xFFFFFFFFu;   /* the label arrived while the walker waited */
+                        s_sema_n_ok++;
+                        gcm_sema_hist_note(gcm_us_now(), 0);
+                        if ((s_sema_n_ok & (s_sema_n_ok - 1)) == 0)
+                            fprintf(stderr, "[sema] limite: %llu ACQUIRE cumpridos esperando, %llu estouraram\n", s_sema_n_ok, s_sema_n_timeout);
+                    }
                 }
-                if (sem_blocked) break;
+                if (sem_blocked) { why = "parked"; break; }   /* parked: the present thread polls at high resolution */
                 s_fifo_getoff += 4 + count * 4;
                 continue;
             }
+            /* GOWA: report hold (gcm_report_hold) -- leave the GET_REPORT unconsumed. */
+            if (subch == 0 && method == 0x1800u &&
+                (s_report_dma == 0xFEED0001u || s_report_dma == 0xBAD68000u) && gcm_report_hold(gcm_io2ea(s_fifo_getoff + 4) ? (vm_read32(gcm_io2ea(s_fifo_getoff + 4)) & 0xFFFFFFu) : 0u)) {
+                why = "report-hold";
+                break;
+            }
+            /* GOWA (24/10): a packet of plain NV4097 register words -- transform
+             * constants and program words are ~40% of chapter 16's ~60 thousand FIFO
+             * words a frame -- goes to the live engine in one call when none of its
+             * methods has handling here (reference, labels, reports and their DMA: the
+             * method span is checked), no per-word diagnostic is on and the words sit
+             * in one IO page. GOWA_FIFO_RUN=0 keeps word by word. */
+            { static int s_run = -1;
+              if (s_run < 0) {
+                  const char* e = getenv("GOWA_FIFO_RUN");
+                  s_run = !(e && *e == '0') && rsx_live_draw_enabled() && !rsx_draw_engine_enabled() &&
+                          !getenv("GCM_SUBCH7") && !getenv("GCM_OBJDBG") && !getenv("GCM_SUBCH_GATE") &&
+                          !getenv("GCM_VAL_WATCH") && !getenv("GOWA_METHOD_HIST") && !getenv("RSX_LIVE_FEED_DBG") &&
+                          !getenv("GOWA_SLOW_RSX_PCT") && !getenv("GOWA_RSX_OLDSTATE");
+              }
+              if (s_run && subch == 0 && count) {
+                  const u32 m_lo = method, m_hi = type == 0 ? method + (count - 1) * 4 : method;
+                  const u32 io0 = s_fifo_getoff + 4;
+                  #define GCM_RUN_HAS(a, b) (m_lo <= (b) && m_hi >= (a))
+                  if (m_hi < 0x2000u && !GCM_RUN_HAS(0x50u, 0x50u) && !GCM_RUN_HAS(0x1A8u, 0x1A8u) &&
+                      !GCM_RUN_HAS(0x1800u, 0x1800u) && !GCM_RUN_HAS(0x1D6Cu, 0x1D74u) &&
+                      (io0 & 0xFFFFFu) + count * 4u <= 0x100000u) {
+                      extern u8* vm_base;
+                      const u32 dea0 = gcm_io2ea(io0);
+                      if (dea0 && rsx_live_draw_method_run(method, vm_base + dea0, count, type == 2)) {
+                          s_fifo_getoff += 4 + count * 4;
+                          continue;
+                      }
+                  }
+                  #undef GCM_RUN_HAS
+              } }
             for (u32 i = 0; i < count; i++) {
                 u32 dea = gcm_io2ea(s_fifo_getoff + 4 + i * 4);
                 if (!dea) break;
+                const u32 arg = gcm_fifo_rd32(dea);   /* GOWA (24/10): read once */
                 u32 m = (type == 0) ? method + i * 4 : method;
+                /* GOWA: a report or a back-end semaphore is where the CPU or an
+                 * SPU job may read what the GPU wrote to main memory. */
+                if (subch == 0 && (m == 0x1800u || m == 0x1D70u || m == 0x1D74u || m == 0x0050u) &&
+                    rsx_live_draw_enabled())
+                    rsx_live_draw_sync_mainmem();
                 /* GCM_SET_USER_COMMAND is method 0xEB00, which this decode
                  * splits into subchannel 7 / method 0x0B00 -- so it was landing
                  * in the 2D engine path and being dropped as unrecognised. It
@@ -1873,16 +2671,16 @@ static void gcm_rsx_process_fifo_unlocked(void)
                   if (sd < 0) sd = getenv("GCM_SUBCH7") ? 1 : 0;
                   if (sd && subch == 7 && (s7++ < 16))
                       fprintf(stderr, "[subch7] method=0x%04X data=0x%08X\n",
-                              m, vm_read32(dea)); }
+                              m, arg); }
                 if (subch == 7 && m == 0x0B00u) {
                     extern void rsx_raise_user_cmd(u32 arg);
-                    rsx_raise_user_cmd(vm_read32(dea));
+                    rsx_raise_user_cmd(arg);
                     /* A title that registered its handler with the HLE
                      * cellGcmSetUserHandler has no lv2 interrupt thread
                      * reading that event; its handler runs from the pump.
                      * The `continue` skips the 0xEB00 case below, so queue
                      * it for the pump here. */
-                    if (s_user_handler_opd) cellGcmQueueUserCommand(vm_read32(dea));
+                    if (s_user_handler_opd) cellGcmQueueUserCommand(arg);
                     continue;
                 }
                 /* GCM_SUBCH1_3D=1: treat subchannel 1 as the 3D object too.
@@ -1899,7 +2697,7 @@ static void gcm_rsx_process_fifo_unlocked(void)
                   if (od < 0) { const char* e = getenv("GCM_OBJDBG"); od = e ? 1 : 0; }
                   if (od && m == 0) {
                       static unsigned seen[8]; static int have[8];
-                      const unsigned h = vm_read32(dea);
+                      const unsigned h = arg;
                       if (subch < 8 && (!have[subch] || seen[subch] != h)) {
                           have[subch] = 1; seen[subch] = h;
                           printf("[GCM-OBJ] subch=%u SET_OBJECT handle=0x%08X%c",
@@ -1929,7 +2727,7 @@ static void gcm_rsx_process_fifo_unlocked(void)
                   /* GCM_VAL_WATCH=<hex>: every FIFO word carrying that value, any method. */
                   { static u32 vw = 1;
                     if (vw == 1) { const char* e = getenv("GCM_VAL_WATCH"); vw = e ? (u32)strtoul(e, 0, 16) : 0; }
-                    if (vw && vm_read32(dea) == vw) {
+                    if (vw && arg == vw) {
                         static int vn; if (vn++ < 64)
                             printf("[valwatch] subch=%u method=0x%04X = 0x%08X get=0x%X%c", subch, m, vw, s_fifo_getoff, 10);
                     } }
@@ -1937,19 +2735,35 @@ static void gcm_rsx_process_fifo_unlocked(void)
                   if (sg && !subch && (cm3 == 0x210 || cm3 == 0x214 || cm3 == 0x218 || cm3 == 0x288 || cm3 == 0x28C ||
                                        cm3 == 0x1A20)) {
                       if ((poll++ & 255u) == 0) { FILE* g = fopen(sg, "rb"); open_g = g != NULL; if (g) fclose(g); }
-                      if (open_g) printf("[surfreg] 0x%04X = 0x%08X%c", cm3, vm_read32(dea), 10);
+                      if (open_g) printf("[surfreg] 0x%04X = 0x%08X%c", cm3, arg, 10);
                   }
                   if (sg && subch) {
                       if ((poll++ & 255u) == 0) { FILE* g = fopen(sg, "rb"); open_g = g != NULL; if (g) fclose(g); }
-                      if (open_g) printf("[subch] %u 0x%04X = 0x%08X%c", subch, m, vm_read32(dea), 10);
+                      if (open_g) printf("[subch] %u 0x%04X = 0x%08X%c", subch, m, arg, 10);
                   } }
                 /* Mirror the whole method stream into the live NV4097->D3D12
                  * engine (caner / canersaka). Inert unless RSX_LIVE_DRAW is set.
                  * It wants the raw method with its subchannel bits -- it
                  * canonicalises with & 0x1FFC itself. */
+                /* GOWA_METHOD_HIST=1 (22/10): which methods the FIFO words are (each argument
+                 * word counted under its method), top 24 every 2^22 words. Diagnostic. */
+                { static int mh = -1; static unsigned long long mh_n[0x800], mh_tot;
+                  if (mh < 0) mh = getenv("GOWA_METHOD_HIST") ? 1 : 0;
+                  if (mh) {
+                      mh_n[(m & 0x1FFCu) >> 2]++;
+                      if ((++mh_tot & ((1ull << 22) - 1)) == 0) {
+                          printf("[mhist] %llu palavras:", mh_tot);
+                          for (int r = 0; r < 24; r++) {
+                              int b = -1; for (int k = 0; k < 0x800; k++) if (mh_n[k] && (b < 0 || mh_n[k] > mh_n[b])) b = k;
+                              if (b < 0) break;
+                              printf(" %04X:%.1f%%", b << 2, 100.0 * mh_n[b] / (double)(1ull << 22)); mh_n[b] = 0;
+                          }
+                          memset(mh_n, 0, sizeof mh_n); printf("%c", 10); fflush(stdout);
+                      }
+                  } }
                 { static int live = -1;
                   if (live < 0) live = rsx_live_draw_enabled();
-                  if (live) rsx_live_draw_method((subch << 13) | m, vm_read32(dea)); }
+                  if (live) rsx_live_draw_method((subch << 13) | m, arg); }
 
                 /* And into the platform-neutral register-file draw engine,
                  * which is the macOS path under PS3RECOMP_RSX_ENGINE=dispatch.
@@ -1957,7 +2771,7 @@ static void gcm_rsx_process_fifo_unlocked(void)
                  * same reason the live engine does, and masks them itself. */
                 { static int eng = -1;
                   if (eng < 0) eng = rsx_draw_engine_enabled();
-                  if (eng) rsx_draw_engine_method((subch << 13) | m, vm_read32(dea)); }
+                  if (eng) rsx_draw_engine_method((subch << 13) | m, arg); }
 
                 /* RSX_LIVE_FEED_DBG=1: what the FIFO actually carries. Counted
                  * for any run, live engine or not, so the method stream and the
@@ -1981,11 +2795,28 @@ static void gcm_rsx_process_fifo_unlocked(void)
                  * the draw-engine call above does. */
                 { const u32 mfull = (subch << 13) | m;
                 if (mfull == 0xEB00u || mfull == 0xEB04u) {
-                    cellGcmQueueUserCommand(vm_read32(dea));
+                    cellGcmQueueUserCommand(arg);
                 } else if (mfull == 0xE920u || mfull == 0xE924u) {
-                    cellGcmSetFlipCommand(vm_read32(dea) & 7u);
+                    { extern void rsx_live_draw_mtrace_note(const char*, u32);
+                      rsx_live_draw_mtrace_note("FLIPCMD", arg & 7u); }
+                    cellGcmSetFlipCommand(arg & 7u);
                 } else if (subch == 0 || (subch == 1 && !s1_2d)) {
-                    rsx_process_method(&s_state, m, vm_read32(dea));
+                    /* GOWA_SLOW_RSX_PCT=N: sensitivity test, the FIFO walker N%
+                     * slower (spu_drain.c gowa_slow_tick_sel; GOWA_SLOW_FROM) */
+                    { extern int g_gowa_slow_rsx; extern void gowa_slow_tick_sel(int, int);
+                      if (__builtin_expect(g_gowa_slow_rsx != 0, 0)) {
+                          if (g_gowa_slow_rsx < 0) { const char* e = getenv("GOWA_SLOW_RSX_PCT"); g_gowa_slow_rsx = e ? atoi(e) : 0; }
+                          if (g_gowa_slow_rsx > 0) gowa_slow_tick_sel(g_gowa_slow_rsx, 1);
+                      } }
+                    /* GOWA (24/10): with the live engine the old backend is the null one
+                     * and s_state feeds nothing else -- only the reference and the
+                     * back-end labels act outside it (rsx_commands.c); every other method
+                     * walked ~60 compares into a state nobody reads. GOWA_RSX_OLDSTATE=1
+                     * keeps every method. */
+                    { static int s_old = -1;
+                      if (s_old < 0) s_old = (!rsx_live_draw_enabled() || getenv("GOWA_RSX_OLDSTATE")) ? 1 : 0;
+                      if (s_old || m == 0x50u || m - 0x1D6Cu <= 8u)
+                          rsx_process_method(&s_state, m, arg); }
                     /* NV406E_SET_REFERENCE: queue the fence value for PACED
                      * publication (gcm_ref_publish below) instead of letting a
                      * later fence in the same batch overwrite it. */
@@ -1994,9 +2825,9 @@ static void gcm_rsx_process_fifo_unlocked(void)
                      * area. Sample counts are not measured, so a ZPASS query
                      * reports "visible" -- the conservative answer; reading 0
                      * tells the title every queried object is occluded. */
-                    if (m == 0x1A8) s_report_dma = vm_read32(dea);
+                    if (m == 0x1A8) s_report_dma = arg;
                     if (m == 0x1800) {
-                        const u32 v = vm_read32(dea), off = v & 0xFFFFFFu, idx = off / 16u;
+                        const u32 v = arg, off = v & 0xFFFFFFu, idx = off / 16u;
                         const u32 val = (v >> 24) == 1u ? 0xFFFFu : 0u;
                         const u64 ts = gcm_report_timestamp();
                         const int main_mem = s_report_dma == 0xFEED0001u || s_report_dma == 0xBAD68000u;
@@ -2009,6 +2840,11 @@ static void gcm_rsx_process_fifo_unlocked(void)
                                 vm_write32(rea + 4u, (u32)ts);
                                 vm_write32(rea + 8u, val);
                                 vm_write32(rea + 12u, 0u);
+                                if (gcm_report_pace_us() && gcm_report_in_pace_range(off)) {
+                                    extern unsigned long long ps3_ms_now(void);
+                                    s_report_pace_until = gcm_us_now() + gcm_report_pace_us();
+                                    s_report_pace_hit = 1;
+                                }
                             } else { static int un = 0; if (un++ < 4) printf("[GET_REPORT] main-memory offset 0x%X is not IO-mapped%c", off, 10); }
                         } else if (idx < CELL_GCM_MAX_REPORT_COUNT) {
                             s_report_data[idx].timestamp = ts;
@@ -2016,10 +2852,11 @@ static void gcm_rsx_process_fifo_unlocked(void)
                         }
                     }
                 } else
-                    gcm_2d_method(subch, m, vm_read32(dea));
+                    gcm_2d_method(subch, m, arg);
                 }
             }
             s_fifo_getoff += 4 + count * 4;
+            if (s_report_pace_hit) { s_report_pace_hit = 0; why = "report-pace"; break; }
             continue;
         }
         { static int _uw = 0; if (_uw++ < 16 && getenv("RTT_DUMP"))
@@ -2056,6 +2893,7 @@ static void gcm_rsx_process_fifo_unlocked(void)
       if (passes < 0) { const char* e = getenv("GCM_FIFO_CIRCLE_PASSES");
                         passes = e ? atoi(e) : 4; }
       if (passes && budget <= 0 && s_fifo_getoff != put) {
+          { static int nd = 0; if (burned == 0 && nd < 2) { nd++; gcm_jh_dump("budget burned", s_fifo_getoff, put); gcm_fifo_dump_around(s_fifo_getoff); } }
           if (++burned >= passes) {
               static int n = 0;
               if (n++ < 8)
@@ -2068,16 +2906,29 @@ static void gcm_rsx_process_fifo_unlocked(void)
       } else burned = 0; }
 
     { static u32 last = 0xFFFFFFFFu; static int stuck = 0;
-      if (s_fifo_getoff == last && s_fifo_getoff != put) {
+      /* A self-JUMP park is not a stuck walker: the park path above decides
+       * when to stop waiting for its patch. Resyncing here, after 8 passes,
+       * cut that grace short and dropped the segment the title was about to
+       * link in (God of War Ascension's first in-game frames, 0x202FBC40). */
+      int parked_here = 0;
+      { u32 pea = gcm_io2ea(s_fifo_getoff);
+        if (pea) { u32 pw = vm_read32(pea);
+                   parked_here = ((pw & 0xE0000003u) == 0x20000000u) && ((pw & 0x1FFFFFFCu) == s_fifo_getoff); } }
+      if (s_fifo_getoff == last && s_fifo_getoff != put && !parked_here && !paced && !s_report_hold_active &&
+          s_sema_wait_off != s_fifo_getoff &&   /* GOWA: waiting on an ACQUIRE is not stuck */
+          !(s_park_hold_since && s_park_hold_off == s_fifo_getoff)) {   /* nor a block still being written (24/10) */
           if (++stuck >= 8) { gcm_fifo_dump_around(s_fifo_getoff);
                              gcm_fifo_resync_why("stuck-get", &s_fifo_getoff, put); stuck = 0; }
       } else { stuck = 0; last = s_fifo_getoff; } }
 
+    /* GOWA_PARK_POLL_US: the present thread polls a standing park often */
+    { extern volatile int g_gcm_fifo_parked; g_gcm_fifo_parked = !strcmp(why, "parked"); }
+    gcm_ctx_pass_note(s_fifo_getoff, why);
     /* Publish progress: get chases put; ref advances at most ONE queued fence
      * per tick (gcm_ref_push/gcm_ref_publish_one above) so every SET_REFERENCE
      * value stays observable to equality-waiters. The wrap recycle path polls
      * the drained EA. */
-    if (getenv("GCM_DRAINDBG")) {
+    if (s_draindbg) {
         static int n2 = 0;
         if (n2++ % 60 == 0)
             fprintf(stderr, "[DRAINEND] %s: %08X -> %08X (%u bytes), put=%08X\n",
@@ -2323,8 +3174,47 @@ u32 cellGcm_display_buffer_count(void)
     return n;
 }
 
+/* GOWA_FLIP_PACE_HZ=<n> (23/10): the frame limiter on the GAME's side -- the
+ * guest thread that asks for the flip sleeps until its slot, as a title does
+ * waiting for vblank, and the RSX walker never stops. GOWA_FLIP_HZ holds the
+ * walker at an early flip instead, and with the SPUs the limit that stalls the
+ * pipeline: the EDGE jobs wait for the RSX to free their output ring, so the
+ * phase that runs at 72 uncapped averaged 58.5 at 60 (dips to 55), chapter 16
+ * 60.9 -> 59.4. Same cadence rule (advance one period unless far behind).
+ * Sleeps on a high-resolution waitable timer, the last ~300 us spinning. */
+static void gcm_ppu_flip_pace(void)
+{
+    static double hz = -1.0;
+    static LARGE_INTEGER qpf, last;
+    static HANDLE tmr;
+    if (hz < 0.0) {
+        const char* e = getenv("GOWA_FLIP_PACE_HZ");
+        hz = e ? atof(e) : 0.0;
+        QueryPerformanceFrequency(&qpf);
+        if (hz > 0.0) tmr = CreateWaitableTimerExW(NULL, NULL, 0x00000002 /* HIGH_RESOLUTION */, TIMER_ALL_ACCESS);
+    }
+    if (hz <= 0.0) return;
+    const LONGLONG per = (LONGLONG)((double)qpf.QuadPart / hz);
+    LARGE_INTEGER now; QueryPerformanceCounter(&now);
+    if (!last.QuadPart) { last = now; return; }
+    const LONGLONG due = last.QuadPart + per;
+    const LONGLONG spin = qpf.QuadPart * 3 / 10000;   /* 300 us */
+    while (now.QuadPart < due) {
+        const LONGLONG left = due - now.QuadPart;
+        if (left > spin && tmr) {
+            LARGE_INTEGER d; d.QuadPart = -(LONGLONG)((left - spin) * 10000000 / qpf.QuadPart);
+            if (SetWaitableTimer(tmr, &d, 0, NULL, NULL, FALSE)) WaitForSingleObject(tmr, 50);
+        } else {
+            YieldProcessor();
+        }
+        QueryPerformanceCounter(&now);
+    }
+    last.QuadPart = (now.QuadPart - due < per) ? due : now.QuadPart;
+}
+
 static s32 gcm_flip_request(u32 bufferId, int in_fifo)
 {
+    gcm_ppu_flip_pace();
     /* GCM_FLIPCOUNT=1: every flip, with a timestamp. FLIP_DBG caps at 20 lines,
      * which answers "did it ever flip?" and not "is it still flipping, and how
      * fast?" -- the question that matters when a title stops appearing on
@@ -2379,6 +3269,8 @@ static s32 gcm_flip_request(u32 bufferId, int in_fifo)
     /* in_fifo: the flip sits in the command stream as a GCM_FLIP_MARKER, and
      * the drain does this half when it reaches it (see the 0xFEAD case). */
     if (!in_fifo) {
+        { extern void rsx_live_draw_mtrace_note(const char*, u32);
+          rsx_live_draw_mtrace_note("FLIPREQ(nofifo)", bufferId); }
         gcm_set_current_display_buffer(bufferId);
         s_flip_pending = 1;   /* ticker: present BEFORE the next drain */
         s_flip_request_count++;
@@ -2569,6 +3461,7 @@ u64 cellGcmGetLastFlipTime(void)
 /* Mirror the host tables into the guest window the title will index. */
 static void gcm_publish_offset_tables(void)
 {
+    s_offset_tables_published = 1;
     for (u32 i = 0; i < GCM_OFFSET_TABLE_PAGES; i++) {
         vm_write16(GCM_OFFSET_TABLE_IO_ADDR + i * 2, s_io_address_table[i]);
         vm_write16(GCM_OFFSET_TABLE_EA_ADDR + i * 2, s_ea_address_table[i]);
@@ -3210,10 +4103,47 @@ s32 cellGcmSetDefaultFifoSize(u32 size)
  * in the label getter and no flip was EVER issued: the intro-movie pump ran,
  * drew, "flipped" into the wrong function, and the screen stayed black. */
 /* NID: 0x21397818 */
+/* GOWA_FLIP_PATH_LOG=1: flips per path every 5 s */
+static volatile LONG s_fp_fifo, s_fp_fallback, s_fp_label;
+static void gcm_flip_path_log(void)
+{
+    static int on = -1; static ULONGLONG t0;
+    if (on < 0) on = getenv("GOWA_FLIP_PATH_LOG") ? 1 : 0;
+    if (!on) return;
+    const ULONGLONG now = GetTickCount64();
+    if (!t0) t0 = now;
+    if (now - t0 >= 5000) {
+        fprintf(stderr, "[flip-path] 5 s: %ld no FIFO, %ld imediatos (anel cheio), %ld com label\n",
+                InterlockedExchange(&s_fp_fifo, 0), InterlockedExchange(&s_fp_fallback, 0),
+                InterlockedExchange(&s_fp_label, 0));
+        t0 = now;
+    }
+}
 s32 _cellGcmSetFlipCommand(void* ctx, u32 bufferId)
 {
-    if (gcm_flip_into_fifo((u32)(uintptr_t)ctx, bufferId))
+    gcm_flip_path_log();
+    if (gcm_flip_into_fifo((u32)(uintptr_t)ctx, bufferId)) {
+        InterlockedIncrement(&s_fp_fifo);
         return gcm_flip_request(bufferId, 1);
+    }
+    InterlockedIncrement(&s_fp_fallback);
+    /* GOWA_DEFER_FLIP (default on; =0 the old immediate flip): no room for the
+     * marker -- flip when the walker reaches ctx->current instead. God of War
+     * Ascension takes this path for most flips (its ring always looks nearly
+     * full here), and the immediate flip blinked its menu text. */
+    { static int df = -1;
+      if (df < 0) { const char* e = getenv("GOWA_DEFER_FLIP"); df = !(e && *e == '0'); }
+      const u32 c = (u32)(uintptr_t)ctx;
+      if (df && c && bufferId < CELL_GCM_MAX_DISPLAY_BUFFER_NUM && s_display_buffer_set[bufferId] &&
+          s_defflip_tail - s_defflip_head < GCM_DEFFLIP_Q) {
+          const u32 io = gcm_ea2io(vm_read32(c + 8));
+          if (io != 0xFFFFFFFFu) {
+              s_defflip_io[s_defflip_tail % GCM_DEFFLIP_Q] = io;
+              s_defflip_buf[s_defflip_tail % GCM_DEFFLIP_Q] = bufferId;
+              s_defflip_tail++;
+              return gcm_flip_request(bufferId, 1);   /* the guest-visible half */
+          }
+      } }
     return cellGcmSetFlipCommand(bufferId);
 }
 
@@ -3222,6 +4152,8 @@ s32 _cellGcmSetFlipCommandWithWaitLabel(void* ctx, u32 bufferId,
                                         u32 labelIndex, u32 labelValue)
 {
     (void)ctx;
+    gcm_flip_path_log();
+    InterlockedIncrement(&s_fp_label);
     return cellGcmSetFlipCommandWithWaitLabel(bufferId, labelIndex, labelValue);
 }
 

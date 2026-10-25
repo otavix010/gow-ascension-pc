@@ -30,6 +30,7 @@
 #define WIN32_LEAN_AND_MEAN
 #endif
 #include <windows.h>
+#include "rsx_window_place.h"
 
 /* D3D12 headers */
 #include <d3d12.h>
@@ -38,7 +39,7 @@
 #include <dxgi1_6.h>
 #include <d3dcompiler.h>
 
-/* We need these GUIDs — define them here to avoid uuid.lib dependency */
+/* We need these GUIDs â€” define them here to avoid uuid.lib dependency */
 #include <initguid.h>
 
 /* Link libraries */
@@ -249,7 +250,7 @@ typedef struct {
 
     /* Pipeline */
     ID3D12RootSignature*  root_signature;
-    ID3D12PipelineState*  pipeline_state;         /* triangle class — default */
+    ID3D12PipelineState*  pipeline_state;         /* triangle class â€” default */
     ID3D12PipelineState*  pipeline_state_lines;   /* line class */
     ID3D12PipelineState*  pipeline_state_points;  /* point class */
 
@@ -521,19 +522,13 @@ static HWND create_window(u32 width, u32 height, const char* title)
     wc.lpszClassName = "ps3recomp_d3d12";
     RegisterClassExA(&wc);
 
-    RECT wr = {0, 0, (LONG)width, (LONG)height};
-    AdjustWindowRect(&wr, WS_OVERLAPPEDWINDOW, FALSE);
-
     /* Keep the display awake (see rsx_null_backend.c). */
     SetThreadExecutionState(ES_CONTINUOUS | ES_DISPLAY_REQUIRED | ES_SYSTEM_REQUIRED);
-    return CreateWindowExA(
-        0, "ps3recomp_d3d12",
-        title ? title : "ps3recomp (D3D12)",
-        WS_OVERLAPPEDWINDOW | WS_VISIBLE,
-        CW_USEDEFAULT, CW_USEDEFAULT,
-        wr.right - wr.left, wr.bottom - wr.top,
-        NULL, NULL, GetModuleHandle(NULL), NULL);
+    HWND hwnd = rsx_create_placed_window("ps3recomp_d3d12", title ? title : "ps3recomp (D3D12)", width, height);
+    return hwnd;
 }
+
+
 
 /* ---------------------------------------------------------------------------
  * D3D12 initialization
@@ -690,7 +685,7 @@ static int init_d3d12(u32 width, u32 height)
     /* ---------------------------------------------------------------
      * Depth/stencil buffer
      * 24-bit depth + 8-bit stencil (DXGI_FORMAT_D24_UNORM_S8_UINT).
-     * One shared depth texture across both frames — RSX games on PS3
+     * One shared depth texture across both frames â€” RSX games on PS3
      * typically use a single zeta surface.
      * ---------------------------------------------------------------*/
     {
@@ -778,7 +773,7 @@ static int init_d3d12(u32 width, u32 height)
 
     /* ---------------------------------------------------------------
      * Create root signature with 16 root constants (one mat4 MVP at b0).
-     * Visible only to the vertex shader — pixel shader doesn't need it.
+     * Visible only to the vertex shader â€” pixel shader doesn't need it.
      * ---------------------------------------------------------------*/
     {
         /* param 0: mat4 MVP as 16 root constants at b0 (vertex shader).
@@ -851,7 +846,7 @@ static int init_d3d12(u32 width, u32 height)
         /* Basic vertex-colored shader.
          * The MVP matrix arrives via root constants as 4 vec4 columns
          * (PS3/OpenGL column-major convention). We multiply explicitly so
-         * we don't depend on HLSL's matrix packing — matches PS3 semantics
+         * we don't depend on HLSL's matrix packing â€” matches PS3 semantics
          * `gl_Position = MVP * vec4(pos, 1.0)`. */
         static const char vs_hlsl[] =
             "cbuffer cb0 : register(b0) {\n"
@@ -921,8 +916,8 @@ static int init_d3d12(u32 width, u32 height)
             pso_desc.RTVFormats[0] = DXGI_FORMAT_R8G8B8A8_UNORM;
             pso_desc.DSVFormat = DXGI_FORMAT_D24_UNORM_S8_UINT;
             /* Depth test enabled, write enabled, LESS func.
-             * Games with depth_test_enable=0 in RSX state can still render —
-             * LESS just means new-z must be less than existing — but future
+             * Games with depth_test_enable=0 in RSX state can still render â€”
+             * LESS just means new-z must be less than existing â€” but future
              * work should mirror RSX depth state into a PSO cache. */
             pso_desc.DepthStencilState.DepthEnable    = TRUE;
             pso_desc.DepthStencilState.DepthWriteMask = D3D12_DEPTH_WRITE_MASK_ALL;
@@ -940,7 +935,7 @@ static int init_d3d12(u32 width, u32 height)
                 printf("[D3D12] PSO TRIANGLE creation failed (0x%08lX)\n", hr);
             }
 
-            /* Line-class PSO — same shader, LINE topology type. */
+            /* Line-class PSO â€” same shader, LINE topology type. */
             pso_desc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_LINE;
             hr = s_d3d.device->lpVtbl->CreateGraphicsPipelineState(
                 s_d3d.device, &pso_desc,
@@ -3164,6 +3159,17 @@ static void vp_record_cb(u32 slot, int vs_idx, const D3D12DrawRecord* dr)
     vpx[4] = vpx[5] = vpx[7] = 0.0f;
     if (vs_[2] != 0.0f) { vpx[2] = vs_[2]; vpx[6] = vo_[2]; }
     else                { vpx[2] = 1.0f;   vpx[6] = 0.0f;   }
+    /* GOWA_VPSCALE_LOG=1: distinct viewport scale/offset pairs (with the
+     * render target) -- which passes the guest flips. */
+    { static int lg = -1; if (lg < 0) lg = getenv("GOWA_VPSCALE_LOG") ? 1 : 0;
+      if (lg) { static float seen[64][4]; static int ns = 0, full = 0;
+        int f = 0; for (int i = 0; i < ns; i++)
+            if (seen[i][0] == vs_[0] && seen[i][1] == vs_[1] && seen[i][2] == vo_[0] && seen[i][3] == vo_[1]) { f = 1; break; }
+        if (!f && ns < 64) { seen[ns][0] = vs_[0]; seen[ns][1] = vs_[1]; seen[ns][2] = vo_[0]; seen[ns][3] = vo_[1]; ns++;
+            fprintf(stderr, "[vpscale] scale=(%g %g %g) offset=(%g %g %g) surf=0x%X %ux%u frame=%u\n",
+                    vs_[0], vs_[1], vs_[2], vo_[0], vo_[1], vo_[2], st->surface_color_offset[0],
+                    st->surface_clip_w, st->surface_clip_h, (unsigned)s_d3d.frame_count); }
+        else if (!f && !full) { full = 1; fprintf(stderr, "[vpscale] (tabela cheia)\n"); } } }
     /* DBG_ZOOM=<k> with DBG_CENTER="cx,cy": a debug camera applied in CLIP space,
      * not a framebuffer crop -- the geometry is re-rasterized at full resolution.
      * The shader epilogue already computes
@@ -5089,7 +5095,11 @@ skip_dump_consider: ;
                      g_rsx_title_base,
                      s_tframes * 1000.0 / (double)(tnow - s_tt0),
                      s_dbg_last_draws, s_d3d.width, s_d3d.height);
-            SetWindowTextA(s_d3d.hwnd, tb);
+            /* GOWA: the title (PARAM.SFO) is UTF-8 -- "Ascension™" came out as
+             * "Ascensionâ„¢" through the ANSI call. */
+            { wchar_t tw[256];
+              if (MultiByteToWideChar(CP_UTF8, 0, tb, -1, tw, 256) > 0) SetWindowTextW(s_d3d.hwnd, tw);
+              else SetWindowTextA(s_d3d.hwnd, tb); }
             s_tframes = 0;
             s_tt0 = tnow;
         }
@@ -6210,7 +6220,7 @@ static void d3d12_draw_arrays(void* ud, u32 primitive, u32 first, u32 count)
     u32 topo = (u32)rsx_primitive_topology(primitive);
     if (topo == RSX_TOPOLOGY_UNSUPPORTED) {
         /* Other primitives still needing index-buffer conversion
-         * (line loops, triangle fans) — skip rather than draw wrong. */
+         * (line loops, triangle fans) â€” skip rather than draw wrong. */
         static int s_skipped_nontri = 0;
         if (s_skipped_nontri < 3) {
             printf("[D3D12] draw_arrays: skipping prim=%u (needs index conversion)\n",
@@ -6791,7 +6801,7 @@ void rsx_d3d12_backend_present(void)
 #include <ps3emu/ps3types.h>   /* u32 (header includes above are inside the _WIN32 guard) */
 #include <stdio.h>
 
-/* Stub for non-Windows — D3D12 is Windows-only */
+/* Stub for non-Windows â€” D3D12 is Windows-only */
 int rsx_d3d12_backend_init(u32 w, u32 h, const char* t)
 {
     (void)w; (void)h; (void)t;

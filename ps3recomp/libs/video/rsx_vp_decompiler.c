@@ -30,6 +30,15 @@
  */
 #include "rsx_vp_decompiler.h"
 #include <stdio.h>
+
+/* GOWA: 1 = export TEX8/TEX9 too (RSX output registers 15 and 6 -- RPCS3
+ * maps tc8 to dst_reg15 and tc9 to dst_reg6, shared with the point size).
+ * The fragment decompiler then reads them instead of a constant 0. Set by
+ * the live engine (GOWA_TC89=0 keeps the old 8-texcoord interface). */
+int g_rsx_vp_tc89 = 0;
+/* GOWA (22/10): variante com o prólogo da luz do EDGE (rsx_edge_luz.h) -- o motor live liga
+ * só enquanto gera o VS de um desenho marcado. */
+int g_rsx_vp_edge_luz = 0;
 #include <string.h>
 
 /* ---- little-endian word read (RPCS3-capture native order) --------------- */
@@ -60,6 +69,38 @@ u32 rsx_vp_program_size_instrs(const u8* ucode, u32 max_bytes)
         instrs++;
         off += 16;
         if (d3 & 1u) return instrs;   /* D3.end */
+    }
+    return 0;
+}
+
+/* GOWA (24/10): see rsx_vp_decompiler.h. One constant index per instruction (D1
+ * const_src), read by any of the three sources typed 3 -- the same test emit_src
+ * makes, so this covers every vp_c[] the decompiled HLSL can name. */
+u32 rsx_vp_constant_range(const u8* ucode, u32 max_bytes, u32* lo, u32* hi)
+{
+    u32 l = 512, h = 0, off = 0, instrs = 0;
+    *lo = 1; *hi = 0;
+    if (!ucode) return 0;
+    while (off + 16 <= max_bytes) {
+        const u32 d1 = rd_le(ucode + off + 4), d2 = rd_le(ucode + off + 8);
+        const u32 d3 = rd_le(ucode + off + 12);
+        const u32 src0 = ((d2 >> 23) & 0x1FF) | ((d1 & 0xFF) << 9);
+        const u32 src1 = (d2 >> 6) & 0x1FFFF;
+        const u32 src2 = ((d3 >> 21) & 0x7FF) | ((d2 & 0x3F) << 11);
+        if ((src0 & 3) == 3 || (src1 & 3) == 3 || (src2 & 3) == 3) {
+            if ((d3 >> 1) & 1) { l = 0; h = 511; }          /* (c + a0.x) & 511: any slot */
+            else {
+                const u32 c = (d1 >> 12) & 511;
+                if (c < l) l = c;
+                if (c > h) h = c;
+            }
+        }
+        instrs++;
+        off += 16;
+        if (d3 & 1u) {
+            if (l <= h) { *lo = l; *hi = h; }
+            return instrs;
+        }
     }
     return 0;
 }
@@ -284,12 +325,17 @@ int rsx_vp_decompile_compact_ex(
     char* out, u32 out_size)
 {
     rsx_vp_input_analysis analysis;
+    /* GOWA: na variante com a luz do EDGE os atributos 7/8/14/15 vêm do prólogo, não do
+     * layout -- não contam como faltando, e não são declarados como entrada; 0/4/5 (que o
+     * prólogo lê) são declarados mesmo que o VP não os leia. */
+    const u32 luz = g_rsx_vp_edge_luz ? 0xC180u : 0u;
     if (rsx_vp_analyze_inputs(ucode, max_bytes, &analysis) < 0 ||
         !analysis.exact ||
-        (analysis.input_mask & ~(input_mask & 0xFFFFu)) != 0)
+        (analysis.input_mask & ~((input_mask | luz) & 0xFFFFu)) != 0)
         input_mask = 0xFFFFu;
     else
-        input_mask = analysis.input_mask;
+        input_mask = luz ? (((analysis.input_mask | 0x31u) & ~luz) & (input_mask | 0x31u))
+                         : analysis.input_mask;
     return rsx_vp_decompile_impl(
         ucode, max_bytes, vtex_mask, 1, input_mask, out, out_size);
 }
@@ -589,7 +635,10 @@ static int rsx_vp_decompile_impl(
         "    float4 pos:SV_Position; float4 col0:COLOR0; float4 col1:COLOR1;\n"
         "    float4 fog:FOG;\n"
         "    float4 t0:TEXCOORD0; float4 t1:TEXCOORD1; float4 t2:TEXCOORD2; float4 t3:TEXCOORD3;\n"
-        "    float4 t4:TEXCOORD4; float4 t5:TEXCOORD5; float4 t6:TEXCOORD6; float4 t7:TEXCOORD7;\n"
+        "    float4 t4:TEXCOORD4; float4 t5:TEXCOORD5; float4 t6:TEXCOORD6; float4 t7:TEXCOORD7;\n");
+    if (g_rsx_vp_tc89)
+        emit(&o, "    float4 t8:TEXCOORD8; float4 t9:TEXCOORD9;\n");
+    emit(&o,
         "};\n"
         /* b0: 512 vec4 transform constants + the RSX viewport transform,
          * pre-mapped by the harness to D3D clip space:
@@ -610,6 +659,13 @@ static int rsx_vp_decompile_impl(
         " vp_mul1(a.z, b.z), vp_mul1(a.w, b.w)); }\n"
         "float vp_dot3(float4 a, float4 b) { float4 m = vp_mul(a, b); return m.x + m.y + m.z; }\n"
         "float vp_dot4(float4 a, float4 b) { float4 m = vp_mul(a, b); return m.x + m.y + m.z + m.w; }\n");
+    if (g_rsx_vp_edge_luz)
+        emit(&o,
+            /* GOWA: luzes do segmento EDGE (gowa_luz_set em rsx_edge_luz.h) */
+            "cbuffer EdgeLuz : register(b2) {\n"
+            "    float4 el_info; float4 el_info2;\n"
+            "    float4 el_p[40]; float4 el_c[40]; float4 el_d[40];\n"
+            "};\n");
 
     for (u32 vtu = 0; vtu < 4; vtu++) {
         if (!((vtex_mask >> vtu) & 1u)) continue;
@@ -641,6 +697,46 @@ static int rsx_vp_decompile_impl(
             emit(&o, assignment);
         }
     }
+    if (g_rsx_vp_edge_luz)
+        emit(&o,
+            /* GOWA (22/10): a conta da 0x73E0 + 0x6AC8 do job 0x72DF80 (out/spudiff/modelo_73e0.h,
+             * modelo_6ac8.h), que a SPU pulou: as luzes do segmento viram uma luz dominante por
+             * vértice -- A (posição) em v[7], cores + e - em v[8]/v[14] -- e a última soma à
+             * parte em v[15]. N = (T x B)*T.w com T = v[4], B = v[5]. */
+            "    {\n"
+            "        float3 P = v[0].xyz;\n"
+            "        float3 N = cross(v[4].xyz, v[5].xyz) * v[4].w;\n"
+            "        int nfixa = (int)el_info.x, nluz = (int)el_info.y, n6 = (int)el_info.z;\n"
+            "        float g = el_info2.x;\n"
+            "        float3 S = (float3)0; float W = 1e-4;\n"
+            "        [loop] for (int l = 0; l < nluz; l++) {\n"
+            "            float3 d = el_p[l].xyz - P; float d2 = dot(d, d) + 1e-4; float inv = rsqrt(d2);\n"
+            "            float s = 1.0 - min(d2 * inv * el_p[l].w, 1.0); float att = s * s * (3.0 - 2.0 * s);\n"
+            "            float q = att * att * (el_c[l].w * g);\n"
+            "            float3 dir = (l < nfixa) ? el_d[l].xyz : d * inv;\n"
+            "            float w = abs(q) * min(abs(0.5 * dot(N, dir) + 0.5), 1.0);\n"
+            "            S += dir * w; W += w;\n"
+            "        }\n"
+            "        float3 Dn = S * rsqrt(dot(S, S) + 1e-4);\n"
+            "        float3 Bp = (float3)0, Cn = (float3)0;\n"
+            "        [loop] for (int l2 = 0; l2 < nluz; l2++) {\n"
+            "            float3 d = el_p[l2].xyz - P; float d2 = dot(d, d) + 1e-4; float inv = rsqrt(d2);\n"
+            "            float s = 1.0 - min(d2 * inv * el_p[l2].w, 1.0); float att = s * s * (3.0 - 2.0 * s);\n"
+            "            float q = att * att * (el_c[l2].w * g);\n"
+            "            float3 dir = (l2 < nfixa) ? el_d[l2].xyz : d * inv;\n"
+            "            float kd = dot(Dn, dir); float k = kd > 0.0 ? min(kd, 1.0) : 0.0;\n"
+            "            float3 cc = el_c[l2].xyz * (g * q * k);\n"
+            "            Bp += max(cc, (float3)0); Cn += max(-cc, (float3)0);\n"
+            "        }\n"
+            "        float4 acc = el_info.wwww;\n"
+            "        [loop] for (int l3 = nluz; l3 < nluz + n6; l3++) {\n"
+            "            float3 d = el_p[l3].xyz - P; float d2 = dot(d, d);\n"
+            "            float s = 1.0 - min(sqrt(d2) * el_p[l3].w, 1.0); float att = s * s * (3.0 - 2.0 * s);\n"
+            "            float4 col = el_c[l3] * g;\n"
+            "            acc += (att * att * col.w) * col;\n"
+            "        }\n"
+            "        v[7].xyz = P + S / W; v[8].xyz = Bp; v[14].xyz = Cn; v[15].xyz = acc.xyz;\n"
+            "    }\n");
     emit(&o,
         "    float4 r[32]; float4 o[16];\n"
         "    [unroll] for (int _i=0;_i<32;_i++) r[_i]=(float4)0;\n"
@@ -662,7 +758,10 @@ static int rsx_vp_decompile_impl(
         "    Out.pos = float4(_p.xyz * vp_posscale.xyz + _p.w * vp_posoffset.xyz, _p.w);\n"
         "    Out.col0 = o[1]; Out.col1 = o[2]; Out.fog = o[5].xxxx;\n"
         "    Out.t0=o[7];  Out.t1=o[8];  Out.t2=o[9];  Out.t3=o[10];\n"
-        "    Out.t4=o[11]; Out.t5=o[12]; Out.t6=o[13]; Out.t7=o[14];\n"
+        "    Out.t4=o[11]; Out.t5=o[12]; Out.t6=o[13]; Out.t7=o[14];\n");
+    if (g_rsx_vp_tc89)
+        emit(&o, "    Out.t8=o[15]; Out.t9=o[6];\n");
+    emit(&o,
         "    return Out;\n"
         "}\n");
 

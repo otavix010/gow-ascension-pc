@@ -144,6 +144,11 @@ static int fp_instruction_has_constant(u32 w1, u32 w2, u32 w3)
 }
 
 unsigned long long g_rsx_fp_nonfinite_constants = 0;
+u32 g_rsx_fp_exp_units = 0;   /* GOWA: EXP_TEX-expandable units, see the TEX build */
+/* GOWA: 1 = buffered shaders with a depth-compare unit declare fp_texwin[8]
+ * after fp_alpha: per unit (u, v) scale of the declared window inside the host
+ * depth snapshot (xy = even unit, zw = odd unit), uploaded per draw. */
+int g_rsx_fp_shadow_window = 0;
 
 /* An inline fragment constant is never legitimately non-finite.  A NaN one
  * poisons every pixel the program touches, which on an FP16 HDR target shows
@@ -200,6 +205,15 @@ static u64 fp_hash_bytes(const void* data, u32 size, u64 hash)
     return hash;
 }
 
+/* GOWA: 8 bytes per multiply instead of FNV-1a's one -- this runs on every
+ * draw (PSO key), ~11.700 draws per frame in the cap. 16 scene. Keys are only
+ * in-memory cache keys (the shader disk cache is keyed by the HLSL text). */
+static inline u64 fp_mix64(u64 h, u64 w)
+{
+    h ^= w * 0x9E3779B97F4A7C15ull;
+    h = (h << 31) | (h >> 33);
+    return h * 0xC2B2AE3D27D4EB4Full;
+}
 u64 rsx_fp_structural_hash(const u8* ucode, u32 max_bytes, u64 seed)
 {
     if (!ucode)
@@ -214,7 +228,8 @@ u64 rsx_fp_structural_hash(const u8* ucode, u32 max_bytes, u64 seed)
         const u32 w1 = rsx_fp_read_word(ucode + off + 4);
         const u32 w2 = rsx_fp_read_word(ucode + off + 8);
         const u32 w3 = rsx_fp_read_word(ucode + off + 12);
-        hash = fp_hash_bytes(ucode + off, 16, hash);
+        { u64 lo, hi; memcpy(&lo, ucode + off, 8); memcpy(&hi, ucode + off + 8, 8);
+          hash = fp_mix64(fp_mix64(hash, lo), hi); }
         instruction_count++;
         off += 16;
         if (fp_instruction_has_constant(w1, w2, w3)) {
@@ -333,8 +348,28 @@ static void decode_src(u32 w, int abs_bit, Src* s)
 /* HLSL expression for the interpolated input selected by OPDEST.INPUT_SRC.
  * The backend's passthrough VS forwards COL0/COL1/FOG/TEXCOORD0..7; WPOS maps
  * to SV_POSITION (screen-space — an approximation of the RSX window coord). */
+/* GOWA: the FACING input (0xE, RPCS3 "ssa") -- +1 on a front face, -1 on a
+ * back face. It was a constant 0: God of War Ascension's double-sided
+ * normal-mapped materials build the tangent-space sign as
+ * (face > 0) - (face < 0), so their world normal came out 0 and the diffuse
+ * and specular from the normal map vanished (black scarab shells, no
+ * iridescence). GOWA_FP_FACE=0 restores the 0, =2 inverts the sign. Set while
+ * the body is emitted; the preamble then declares SV_IsFrontFace. */
+static int s_fp_uses_face;
+extern int g_rsx_vp_tc89;   /* rsx_vp_decompiler.c: TEX8/TEX9 exported */
+static int fp_face_mode(void)
+{
+    static int m = -1;
+    if (m < 0) { const char* e = getenv("GOWA_FP_FACE"); m = e ? atoi(e) : 1; }
+    return m;
+}
 static const char* input_expr(u32 input_src)
 {
+    if (input_src == 0xE && fp_face_mode() != 0) {
+        s_fp_uses_face = 1;
+        return fp_face_mode() == 2 ? "(input._rsx_front ? (float4)-1.0 : (float4)1.0)"
+                                   : "(input._rsx_front ? (float4)1.0 : (float4)-1.0)";
+    }
     static const char* tc[8] = {
         "input.tc0", "input.tc1", "input.tc2", "input.tc3",
         "input.tc4", "input.tc5", "input.tc6", "input.tc7" };
@@ -347,6 +382,8 @@ static const char* input_expr(u32 input_src)
     case 0x3: return "input.fog";      /* FOGC */
     default:
         if (input_src >= 0x4 && input_src <= 0xB) return tc[input_src - 0x4]; /* TC0..7 */
+        if (g_rsx_vp_tc89 && input_src == 0xC) return "input.tc8";   /* GOWA: VP o[15] */
+        if (g_rsx_vp_tc89 && input_src == 0xD) return "input.tc9";   /* GOWA: VP o[6] */
         return "float4(0,0,0,0)";      /* TC8/TC9/FACING not plumbed */
     }
 }
@@ -358,6 +395,9 @@ static void emit_src(const Src* s, u32 input_src, const float* k, int has_k,
     char base[96];
     if (s->type == FP_REG_TYPE_TEMP) {
         snprintf(base, sizeof(base), "%s[%u]", s->half ? "h" : "r", s->index);
+    } else if (s->type == FP_REG_TYPE_INPUT && input_src == 0x0 && buffered) {
+        /* WPOS with the guest's window origin (_rsx_wpos, fp_alpha.yz) */
+        snprintf(base, sizeof(base), "_rsx_wpos(input.position)");
     } else if (s->type == FP_REG_TYPE_INPUT) {
         snprintf(base, sizeof(base), "%s", input_expr(input_src));
     } else { /* CONST */
@@ -439,6 +479,114 @@ void rsx_fp_shadow_desc_from_texture(rsx_fp_shadow_desc* out, u32 format,
     out->unnormalized = (u8)((format & 0x40u) != 0);
 }
 
+/* GOWA: fp16/fp32 register aliasing (GOWA_FP_ALIAS, default on; =0 off).
+ * On the RSX the half registers share the storage of the full ones: H(2n) is
+ * R(n).xy and H(2n+1) is R(n).zw, two fp16 per 32-bit lane, x in the low
+ * half (RPCS3 emulates it the same way). Cg-compiled programs reuse that
+ * storage across precisions, and a program that writes R(n) and later reads
+ * H(2n) (or the other way round) gets the other view's bits. The decompiler
+ * keeps r[] and h[] apart, so those programs computed something else: God of
+ * War Ascension's Kratos body material lost most of its diffuse (and with it
+ * the red tattoo) this way.
+ * A pre-pass finds the R registers that are also used through their H halves
+ * in the same program; every write to one of those (as R or as H) is followed
+ * by an update of the other view, so both always hold the hardware's bits.
+ * Programs that never mix precisions on the same storage emit unchanged. */
+static int fp_alias_enabled(void)
+{
+    static int on = -1;
+    if (on < 0) { const char* e = getenv("GOWA_FP_ALIAS"); on = !(e && *e == '0'); }
+    return on;
+}
+static u64 fp_alias_scan(const u8* ucode, u32 max_bytes)
+{
+    u64 used_r = 0, used_h = 0;   /* bit n: R(n) / H(n) referenced, n < 64 */
+    for (u32 off = 0; off + 16 <= max_bytes;) {
+        const u32 w0 = rsx_fp_read_word(ucode + off);
+        const u32 w1 = rsx_fp_read_word(ucode + off + 4);
+        const u32 w2 = rsx_fp_read_word(ucode + off + 8);
+        const u32 w3 = rsx_fp_read_word(ucode + off + 12);
+        if (!(w2 & FP_BRANCH)) {
+            if (!(w0 & FP_OUT_NONE)) {
+                const u32 d = (w0 & FP_OUT_REG_MASK) >> FP_OUT_REG_SHIFT;
+                if (w0 & FP_OUT_HALF) used_h |= 1ull << d; else used_r |= 1ull << d;
+            }
+            const u32 ws[3] = { w1, w2, w3 };
+            for (int k = 0; k < 3; k++) {
+                if (((ws[k] & FP_REG_TYPE_MASK) >> FP_REG_TYPE_SHIFT) != FP_REG_TYPE_TEMP) continue;
+                const u32 i = (ws[k] & FP_SRC_REG_MASK) >> FP_SRC_REG_SHIFT;
+                if (ws[k] & FP_SRC_HALF) used_h |= 1ull << i; else used_r |= 1ull << i;
+            }
+        }
+        off += 16;
+        if (!(w2 & FP_BRANCH) && ((w1 & 3u) == 2 || (w2 & 3u) == 2 || (w3 & 3u) == 2))
+            off += 16;
+        if (w0 & FP_END) break;
+    }
+    /* the colour exports are read at the end: h0/h4/h6/h8 or r0/r2/r3/r4 */
+    used_h |= (1ull << 0) | (1ull << 4) | (1ull << 6) | (1ull << 8);
+    used_r |= (1ull << 0) | (1ull << 2) | (1ull << 3) | (1ull << 4);
+    u64 conflict = 0;
+    for (u32 n = 0; n < 24; n++)   /* r[48]/h[48]: H index 2n+1 < 48 */
+        if (((used_r >> n) & 1) && (((used_h >> (2 * n)) & 3) != 0))
+            conflict |= 1ull << n;
+    return conflict;
+}
+/* After a write of register idx (half or full) with write mask m: bring the
+ * other view of the same storage up to date. */
+static void fp_alias_sync(Out* o, u64 conflict, u32 idx, int half, const char* m)
+{
+    char t[512];
+    const int mx = strchr(m, 'x') != NULL, my = strchr(m, 'y') != NULL;
+    const int mz = strchr(m, 'z') != NULL, mw = strchr(m, 'w') != NULL;
+    if (half) {
+        const u32 n = idx >> 1;
+        if (n >= 24 || !((conflict >> n) & 1)) return;
+        const char lo = (idx & 1) ? 'z' : 'x', hi = (idx & 1) ? 'w' : 'y';
+        if (mx || my) {
+            snprintf(t, sizeof t, "    r[%u].%c = asfloat(f32tof16(h[%u].x) | (f32tof16(h[%u].y) << 16));\n", n, lo, idx, idx);
+            out_puts(o, t);
+        }
+        if (mz || mw) {
+            snprintf(t, sizeof t, "    r[%u].%c = asfloat(f32tof16(h[%u].z) | (f32tof16(h[%u].w) << 16));\n", n, hi, idx, idx);
+            out_puts(o, t);
+        }
+    } else {
+        if (idx >= 24 || !((conflict >> idx) & 1)) return;
+        static const char cc[4] = { 'x', 'y', 'z', 'w' };
+        const int mm[4] = { mx, my, mz, mw };
+        for (int c = 0; c < 4; c++) {
+            if (!mm[c]) continue;
+            const u32 hi = 2 * idx + (c >> 1);
+            snprintf(t, sizeof t, "    h[%u].%s = float2(f16tof32(asuint(r[%u].%c)), f16tof32(asuint(r[%u].%c) >> 16));\n",
+                     hi, (c & 1) ? "zw" : "xy", idx, cc[c], idx, cc[c]);
+            out_puts(o, t);
+        }
+    }
+}
+
+/* GOWA_FP_CLAMP16=1: colour exports clamped to the largest finite fp16
+ * (+-65504) before the NaN guard. A value past it written into an RGBA16F
+ * target becomes infinity on D3D12, and the next pass's arithmetic turns it
+ * into NaN -- God of War Ascension's 1x1 average luminance came back as NaN or
+ * ~125 on ~10% of the frames in chapter 16 (bright light), and the exposure
+ * washed the whole frame out. */
+static int fp_clamp16_on(void)
+{
+    static int on = -1;
+    if (on < 0) { const char* e = getenv("GOWA_FP_CLAMP16"); on = (e && *e == '1') ? 1 : 0; }
+    return on;
+}
+/* GOWA_FP_NANINT=1: the export NaN guard on the bits (integer compare) instead
+ * of `x == x`, which the HLSL compiler may fold to true when it assumes no
+ * NaNs (no IEEE strictness flag) -- then a NaN export reached the target. */
+static int fp_nanint_on(void)
+{
+    static int on = -1;
+    if (on < 0) { const char* e = getenv("GOWA_FP_NANINT"); on = (e && *e == '1') ? 1 : 0; }
+    return on;
+}
+
 u32 rsx_fp_texture_units(const u8* ucode, u32 max_bytes)
 {
     u32 units = 0;
@@ -462,7 +610,7 @@ u32 rsx_fp_texture_units(const u8* ucode, u32 max_bytes)
 }
 
 static void fp_shadow_helper(Out* p, u32 unit, u32 cube_mask,
-                              const rsx_fp_shadow_desc* d)
+                              const rsx_fp_shadow_desc* d, int use_window)
 {
     char tex[32], text[4096];
     snprintf(tex, sizeof tex, cube_mask ? "rsx_tex%u" : "rsx_tex[%u]", unit);
@@ -479,6 +627,43 @@ static void fp_shadow_helper(Out* p, u32 unit, u32 cube_mask,
         snprintf(text, sizeof text, "    uint width, height; %s.GetDimensions(width, height);\n"
             "    float2 size = float2(width, height);\n", tex);
         out_puts(p, text);
+    }
+    if (!d->unnormalized && use_window) {
+        /* GOWA: fp_texwin[unit] = (window u, window v, border depth, 1 =
+         * BORDER addressing). The declared texture is a top-left window of
+         * the host depth snapshot: texels are addressed inside it, and a tap
+         * outside it reads the border depth (BORDER) or the window's edge --
+         * not whatever another light left in the rest of the buffer. */
+        if (!d->linear) {
+            snprintf(text, sizeof text, "    uint width, height; %s.GetDimensions(width, height);\n"
+                "    float2 size = float2(width, height);\n", tex);
+            out_puts(p, text);
+        }
+        snprintf(text, sizeof text,
+            "    float4 win = fp_texwin[%u];\n"
+            "    float2 wsize = size * win.xy;\n", unit);
+        out_puts(p, text);
+        const u32 ntap = d->linear ? 4u : 1u;
+        if (d->linear)
+            out_puts(p, "    float2 position = coordinate.xy * wsize - 0.5;\n"
+                "    float2 base = floor(position); float2 fraction = position - base;\n");
+        else
+            out_puts(p, "    float2 base = floor(coordinate.xy * wsize);\n");
+        for (u32 tap = 0; tap < ntap; tap++) {
+            snprintf(text, sizeof text,
+                "    float2 t%u = base + float2(%s, %s);\n"
+                "    float d%u = (all(t%u >= 0.0) && all(t%u < wsize))\n"
+                "        ? %s.SampleLevel(rsx_samp[%u], (t%u + 0.5) / size, 0.0).r\n"
+                "        : (win.w > 0.5 ? win.z : %s.SampleLevel(rsx_samp[%u], (clamp(t%u, 0.0, wsize - 1.0) + 0.5) / size, 0.0).r);\n"
+                "    float c%u = _rsx_shadow_cmp%u(reference, d%u);\n",
+                tap, (tap & 1) ? "1.0" : "0.0", (tap & 2) ? "1.0" : "0.0",
+                tap, tap, tap, tex, unit, tap, tex, unit, tap, tap, unit, tap);
+            out_puts(p, text);
+        }
+        out_puts(p, d->linear
+            ? "    return (float4)lerp(lerp(c0, c1, fraction.x), lerp(c2, c3, fraction.x), fraction.y);\n}\n"
+            : "    return (float4)c0;\n}\n");
+        return;
     }
     out_puts(p, d->unnormalized ? "    float2 uv = coordinate.xy / size;\n" :
                                      "    float2 uv = coordinate.xy;\n");
@@ -551,6 +736,10 @@ static int rsx_fp_decompile_internal(
     const u32 gamma_units = rsx_fp_texture_gamma_units(ucode, max_bytes, gamma_masks);
 
     const u32 sampled_units = rsx_fp_texture_units(ucode, max_bytes);
+    /* GOWA: fp_texwin in the cbuffer (see g_rsx_fp_shadow_window) */
+    int shadow_window = 0;
+    if (shadow && buffered && g_rsx_fp_shadow_window) for (u32 u = 0; u < 16; u++)
+        if ((sampled_units & (1u << u)) && shadow[u].enabled == 1) shadow_window = 1;
     if (shadow) for (u32 u = 0; u < 16; u++)
         if ((sampled_units & (1u << u)) && shadow[u].enabled &&
             (shadow[u].enabled != 1 || shadow[u].func > 7 ||
@@ -579,6 +768,7 @@ static int rsx_fp_decompile_internal(
      * export -- which is only known once every instruction has been decoded.
      * Emitting the preamble here would mean guessing it. */
     Out o = { out, out_size, 0, 1 };
+    s_fp_uses_face = 0;
     out[0] = '\0';
     int uses_pack = 0;   /* a pack or unpack opcode was decoded: the preamble gets its helpers */
     out_puts(&o,
@@ -596,6 +786,7 @@ static int rsx_fp_decompile_internal(
      * the highest one written decides how many SV_TARGETs come out. */
     int wrote[2][FP_MAX_COLOR_TARGETS];
     memset(wrote, 0, sizeof wrote);
+    const u64 alias_r = fp_alias_enabled() ? fp_alias_scan(ucode, max_bytes) : 0;
     int count = 0;
     u32 off = 0;
     u32 constant_slot = 0;
@@ -781,6 +972,21 @@ static int rsx_fp_decompile_internal(
         case OP_MAX: snprintf(rhs, sizeof(rhs), "max((%s), (%s))", a, b); break;
         case OP_FRC: snprintf(rhs, sizeof(rhs), "frac(%s)", a); break;
         case OP_FLR: snprintf(rhs, sizeof(rhs), "floor(%s)", a); break;
+        /* GOWA: screen-space derivatives (RPCS3 dFdx/dFdy). They were an
+         * unhandled TODO: the destination kept stale values, and God of War
+         * Ascension's distance-field menu text, which sizes its edge from
+         * them, came out with a thick dark rim. ddy follows the guest window
+         * origin like WPOS (fp_alpha.z, buffered constants only). */
+        case OP_DDX:
+        case OP_DDY: {
+            /* GOWA_FP_DERIV=0: back to the unhandled TODO (A/B) */
+            static int dv = -1;
+            if (dv < 0) { const char* e = getenv("GOWA_FP_DERIV"); dv = !(e && *e == '0'); }
+            if (!dv) { handled = 0; break; }
+            if (opcode == OP_DDX) snprintf(rhs, sizeof(rhs), "ddx(%s)", a);
+            else snprintf(rhs, sizeof(rhs), buffered ? "(ddy(%s) * (fp_alpha.z > 0.5 ? -1.0 : 1.0))" : "ddy(%s)", a);
+            break;
+        }
         case OP_RCP: snprintf(rhs, sizeof(rhs), "(1.0 / (%s).x)", a); break;
         /* Pack/unpack (RPCS3 FragmentProgramDecompiler PK/UP cases and the pkg/upg
          * builtins): the packed word is a scalar that replicates. */
@@ -845,8 +1051,9 @@ static int rsx_fp_decompile_internal(
                 snprintf(rhs, sizeof(rhs), "_rsx_shadow%u((%s).xyz)", tex_unit, a);
                 break;
             }
-            if ((tex_cube_mask >> tex_unit) & 1u)
-                /* Cubemap: sample with the full 3-component direction vector. */
+            if (((tex_cube_mask >> tex_unit) & 1u) || ((tex_cube_mask >> (16u + tex_unit)) & 1u))
+                /* Cubemap: sample with the full 3-component direction vector
+                 * (GOWA: and a volume, bits 16..31 of the mask, with xyz). */
                 snprintf(rhs, sizeof(rhs),
                          "rsx_tex%u.Sample(rsx_samp[%u], (%s).xyz)", tex_unit, tex_unit, a);
             else if (tex_cube_mask)
@@ -866,6 +1073,10 @@ static int rsx_fp_decompile_internal(
                  * the direction directly. */
                 snprintf(rhs, sizeof(rhs),
                          "rsx_tex%u.Sample(rsx_samp[%u], (%s).xyz)", tex_unit, tex_unit, a);
+            else if ((tex_cube_mask >> (16u + tex_unit)) & 1u)
+                snprintf(rhs, sizeof(rhs),
+                         "rsx_tex%u.Sample(rsx_samp[%u], (%s).xyz / (%s).w)",
+                         tex_unit, tex_unit, a, a);
             else if (tex_cube_mask)
                 snprintf(rhs, sizeof(rhs),
                          "rsx_tex%u.Sample(rsx_samp[%u], (%s).xy / (%s).w)",
@@ -879,7 +1090,8 @@ static int rsx_fp_decompile_internal(
             /* Biased / explicit-LOD sample; bias or LOD is src1.x (RPCS3
              * TEXTURE_SAMPLE2D_BIAS / _LOD). GH3's fret buttons and fret lines
              * are TXB: unhandled, they sampled nothing and output alpha 0. */
-            const int cube = (tex_cube_mask >> tex_unit) & 1u;
+            const int cube = ((tex_cube_mask >> tex_unit) & 1u) ||
+                             ((tex_cube_mask >> (16u + tex_unit)) & 1u);
             char tn[32];
             snprintf(tn, sizeof(tn), tex_cube_mask ? "rsx_tex%u" : "rsx_tex[%u]", tex_unit);
             snprintf(rhs, sizeof(rhs), "%s.%s(rsx_samp[%u], (%s).%s, (%s).x)", tn,
@@ -925,6 +1137,18 @@ static int rsx_fp_decompile_internal(
             char sample[sizeof rhs]; memcpy(sample, rhs, sizeof sample);
             const int length = snprintf(rhs, sizeof rhs, "_rsx_gamma_input(%s, %uu)",
                                         sample, gamma_masks[tex_unit] & 15u);
+            if (length < 0 || (size_t)length >= sizeof rhs) return -1;
+        }
+        /* GOWA: EXP_TEX (w0 bit 21) -- the RSX expands the fetched [0,1] value
+         * to [-1,1] (x*2-1): signed data (velocity, normals) kept in unsigned
+         * 8-bit targets. Only on units whose format is unsigned normalized
+         * (g_rsx_fp_exp_units, filled by the caller; 0 = the old behaviour).
+         * Without it God of War Ascension's motion blur read its "no motion"
+         * velocity (0.5) as motion and blurred the whole screen. */
+        if ((w0 & (1u << 21)) && ((g_rsx_fp_exp_units >> tex_unit) & 1u) &&
+            (opcode == OP_TEX || opcode == OP_TXP || opcode == OP_TXB || opcode == OP_TXL || opcode == OP_TXD)) {
+            char sample[sizeof rhs]; memcpy(sample, rhs, sizeof sample);
+            const int length = snprintf(rhs, sizeof rhs, "((%s) * 2.0 - 1.0)", sample);
             if (length < 0 || (size_t)length >= sizeof rhs) return -1;
         }
 
@@ -1008,6 +1232,7 @@ static int rsx_fp_decompile_internal(
             if (has_dest) {
                 const int target = fp_export_target(dst_idx, dst_half);
                 if (target >= 0) wrote[dst_half][target] = 1;
+                if (alias_r && !is_never) fp_alias_sync(&o, alias_r, dst_idx, dst_half, m);
             }
         }
 
@@ -1054,10 +1279,13 @@ static int rsx_fp_decompile_internal(
      * becomes a struct even for one colour target. */
     const int depth_export = ctrl != RSX_FP_CTRL_AUTO && (ctrl & 0xEu) != 0u;
     if (targets == 1 && !depth_export) {
-        char tail[96];
+        char tail[192];
         snprintf(tail, sizeof(tail),
-                 "    float4 _o = %s[0];\n"
-                 "    return (_o == _o) ? _o : (float4)0;\n}\n", export_file);
+                 fp_nanint_on() ? "    float4 _o = %s[0];%s\n"
+                                  "    return ((asuint(_o) & 0x7FFFFFFFu) > 0x7F800000u) ? (float4)0 : _o;\n}\n"
+                                : "    float4 _o = %s[0];%s\n"
+                                  "    return (_o == _o) ? _o : (float4)0;\n}\n", export_file,
+                 fp_clamp16_on() ? " _o = clamp(_o, -65504.0, 65504.0);" : "");
         out_puts(&o, tail);
     } else {
         /* Multiple render targets. The NaN guard is per target: a poisoned
@@ -1066,10 +1294,20 @@ static int rsx_fp_decompile_internal(
         out_puts(&o, "    PSOutput _out;\n");
         for (u32 t = 0; t < targets; t++) {
             char line[192];
+            char clampbuf[64] = "";
+            if (fp_clamp16_on())
+                snprintf(clampbuf, sizeof(clampbuf), " _o%u = clamp(_o%u, -65504.0, 65504.0);", t, t);
+            if (fp_nanint_on())
+                snprintf(line, sizeof(line),
+                         "    float4 _o%u = %s[%u];%s\n"
+                         "    _out.t%u = ((asuint(_o%u) & 0x7FFFFFFFu) > 0x7F800000u) ? (float4)0 : _o%u;\n",
+                         t, export_file, fp_export_reg[half_exports][t], clampbuf,
+                         t, t, t);
+            else
             snprintf(line, sizeof(line),
-                     "    float4 _o%u = %s[%u];\n"
+                     "    float4 _o%u = %s[%u];%s\n"
                      "    _out.t%u = (_o%u == _o%u) ? _o%u : (float4)0;\n",
-                     t, export_file, fp_export_reg[half_exports][t],
+                     t, export_file, fp_export_reg[half_exports][t], clampbuf,
                      t, t, t, t);
             out_puts(&o, line);
         }
@@ -1090,8 +1328,12 @@ static int rsx_fp_decompile_internal(
         "    float4 position : SV_POSITION; float4 col0 : COLOR0; float4 col1 : COLOR1;\n"
         "    float4 fog : FOG;\n"
         "    float4 tc0:TEXCOORD0; float4 tc1:TEXCOORD1; float4 tc2:TEXCOORD2; float4 tc3:TEXCOORD3;\n"
-        "    float4 tc4:TEXCOORD4; float4 tc5:TEXCOORD5; float4 tc6:TEXCOORD6; float4 tc7:TEXCOORD7;\n"
-        "};\n");
+        "    float4 tc4:TEXCOORD4; float4 tc5:TEXCOORD5; float4 tc6:TEXCOORD6; float4 tc7:TEXCOORD7;\n");
+    if (g_rsx_vp_tc89)
+        out_puts(&p, "    float4 tc8:TEXCOORD8; float4 tc9:TEXCOORD9;\n");
+    if (s_fp_uses_face)
+        out_puts(&p, "    bool _rsx_front : SV_IsFrontFace;\n");
+    out_puts(&p, "};\n");
     /* Texture bank. With no cube units (the default) emit the exact legacy
      * array declaration so 2D-only programs are byte-identical. When any unit
      * is a cubemap, declare each unit individually at its t-register so the
@@ -1102,7 +1344,8 @@ static int rsx_fp_decompile_internal(
         char decl[64];
         for (u32 u = 0; u < 16; u++) {
             snprintf(decl, sizeof(decl), "%s rsx_tex%u : register(t%u);\n",
-                     ((tex_cube_mask >> u) & 1u) ? "TextureCube" : "Texture2D  ", u, u);
+                     ((tex_cube_mask >> u) & 1u) ? "TextureCube"
+                     : ((tex_cube_mask >> (16u + u)) & 1u) ? "Texture3D  " : "Texture2D  ", u, u);
             out_puts(&p, decl);
         }
     }
@@ -1115,14 +1358,28 @@ static int rsx_fp_decompile_internal(
             constants_decl, sizeof(constants_decl),
             "cbuffer PSConstants : register(b1) {\n"
             "    float4 fp_constants[%u];\n"
-            "    float4 fp_alpha;\n"
+            "    float4 fp_alpha;\n%s"
             "};\n",
-            buffered_constant_count ? buffered_constant_count : 1u);
+            buffered_constant_count ? buffered_constant_count : 1u,
+            shadow_window ? "    float4 fp_texwin[16];\n" : "");
         out_puts(&p, constants_decl);
+        /* RSX WPOS: with the window origin at the bottom (SET_SHADER_WINDOW
+         * bit 12, the usual libgcm setting) y counts up from the bottom edge;
+         * SV_Position counts down from the top. fp_alpha.y = window height,
+         * fp_alpha.z = 1 when the origin is the bottom (live draw uploads both
+         * beside the alpha reference). Screen-space lookups in post passes
+         * (God of War Ascension's gameplay) sampled upside down without it. */
+        /* fp_alpha.w = 1 / internal resolution scale (GOWA_RES_SCALE): WPOS
+         * stays in guest pixels when the target is rendered N x larger. */
+        out_puts(&p,
+            "float4 _rsx_wpos(float4 p) {\n"
+            "    float2 q = p.xy * fp_alpha.w;\n"
+            "    return float4(q.x, fp_alpha.z > 0.5 ? fp_alpha.y - q.y : q.y, p.z, p.w);\n"
+            "}\n");
     }
     if (shadow) for (u32 u = 0; u < 16; u++)
         if ((sampled_units & (1u << u)) && shadow[u].enabled)
-            fp_shadow_helper(&p, u, tex_cube_mask, &shadow[u]);
+            fp_shadow_helper(&p, u, tex_cube_mask, &shadow[u], shadow_window);
     if (gamma_units) fp_gamma_helper(&p);
     /* NV40 pack/unpack. A packed word travels on in a float's bits, so the
      * packs bitcast and the unpacks bitcast back; the sRGB forms follow
@@ -1461,7 +1718,7 @@ int rsx_fp_apply_unnorm_scale(char* hlsl, u32 hlsl_size, u32 unnorm_mask,
 
     for (u32 u = 0; u < 16; u++) {
         if (!((unnorm_mask >> u) & 1u)) continue;
-        if ((cube_mask >> u) & 1u) continue;
+        if (((cube_mask >> u) & 1u) || ((cube_mask >> (16u + u)) & 1u)) continue;
         const u32 w = dim[u][0], h = dim[u][1];
         if (!w || !h) continue;
 

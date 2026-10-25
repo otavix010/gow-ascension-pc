@@ -116,6 +116,22 @@ void rsx_vertex_fetch_plan_prepare(
 int rsx_vertex_fetch_one(
     const rsx_vertex_fetch_plan* plan, const rsx_vertex_ref* ref, u8* out);
 
+/* GOWA: all `count` vertices at once, attribute by attribute (see the .c).
+ * 0 = use rsx_vertex_fetch_one per vertex instead. */
+int rsx_vertex_fetch_all(
+    const rsx_vertex_fetch_plan* plan, const rsx_vertex_ref* refs, u32 count,
+    u8* out, u32 out_stride);
+
+/* GOWA (24/10): one attribute register `attr` of the plan, a float4 per vertex at
+ * out, out + out_stride, ... (the conversion rsx_vertex_fetch_all does per slot). */
+int rsx_vertex_fetch_attr_all(
+    const rsx_vertex_fetch_plan* plan, u32 attr, const rsx_vertex_ref* refs, u32 count,
+    u8* out, u32 out_stride);
+
+/* GOWA (24/10): 1 when the last rsx_vertex_remap_build took the dense path (the
+ * unique references are then lo..hi in order, one base index). */
+extern int g_rsx_remap_dense;
+
 /* Collapse repeated (vertex_id, base_index) references in first-use order.
  * refs is rewritten in place with the unique prefix.  The occurrence map
  * remains valid until the next call using the same remap object. */

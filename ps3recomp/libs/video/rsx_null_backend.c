@@ -17,6 +17,7 @@
 #define WIN32_LEAN_AND_MEAN
 #endif
 #include <windows.h>
+#include "rsx_window_place.h"
 
 /* ---------------------------------------------------------------------------
  * Internal state
@@ -167,17 +168,28 @@ static void null_clear(void* ud, u32 flags, u32 color, float depth, u8 stencil)
     s_state.clear_color = RGB(r, g, b);
 }
 
+/* Per-draw-state lines: a title that sets the viewport per draw (God of War
+ * Ascension, ~7000 draws a frame) wrote 1.7 M lines a run, and the RSX thread
+ * spent 55% of its time in NtWriteFile. Off unless PS3_RSX_STATE_LOG=1, even
+ * in verbose (redirected) runs. */
+static int null_state_log(void)
+{
+    static int v = -1;
+    if (v < 0) { const char* e = getenv("PS3_RSX_STATE_LOG"); v = (e && e[0] == '1') ? 1 : 0; }
+    return v;
+}
+
 static void null_set_render_target(void* ud, const rsx_state* state)
 {
     (void)ud;
-    if (ps3_log_verbose()) printf("[RSX null] set_render_target(format=0x%X, %ux%u)\n",
+    if (null_state_log()) printf("[RSX null] set_render_target(format=0x%X, %ux%u)\n",
            state->surface_format, state->surface_clip_w, state->surface_clip_h);
 }
 
 static void null_set_viewport(void* ud, const rsx_state* state)
 {
     (void)ud;
-    if (ps3_log_verbose()) printf("[RSX null] set_viewport(%u,%u %ux%u)\n",
+    if (null_state_log()) printf("[RSX null] set_viewport(%u,%u %ux%u)\n",
            state->viewport_x, state->viewport_y,
            state->viewport_w, state->viewport_h);
 }
@@ -247,17 +259,9 @@ int rsx_null_backend_init(u32 width, u32 height, const char* title)
     wc.lpszClassName = "ps3recomp_null";
     RegisterClassExA(&wc);
 
-    /* Compute window size from client area */
-    RECT wr = {0, 0, (LONG)width, (LONG)height};
-    AdjustWindowRect(&wr, WS_OVERLAPPEDWINDOW, FALSE);
-
-    s_state.hwnd = CreateWindowExA(
-        0, "ps3recomp_null",
-        title ? title : "ps3recomp",
-        WS_OVERLAPPEDWINDOW | WS_VISIBLE,
-        CW_USEDEFAULT, CW_USEDEFAULT,
-        wr.right - wr.left, wr.bottom - wr.top,
-        NULL, NULL, GetModuleHandle(NULL), NULL);
+    /* Client area width x height; PS3_WINDOW_MONITOR picks the monitor
+     * (rsx_window_place.h). */
+    s_state.hwnd = rsx_create_placed_window("ps3recomp_null", title ? title : "ps3recomp", width, height);
 
     if (!s_state.hwnd) {
         printf("[RSX null] ERROR: CreateWindow failed (%lu)\n", GetLastError());
@@ -318,7 +322,11 @@ int rsx_null_backend_pump_messages(void)
         char tb[256];
         snprintf(tb, sizeof(tb), "%s | FPS: %.2f | draws: %u | %ux%u", s_state.title, fps,
                  rsx_live_draw_get_last_draws(), s_state.width, s_state.height);
-        SetWindowTextA(s_state.hwnd, tb);
+        /* GOWA: the title (PARAM.SFO) is UTF-8 -- "Ascension™" came out as
+         * "Ascensionâ„¢" through the ANSI call. */
+        { wchar_t tw[256];
+          if (MultiByteToWideChar(CP_UTF8, 0, tb, -1, tw, 256) > 0) SetWindowTextW(s_state.hwnd, tw);
+          else SetWindowTextA(s_state.hwnd, tb); }
         s_state.title_frames = s_state.frame_count;
         s_state.title_time = now;
     }

@@ -181,6 +181,12 @@ int rsx_vertex_constant_ring_plan(
  * half exports; floating surfaces and 32-bit exports bypass conversion. */
 int rsx_fp_srgb_output_enabled(u32 packer, u32 ctrl, u32 color_format);
 
+/* GOWA: units (bit per texture unit) whose format is unsigned normalized,
+ * so an EXP_TEX fetch expands to [-1,1]. Set before decompiling; part of
+ * the caller's pipeline identity. */
+extern u32 g_rsx_fp_exp_units;
+extern int g_rsx_fp_shadow_window;
+
 /* Apply RGB-only linear-to-sRGB conversion to all emitted color targets,
  * before output quantization. Alpha and optional depth exports are preserved.
  * Returns 1, or -1 without mutation for malformed source/insufficient space.

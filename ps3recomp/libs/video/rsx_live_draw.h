@@ -70,6 +70,12 @@ void rsx_live_draw_set_display_buffer(u32 buffer_id, u32 location, u32 offset,
 /* Feed one NV method write. No-op when disabled or uninitialized. */
 void rsx_live_draw_method(u32 method, u32 arg);
 
+/* GOWA (24/10): a FIFO packet's argument words (big-endian, straight from guest
+ * memory) for consecutive methods from `method` (ni: all for `method`), subchannel 0
+ * -- rsx_live_draw_method word by word, without its per-word checks. Returns 0, having
+ * done nothing, when the per-word path is needed (traces, movie mode, not ready). */
+int rsx_live_draw_method_run(u32 method, const u8* words, u32 count, int ni);
+
 /* Publish the FIFO bounds associated with the next flip method.  The live
  * consumer calls this only for driver-queue methods; ordinary method traffic
  * pays no extra synchronization cost. */
@@ -97,6 +103,9 @@ int rsx_live_draw_resolve_blit(u32 src_loc, u32 src_abs, u32 src_pitch, u32 ds, 
  * fence). Mirrors RPCS3 nv406e::set_reference's sync() so REF advances only
  * after the GPU has really caught up. */
 void rsx_live_draw_flush(void);
+/* GOWA: write main-memory render targets back to guest memory (see .c). */
+void rsx_live_draw_sync_mainmem(void);
+int rsx_live_draw_mainmem_writeback_on(void);
 
 /* Present the given display buffer id (called from the flip path). */
 void rsx_live_draw_present(u32 buffer_id);

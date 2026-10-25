@@ -25,6 +25,12 @@ extern "C" {
  * including the one with the D3.end bit, bounded by max_bytes. 0 if none. */
 u32 rsx_vp_program_size_instrs(const u8* ucode, u32 max_bytes);
 
+/* GOWA (24/10): the transform-constant slots the program can read, [*lo, *hi]
+ * (*lo > *hi: none), counting every source field typed "constant" whether its
+ * opcode reads it or not; a relative-addressed constant means all 512. Returns
+ * the instruction count, 0 for invalid/non-terminated input. */
+u32 rsx_vp_constant_range(const u8* ucode, u32 max_bytes, u32* lo, u32* hi);
+
 typedef struct rsx_vp_input_analysis {
     u32 input_mask;
     int exact;

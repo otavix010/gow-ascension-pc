@@ -3,6 +3,7 @@
 #include "rsx_vertex_formats.h"
 
 #include <limits.h>
+#include <immintrin.h>   /* GOWA: AVX2 in rsx_vertex_remap_build */
 #include <stdlib.h>
 #include <string.h>
 
@@ -180,6 +181,8 @@ void rsx_vertex_fetch_plan_prepare(
 {
     if (!plan)
         return;
+    int norm_ok = 0;
+    u32 norm_first = 0, norm_last = 0;
     for (u32 slot = 0; slot < plan->layout.count; slot++) {
         const u32 attr = plan->layout.attrs[slot];
         rsx_vertex_fetch_attr* fetch = &plan->attr[attr];
@@ -215,13 +218,26 @@ void rsx_vertex_fetch_plan_prepare(
 
         u32 first = UINT_MAX;
         u32 last = 0;
-        for (u32 i = 0; i < count; i++) {
-            const u32 element = rsx_vertex_element_index(
-                refs[i].vertex_id, refs[i].base_index,
-                fetch->desc.frequency,
-                (plan->divider_mask >> attr) & 1u);
-            if (element < first) first = element;
-            if (element > last) last = element;
+        /* GOWA (21/10): an ordinary-frequency element is the same for every
+         * attribute ((vertex_id + base_index) & 0xFFFFF) -- its range is
+         * computed once per draw instead of once per attribute */
+        if (fetch->desc.frequency <= 1 && norm_ok) {
+            first = norm_first;
+            last = norm_last;
+        } else {
+            for (u32 i = 0; i < count; i++) {
+                const u32 element = rsx_vertex_element_index(
+                    refs[i].vertex_id, refs[i].base_index,
+                    fetch->desc.frequency,
+                    (plan->divider_mask >> attr) & 1u);
+                if (element < first) first = element;
+                if (element > last) last = element;
+            }
+            if (fetch->desc.frequency <= 1) {
+                norm_ok = 1;
+                norm_first = first;
+                norm_last = last;
+            }
         }
 
         const u64 prefix =
@@ -242,6 +258,83 @@ void rsx_vertex_fetch_plan_prepare(
         fetch->stable_first = first;
         fetch->stable_last = last;
     }
+}
+
+/* GOWA: every vertex of a draw, attribute by attribute: one type-specialised
+ * loop per attribute instead of rsx_vertex_fetch_one's per-vertex walk over
+ * the attributes with a type switch per component. Only through the stable
+ * bases rsx_vertex_fetch_plan_prepare set up; returns 0 (nothing usable
+ * written) whenever an attribute needs the general path -- no stable base, an
+ * element outside it, an unknown type -- and the caller then runs
+ * rsx_vertex_fetch_one per vertex as before. Same values as fetch_one: the
+ * components it does not cover keep (0, 0, 0, 1). */
+static inline float rsx_fa_be_f32(const u8* p) { u32 v; memcpy(&v, p, 4); v = __builtin_bswap32(v); float f; memcpy(&f, &v, 4); return f; }
+static inline s16 rsx_fa_be_s16(const u8* p) { return (s16)((p[0] << 8) | p[1]); }
+static int rsx_vertex_fetch_all_ref(
+    const rsx_vertex_fetch_plan* plan, const rsx_vertex_ref* refs, u32 count,
+    u8* out, u32 out_stride)
+{
+    if (!plan || !refs || !out || !out_stride || plan->inline_data)
+        return 0;
+    for (u32 slot = 0; slot < plan->layout.count; slot++) {
+        const u32 attr = plan->layout.attrs[slot];
+        const rsx_vertex_fetch_attr* f = &plan->attr[attr];
+        u8* dst = out + slot * 16u;
+        if (!f->desc.type || !f->desc.size) {
+            for (u32 i = 0; i < count; i++)
+                memcpy(dst + (size_t)i * out_stride, f->default_value, 16);
+            continue;
+        }
+        if (!f->stable_base)
+            return 0;
+        const u32 freq = f->desc.frequency, mod = (plan->divider_mask >> attr) & 1u;
+        const u32 size = f->desc.size < 4 ? f->desc.size : 4;
+        const u32 first = f->stable_first, last = f->stable_last, stride = f->stride;
+        const u8* base = f->stable_base;
+#define FA_LOOP(...) \
+        for (u32 i = 0; i < count; i++) { \
+            const u32 e = rsx_vertex_element_index(refs[i].vertex_id, refs[i].base_index, freq, mod); \
+            if (e < first || e > last) return 0; \
+            const u8* s = base + (u64)(e - first) * stride; \
+            float* v = (float*)(dst + (size_t)i * out_stride); \
+            v[0] = v[1] = v[2] = 0.0f; v[3] = 1.0f; \
+            __VA_ARGS__ \
+        }
+        switch (f->desc.type) {
+        case RSX_VTX_TYPE_FLOAT:
+            FA_LOOP(for (u32 c = 0; c < size; c++) v[c] = rsx_fa_be_f32(s + c * 4);)
+            break;
+        case RSX_VTX_TYPE_HALF:
+            FA_LOOP(for (u32 c = 0; c < size; c++) v[c] = rsx_compact_be_f16(s + c * 2);)
+            break;
+        case RSX_VTX_TYPE_UNORM8:
+            FA_LOOP(for (u32 c = 0; c < size; c++) v[c] = s[c] / 255.0f;)
+            break;
+        case RSX_VTX_TYPE_UINT8:
+            FA_LOOP(for (u32 c = 0; c < size; c++) v[c] = (float)s[c];)
+            break;
+        case RSX_VTX_TYPE_SNORM16:
+            FA_LOOP(for (u32 c = 0; c < size; c++) v[c] = rsx_fa_be_s16(s + c * 2) / 32767.0f;)
+            break;
+        case RSX_VTX_TYPE_SINT16:
+            FA_LOOP(for (u32 c = 0; c < size; c++) v[c] = (float)rsx_fa_be_s16(s + c * 2);)
+            break;
+        case RSX_VTX_TYPE_CMP32:   /* 11:11:10 signed, as rsx_vertex_decode_element */
+            FA_LOOP({
+                u32 w; memcpy(&w, s, 4); w = __builtin_bswap32(w);
+                s32 x = (s32)(w & 0x7FF), y = (s32)((w >> 11) & 0x7FF), z = (s32)((w >> 22) & 0x3FF);
+                if (x & 0x400) x -= 0x800;
+                if (y & 0x400) y -= 0x800;
+                if (z & 0x200) z -= 0x400;
+                v[0] = (float)x / 1023.0f; v[1] = (float)y / 1023.0f; v[2] = (float)z / 511.0f; v[3] = 1.0f;
+            })
+            break;
+        default:
+            return 0;
+        }
+#undef FA_LOOP
+    }
+    return 1;
 }
 
 int rsx_vertex_fetch_one(
@@ -302,10 +395,15 @@ static u64 rsx_vertex_remap_hash(u64 value)
     return value;
 }
 
+/* GOWA (24/10): 1 when the last rsx_vertex_remap_build took the dense path -- the
+ * unique references are then exactly lo..hi with one base index, in order */
+int g_rsx_remap_dense;
+
 int rsx_vertex_remap_build(
     rsx_vertex_remap* remap, rsx_vertex_ref* refs, u32 count,
     u32* unique_count)
 {
+    g_rsx_remap_dense = 0;
     if (!remap || (!refs && count) || !unique_count)
         return 0;
     *unique_count = count;
@@ -319,6 +417,80 @@ int rsx_vertex_remap_build(
             return 0;
         remap->occurrence_to_unique = occurrences;
         remap->occurrence_capacity = count;
+    }
+
+    /* GOWA: a dense index range needs no hashing. When every reference shares
+     * one base index and max - min + 1 is SMALLER than the reference count,
+     * the unique vertices are just [min, max] (a few may go unused) and each
+     * occurrence maps to vertex_id - min. Edge geometry draws -- thousands per
+     * frame in God of War Ascension -- are almost all like that; the hash
+     * dedupe was ~8% of the RSX thread. Strictly smaller, so the caller's
+     * "remapped" test (unique < count) holds whenever the order changed.
+     * RSX_NO_RANGE_REMAP=1 always hashes. */
+    {
+        static int s_off = -1;
+        if (s_off < 0) s_off = getenv("RSX_NO_RANGE_REMAP") ? 1 : 0;
+        if (!s_off) {
+            u32 lo = refs[0].vertex_id, hi = lo;
+            const u32 base = refs[0].base_index;
+            u32 same = 1;
+            u32 o0 = 1;
+#if defined(__AVX2__)
+            /* GOWA (21/10): 4 refs (vertex_id, base_index) per 256-bit load */
+            {
+                __m256i vmin = _mm256_set1_epi32((int)lo), vmax = vmin;
+                const __m256i vb = _mm256_set1_epi32((int)base);
+                __m256i bad = _mm256_setzero_si256();
+                const __m256i odd = _mm256_setr_epi32(0, -1, 0, -1, 0, -1, 0, -1);
+                for (o0 = 0; o0 + 4 <= count; o0 += 4) {
+                    const __m256i r = _mm256_loadu_si256((const __m256i*)&refs[o0]);
+                    /* even lanes vertex_id, odd lanes base_index: min/max only the even ones
+                     * (odd lanes replaced by lo so they never win) */
+                    const __m256i vid = _mm256_blendv_epi8(r, vmin, odd);
+                    vmin = _mm256_min_epu32(vmin, vid);
+                    vmax = _mm256_max_epu32(vmax, _mm256_blendv_epi8(r, _mm256_setzero_si256(), odd));
+                    bad = _mm256_or_si256(bad, _mm256_and_si256(odd, _mm256_xor_si256(r, vb)));
+                }
+                u32 t[8];
+                _mm256_storeu_si256((__m256i*)t, vmin);
+                for (int k = 0; k < 8; k += 2) lo = t[k] < lo ? t[k] : lo;
+                _mm256_storeu_si256((__m256i*)t, vmax);
+                for (int k = 0; k < 8; k += 2) hi = t[k] > hi ? t[k] : hi;
+                same = _mm256_testz_si256(bad, bad);
+            }
+#endif
+            for (u32 o = o0; o < count; o++) {
+                const u32 v = refs[o].vertex_id;
+                lo = v < lo ? v : lo;
+                hi = v > hi ? v : hi;
+                same &= refs[o].base_index == base;
+            }
+            const u64 range = (u64)hi - lo + 1u;
+            if (same && range < count) {
+                u32 o = 0;
+#if defined(__AVX2__)
+                {
+                    const __m256i vlo = _mm256_set1_epi32((int)lo);
+                    const __m256i pick = _mm256_setr_epi32(0, 2, 4, 6, 1, 3, 5, 7);
+                    for (; o + 4 <= count; o += 4) {
+                        const __m256i r = _mm256_permutevar8x32_epi32(
+                            _mm256_loadu_si256((const __m256i*)&refs[o]), pick);
+                        _mm_storeu_si128((__m128i*)&remap->occurrence_to_unique[o],
+                                         _mm256_castsi256_si128(_mm256_sub_epi32(r, vlo)));
+                    }
+                }
+#endif
+                for (; o < count; o++)
+                    remap->occurrence_to_unique[o] = refs[o].vertex_id - lo;
+                for (u32 i = 0; i < (u32)range; i++) {
+                    refs[i].vertex_id = lo + i;
+                    refs[i].base_index = base;
+                }
+                *unique_count = (u32)range;
+                g_rsx_remap_dense = 1;
+                return 1;
+            }
+        }
     }
 
     if (count > UINT_MAX / 2u)
@@ -412,3 +584,5 @@ int rsx_vertex_topology_plan(
         return 0;
     }
 }
+
+#include "rsx_vertex_fetch_simd.h"   /* GOWA: rsx_vertex_fetch_all (SSE) */
