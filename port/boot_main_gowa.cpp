@@ -968,9 +968,14 @@ static void gowa_hp_dllsym(uintptr_t pc, char* out, size_t n)
     if (best) snprintf(out, n, "%s!%s+0x%X", bn, best, rva - brva);
     else snprintf(out, n, "%s+0x%X", bn, rva);
 }
+/* 25/10: lidas antes da amostragem -- um getenv com a thread amostrada suspensa
+ * espera para sempre se ela estiver segurando a trava do ambiente da CRT (o perfil
+ * por instrução derrubava o jogo no notebook, sempre na mesma janela) */
+static int s_hp_rip = -1, s_hp_rip2 = -1;
 static DWORD WINAPI gowa_hostprof_thread(LPVOID)
 {
     const char* e = getenv("GOWA_HOSTPROF");
+    { const char* r = getenv("GOWA_HOSTPROF_RIP"); s_hp_rip = r ? 1 : 0; s_hp_rip2 = r && *r == '2'; }
     unsigned start_s = (unsigned)strtoul(e, NULL, 10), dur_s = 10;
     if (const char* c = strchr(e, ':')) dur_s = (unsigned)strtoul(c + 1, NULL, 10);
     Sleep(start_s * 1000u);
@@ -1038,6 +1043,11 @@ static DWORD WINAPI gowa_hostprof_thread(LPVOID)
     const DWORD me = GetCurrentThreadId(), pid = GetCurrentProcessId();
     HMODULE self = GetModuleHandleA(NULL);
     ULONGLONG t0 = GetTickCount64(), last_snap = 0;
+    /* 25/10: "está no exe?" pela faixa da imagem -- o GetModuleHandleExA pega a trava do
+     * carregador, e com a thread amostrada suspensa isso pode esperar para sempre */
+    const uintptr_t self_lo = (uintptr_t)self;
+    const uintptr_t self_hi = self_lo + ((const IMAGE_NT_HEADERS64*)((const uint8_t*)self +
+                                         ((const IMAGE_DOS_HEADER*)self)->e_lfanew))->OptionalHeader.SizeOfImage;
     while (GetTickCount64() - t0 < dur_s * 1000ull) {
         if (GetTickCount64() - last_snap > 1000) {
             last_snap = GetTickCount64();
@@ -1091,10 +1101,7 @@ static DWORD WINAPI gowa_hostprof_thread(LPVOID)
                 }
                 if (!g) { uint32_t sk; if (slookup((uintptr_t)ctx.Rip, &sk)) { g = sk; via = 5; } }
                 if (!g) {
-                    HMODULE m = NULL;
-                    GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
-                                       (LPCSTR)ctx.Rip, &m);
-                    inself = (m == self);
+                    inself = (uintptr_t)ctx.Rip >= self_lo && (uintptr_t)ctx.Rip < self_hi;
                     MEMORY_BASIC_INFORMATION mbi; const uint64_t* sp = (const uint64_t*)ctx.Rsp;
                     if (VirtualQuery(sp, &mbi, sizeof mbi) && mbi.State == MEM_COMMIT && !(mbi.Protect & (PAGE_NOACCESS | PAGE_GUARD))) {
                         const uint64_t end = (uint64_t)mbi.BaseAddress + mbi.RegionSize;
@@ -1114,17 +1121,19 @@ static DWORD WINAPI gowa_hostprof_thread(LPVOID)
                             if (k->n == 0) { k->tid = thr[i].tid; k->pc = key; k->n = 1; break; }
                             if (k->tid == thr[i].tid && k->pc == key) { k->n++; break; }
                         }
-                        /* unwind out of the DLL to the first frame in this exe */
+                        /* unwind out of the DLL to the first frame in this exe. Not with
+                         * GOWA_HOSTPROF_RIP=2 (25/10): that mode only wants the exe's RIPs, and
+                         * two runs of it died ~15 s into the window with a fault inside ntdll
+                         * (read of 0x140) -- the suspect is this unwinding of a thread stopped
+                         * inside a DLL */
                         CONTEXT uc = ctx; uintptr_t cr = 0;
-                        for (int d = 0; d < 24; d++) {
+                        for (int d = 0; d < 24 && s_hp_rip2 <= 0; d++) {
                             DWORD64 ib = 0;
                             PRUNTIME_FUNCTION uf = RtlLookupFunctionEntry(uc.Rip, &ib, NULL);
                             if (!uf) { uc.Rip = *(DWORD64*)uc.Rsp; uc.Rsp += 8; }
                             else { void* hd = NULL; DWORD64 ef = 0; RtlVirtualUnwind(UNW_FLAG_NHANDLER, ib, uc.Rip, uf, &uc, &hd, &ef, NULL); }
                             if (!uc.Rip) break;
-                            HMODULE um = NULL;
-                            GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT, (LPCSTR)uc.Rip, &um);
-                            if (um == self) {
+                            if ((uintptr_t)uc.Rip >= self_lo && (uintptr_t)uc.Rip < self_hi) {
                                 DWORD64 sb = 0; PRUNTIME_FUNCTION sf = RtlLookupFunctionEntry(uc.Rip, &sb, NULL);
                                 cr = sf ? (uintptr_t)sf->BeginAddress : (uintptr_t)(uc.Rip - (DWORD64)self);
                                 break;
@@ -1149,8 +1158,7 @@ static DWORD WINAPI gowa_hostprof_thread(LPVOID)
                         /* GOWA_HOSTPROF_RIP=1: also the exact RVA of RIP (all
                          * threads), to read the hot instructions of a runtime
                          * function with llvm-objdump */
-                        static int s_rip = -1; if (s_rip < 0) s_rip = getenv("GOWA_HOSTPROF_RIP") ? 1 : 0;
-                        if (s_rip) {
+                        if (s_hp_rip > 0) {
                             const uint32_t rva = (uint32_t)((uintptr_t)ctx.Rip - (uintptr_t)self);
                             const uint32_t hh = (rva * 2654435761u) >> 20;     /* 4096 slots */
                             for (int pr = 0; pr < 64; pr++) {
@@ -1167,8 +1175,7 @@ static DWORD WINAPI gowa_hostprof_thread(LPVOID)
                  * included), all of them written to GOWA_HOSTPROF_RIPFILE
                  * (default out/hostprof_rip.txt) -- the hot instructions of a
                  * lifted SPU function, resolved with build/gowa.map */
-                { static int s_rip2 = -1; if (s_rip2 < 0) { const char* r = getenv("GOWA_HOSTPROF_RIP"); s_rip2 = r && *r == '2'; }
-                  if (s_rip2 && ok && (via == 5 || via == 0 || via == 6)) {
+                { if (s_hp_rip2 > 0 && ok && (via == 5 || via == 0 || via == 6)) {
                       const uint32_t rva = (uint32_t)((uintptr_t)ctx.Rip - (uintptr_t)self);
                       const uint32_t hh = (rva * 2654435761u) >> 16;
                       for (int pr = 0; pr < 256; pr++) {
