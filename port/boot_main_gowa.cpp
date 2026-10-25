@@ -2320,9 +2320,13 @@ static DWORD WINAPI hang_watchdog(LPVOID)
     /* ponytail: two fixed samples cover a boot wedge, but a hang that happens
      * minutes in (e.g. after a level load) needs them moved. WATCHDOG_AT="a,b"
      * gives the two sample times in seconds. */
+    /* GOWA (25/10): only when WATCHDOG_AT asks. The fixed 8 s and 15 s samples dumped every thread in every
+     * player's log while the game loaded normally (two thousand lines, and the log a report attaches is its last
+     * 256 KB); a real freeze is still dumped by the flip watchdog above. */
     int t1 = 8, t2 = 15;
     { const char* e = getenv("WATCHDOG_AT"); int a = 0, b = 0;
-      if (e && sscanf(e, "%d,%d", &a, &b) == 2 && a > 0 && b > a) { t1 = a; t2 = b; } }
+      if (!e || !*e) return 0;
+      if (sscanf(e, "%d,%d", &a, &b) == 2 && a > 0 && b > a) { t1 = a; t2 = b; } }
     char lbl[64];
     Sleep((DWORD)t1 * 1000);
     snprintf(lbl, sizeof lbl, "%ds sample", t1); dump_threads(lbl, self);

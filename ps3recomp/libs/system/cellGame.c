@@ -308,6 +308,28 @@ void cellGame_init_from_paramsfo(const char* sfo_path)
     if (sfo_read_string(sfo_path, "APP_VER", tmp, sizeof(tmp)) == 0 && tmp[0]) {
         strncpy(s_app_ver, tmp, sizeof(s_app_ver) - 1); s_app_ver[sizeof(s_app_ver) - 1] = '\0';
     }
+
+    /* GOWA (25/10): an installed update (a "GD" patch in /dev_hdd0/game/<title id>/) carries the game's version, as
+     * the PS3 reports it: the disc's PARAM.SFO says 01.00, the 1.04 update's 01.04. God of War Ascension prints
+     * APP_VER on its title screen ("01.00F0.1"), and players took the port for the unpatched game although it runs
+     * the 1.04 executable and reads the update's data. The update's PARAM.SFO is looked for in PS3_HDD0_ROOT, else
+     * beside the disc's PS3_GAME (the port's vfs layout). */
+    {
+        char patch[1100] = "";
+        const char* hdd0 = getenv("PS3_HDD0_ROOT");
+        if (hdd0 && *hdd0) {
+            snprintf(patch, sizeof patch, "%s/game/%s/PARAM.SFO", hdd0, s_title_id);
+        } else {
+            const char* cut = strstr(sfo_path, "PS3_GAME");
+            if (cut) snprintf(patch, sizeof patch, "%.*sgame/%s/PARAM.SFO", (int)(cut - sfo_path), sfo_path, s_title_id);
+        }
+        char cat[8] = "", ver[16] = "";
+        if (patch[0] && sfo_read_string(patch, "CATEGORY", cat, sizeof cat) == 0 && strcmp(cat, "GD") == 0 &&
+            sfo_read_string(patch, "APP_VER", ver, sizeof ver) == 0 && ver[0] && strcmp(ver, s_app_ver) > 0) {
+            printf("[cellGame] update installed ('%s'): APP_VER %s (disc %s)\n", patch, ver, s_app_ver);
+            strncpy(s_app_ver, ver, sizeof(s_app_ver) - 1); s_app_ver[sizeof(s_app_ver) - 1] = '\0';
+        }
+    }
 }
 
 /* Central title-id accessor so other modules (cellSysutil etc.) don't hardcode it. */

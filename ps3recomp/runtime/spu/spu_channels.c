@@ -1475,8 +1475,10 @@ static void spu_ch_wait(spu_context* ctx, uint32_t channel, const char* op)
 {
     if (!yz_ch_block() || spu_ch_ready(ctx, channel)) return;
 
+    /* GOWA (25/10): the first 20, then one in 131072 (was one in 512: ~35 lines a second in play, most of the
+     * log a report attaches) */
     { static unsigned long bn = 0; unsigned long n = ++bn;
-      if (n <= 50 || (n % 512) == 0)
+      if (n <= 20 || (n % 131072) == 0)
         fprintf(stderr, "[ch-block] spu=%X pc=0x%05X op=%s ch=%u evstat=0x%X evmask=0x%X\n",
                 ctx->spu_id, ctx->pc & SPU_LS_MASK, op, channel,
                 ctx->event_status, ctx->event_mask); }
