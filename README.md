@@ -84,6 +84,8 @@ O PS3 tem um processador central (PPU, PowerPC), seis co-processadores vetoriais
 
 ![Capítulo 16 no notebook com a build sem AVX-512](docs/imagens/cap16_notebook_portatil.png)
 
+O que medimos num PC fraco (4 núcleos, sem AVX-512), o que ajudou, o que não ajudou e como medir: [docs/DESEMPENHO_PC_FRACO.md](docs/DESEMPENHO_PC_FRACO.md).
+
 ## Requisitos
 
 - **Windows 10/11 64 bits** e GPU com **Direct3D 12**.
