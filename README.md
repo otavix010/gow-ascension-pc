@@ -1,6 +1,6 @@
 # God of War: Ascension — port nativo para PC
 
-> **Projeto de fãs, sem fins lucrativos, sem relação com a Sony.** *God of War* é marca registrada da Sony Interactive Entertainment. Este repositório **não contém o jogo** nem o firmware: você precisa da **sua própria cópia** do jogo (BCUS98232, com o update 1.04) e do firmware oficial do PS3.
+> **Projeto de fãs, sem fins lucrativos, sem relação com a Sony.** *God of War* é marca registrada da Sony Interactive Entertainment. Este repositório **não contém o jogo** nem o firmware: você precisa da **sua própria cópia** do jogo (BCUS98232). O **update 1.04** e o **firmware oficial do PS3** são **gratuitos**, baixados direto da Sony (links em [Como jogar](#como-jogar)).
 
 ![Capítulo 16 a 66 FPS num Ryzen 7 9800X3D](docs/imagens/cap16_9800x3d.png)
 
@@ -24,10 +24,14 @@ O [Otavix Launcher](https://github.com/otavix010/otavix-launcher/releases/latest
 
 ### À mão
 
-**1. O que você precisa ter**
-- A cópia do **disco** do *God of War: Ascension* **BCUS98232** (EUA), numa pasta que contenha `PS3_GAME`.
-- O **update 1.04**: instalado no [RPCS3](https://rpcs3.net) (fica em `RPCS3\dev_hdd0\game\BCUS98232`) ou o arquivo `.pkg`.
-- O **RPCS3 com o firmware oficial do PS3 instalado** (*File > Install Firmware*, com o `PS3UPDAT.PUP` do site da PlayStation).
+**1. O que você precisa ter** (o update e o firmware são gratuitos e vêm dos servidores oficiais da Sony)
+
+| O quê | Onde conseguir |
+|---|---|
+| **O jogo**: a cópia do disco do *God of War: Ascension* **BCUS98232** (EUA) | A sua cópia, numa pasta que contenha `PS3_GAME`. |
+| **O update 1.04** (grátis, ~235 MB) | **[Baixar o update 1.04 do servidor da Sony](http://b0.ww.np.dl.playstation.net/tppkg/np/BCUS98232/BCUS98232_T76/5525fbb7b6b5456d/UP9000-BCUS98232_00-GOWABDPATCH00001-A0104-V0100-PE.pkg)** (o arquivo `.pkg`; SHA-1 `cf97c10f313ea25c8b0f9b29891c288375c7d3f5`). Tem que ser a **1.04**: as versões 1.05 em diante não servem. Se você já instalou a 1.04 no RPCS3, serve também a pasta `RPCS3\dev_hdd0\game\BCUS98232`. |
+| **O RPCS3** (grátis) | [rpcs3.net/download](https://rpcs3.net/download). Ele só é usado para instalar o firmware. |
+| **O firmware oficial do PS3** (grátis) | Na [página oficial da PlayStation](https://www.playstation.com/pt-br/support/hardware/ps3/system-software/), botão **"Baixar atualização do PS3"** (o arquivo `PS3UPDAT.PUP`). Instale no RPCS3 em ***File > Install Firmware***. |
 
 **2. Instale as ferramentas (uma vez só)**, num terminal:
 ```
@@ -121,7 +125,7 @@ O que medimos num PC fraco (4 núcleos, sem AVX-512), o que ajudou, o que não a
 
 A **native PC port** of *God of War: Ascension* (PS3), made by **static recompilation**: the game's PPU and SPU code is translated to C/C++ and compiled for x86-64 on top of [ps3recomp](https://github.com/sp00nznet/ps3recomp). The GPU command stream is rendered with Direct3D 12, and SPURS runs the official libsre module (LLE).
 
-**Easiest: the [Otavix Launcher](https://github.com/otavix010/otavix-launcher/releases/latest)**, which downloads this port, asks for your folders, generates the game for your CPU and starts it. **Bring your own disc**: no game code or data and no firmware here. You need your own copy (BCUS98232 + update 1.04, installed in RPCS3 or as the .pkg) and RPCS3 with the official PS3 firmware installed. Install Python and the Visual Studio 2022 Build Tools with Clang (commands above), download this repository to a path without spaces, double-click **`gerar.cmd`** (it asks for the folders, then decrypts your copy, translates and builds; ~4 minutes on an 8-core Ryzen 7 9800X3D), then play with **`jogar.cmd`**.
+**Easiest: the [Otavix Launcher](https://github.com/otavix010/otavix-launcher/releases/latest)**, which downloads this port, asks for your folders, generates the game for your CPU and starts it. **Bring your own disc**: no game code or data and no firmware here. You need your own copy of the game (BCUS98232). Update 1.04 and the official PS3 firmware are free from Sony: [update 1.04 .pkg](http://b0.ww.np.dl.playstation.net/tppkg/np/BCUS98232/BCUS98232_T76/5525fbb7b6b5456d/UP9000-BCUS98232_00-GOWABDPATCH00001-A0104-V0100-PE.pkg) (must be exactly 1.04), and the firmware on [PlayStation's PS3 system software page](https://www.playstation.com/en-us/support/hardware/ps3/system-software/), installed in [RPCS3](https://rpcs3.net/download) with *File > Install Firmware*. Install Python and the Visual Studio 2022 Build Tools with Clang (commands above), download this repository to a path without spaces, double-click **`gerar.cmd`** (it asks for the folders, then decrypts your copy, translates and builds; ~4 minutes on an 8-core Ryzen 7 9800X3D), then play with **`jogar.cmd`**.
 
 Status: boots, menus, chapter 1 and chapter 16 play with correct image, 60 FPS locked on a Ryzen 7 9800X3D; the full game is not verified yet. Performance is CPU-bound and much better with AVX-512: ~68 FPS uncapped in chapter 16 on a 9800X3D, ~32 on an i5-11400F, ~8 on a 4-core laptop without AVX-512. The build `gerar.cmd` produces includes the same performance passes as ours (`scripts/otimizar.py`); only PGO is left out. Thread pinning is now off on CPUs with fewer than 12 logical processors (+4% on the laptop), and the GPU command reader no longer hangs on slow PCs.
 
