@@ -38,7 +38,7 @@ def nome(rva):
 
 
 cab = re.compile(r'^\[hostprof\] tid (\d+) \(([^)]*)\): (\d+) amostras, (.*)$')
-lin = re.compile(r'^\[hostprof\]\s+([\d.]+)%\s+rt RVA 0x([0-9A-Fa-f]+)')
+lin = re.compile(r'^\[hostprof\]\s+(dll-via\s+)?([\d.]+)%\s+rt RVA 0x([0-9A-Fa-f]+)')
 atual = None
 for ln in open(log, encoding='utf-8', errors='replace'):
     ln = ln.rstrip('\n')
@@ -49,7 +49,7 @@ for ln in open(log, encoding='utf-8', errors='replace'):
         continue
     m = lin.match(ln)
     if m and atual:
-        print('   %5s%%  %s' % (m.group(1), nome(int(m.group(2), 16))))
+        print('   %s%5s%%  %s' % ('dll-via ' if m.group(1) else '', m.group(2), nome(int(m.group(3), 16))))
         continue
     if atual and ln.startswith('[hostprof]') and ' dll ' in ln:
         print('   ' + ln[len('[hostprof]'):].strip())

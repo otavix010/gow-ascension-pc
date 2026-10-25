@@ -941,6 +941,8 @@ static DWORD WINAPI gowa_hostprof_thread(LPVOID)
      * DLL has unwind data), to name what the lifted caller is waiting in */
     struct DKey { DWORD tid; uintptr_t pc; unsigned n; };
     const int DN = 1 << 12; static DKey dhist[1 << 12];
+    /* 25/10: for a DLL sample, the first frame back in this exe (who called the wait) */
+    static DKey dvia[1 << 12];
     /* GOWA_HOSTPROF_CHAIN=<func hex>[,<func hex>...]: quem chama essas funções
      * (cadeias do guest pelo desenrolar da pilha do host) */
     struct ChainKey { uint32_t c[5]; unsigned n; };
@@ -1029,6 +1031,30 @@ static DWORD WINAPI gowa_hostprof_thread(LPVOID)
                             DKey* k = &dhist[(dh + pr) & (DN - 1)];
                             if (k->n == 0) { k->tid = thr[i].tid; k->pc = key; k->n = 1; break; }
                             if (k->tid == thr[i].tid && k->pc == key) { k->n++; break; }
+                        }
+                        /* unwind out of the DLL to the first frame in this exe */
+                        CONTEXT uc = ctx; uintptr_t cr = 0;
+                        for (int d = 0; d < 24; d++) {
+                            DWORD64 ib = 0;
+                            PRUNTIME_FUNCTION uf = RtlLookupFunctionEntry(uc.Rip, &ib, NULL);
+                            if (!uf) { uc.Rip = *(DWORD64*)uc.Rsp; uc.Rsp += 8; }
+                            else { void* hd = NULL; DWORD64 ef = 0; RtlVirtualUnwind(UNW_FLAG_NHANDLER, ib, uc.Rip, uf, &uc, &hd, &ef, NULL); }
+                            if (!uc.Rip) break;
+                            HMODULE um = NULL;
+                            GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT, (LPCSTR)uc.Rip, &um);
+                            if (um == self) {
+                                DWORD64 sb = 0; PRUNTIME_FUNCTION sf = RtlLookupFunctionEntry(uc.Rip, &sb, NULL);
+                                cr = sf ? (uintptr_t)sf->BeginAddress : (uintptr_t)(uc.Rip - (DWORD64)self);
+                                break;
+                            }
+                        }
+                        if (cr) {
+                            const uint32_t vh = (uint32_t)((thr[i].tid * 2654435761u) ^ (uint32_t)(cr >> 4)) & (DN - 1);
+                            for (int pr = 0; pr < 64; pr++) {
+                                DKey* k = &dvia[(vh + pr) & (DN - 1)];
+                                if (k->n == 0) { k->tid = thr[i].tid; k->pc = cr; k->n = 1; break; }
+                                if (k->tid == thr[i].tid && k->pc == cr) { k->n++; break; }
+                            }
                         }
                     }
                     /* runtime code with no lifted caller (SPU threads, RSX):
@@ -1151,6 +1177,13 @@ static DWORD WINAPI gowa_hostprof_thread(LPVOID)
             if (!best || best->n * 100u < thr[i].total) break;
             char sym[300]; gowa_hp_dllsym(best->pc, sym, sizeof sym);
             fprintf(stderr, "[hostprof]      dll %5.1f%%  %s\n", 100.0 * best->n / thr[i].total, sym);
+            best->n = 0;
+        }
+        for (int rank = 0; rank < 6; rank++) {
+            DKey* best = NULL;
+            for (int k = 0; k < DN; k++) if (dvia[k].n && dvia[k].tid == thr[i].tid && (!best || dvia[k].n > best->n)) best = &dvia[k];
+            if (!best || best->n * 100u < thr[i].total) break;
+            fprintf(stderr, "[hostprof]      dll-via %5.1f%%  rt RVA 0x%08X\n", 100.0 * best->n / thr[i].total, (unsigned)best->pc);
             best->n = 0;
         }
     }
@@ -2634,9 +2667,16 @@ int main(int argc, char** argv)
         CreateThread(NULL, 0, gowa_hostprof_thread, NULL, 0, NULL);
     if (getenv("GOWA_TL"))
         CreateThread(NULL, 0, gowa_tl_thread, (LPVOID)(uintptr_t)GetCurrentThreadId(), 0, NULL);
-    /* GOWA_PIN: padrão ligado desde 20/10 (A/B: cap. 16 +8,6%, fase 1 +8,3%); =0 desliga */
+    /* GOWA_PIN: padrão ligado desde 20/10 (A/B: cap. 16 +8,6%, fase 1 +8,3%); =0 desliga.
+     * 25/10: só com 12 ou mais CPUs lógicas. Com ~9 threads pesadas, fixar as 4 mais
+     * pesadas num i5-10300H (4 núcleos / 8 lógicas) tira do Windows a chance de usar a
+     * CPU lógica que ficou livre: sem fixar, cap. 16 8,06 x 7,75 (+4%, 3 pares
+     * intercalados, mesma janela). =1 força. */
     { const char* pe = getenv("GOWA_PIN");
-      if (!(pe && *pe == '0')) CreateThread(NULL, 0, gowa_pin_thread, NULL, 0, NULL); }
+      SYSTEM_INFO si; GetSystemInfo(&si);
+      const int pin = pe ? (*pe != '0') : (si.dwNumberOfProcessors >= 12);
+      if (pin) CreateThread(NULL, 0, gowa_pin_thread, NULL, 0, NULL);
+      else if (!pe) fprintf(stderr, "[pin] desligado: %lu CPUs lógicas (fixa só com 12 ou mais; GOWA_PIN=1 força)\n", (unsigned long)si.dwNumberOfProcessors); }
     if (getenv("GOWA_GUESTPROF"))
         CreateThread(NULL, 0, gowa_guestprof_thread, NULL, 0, NULL);
     if (getenv("GOWA_GUARD"))
