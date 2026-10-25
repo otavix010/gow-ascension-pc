@@ -373,9 +373,11 @@ if ($alvo -eq 'auto') {
     if ($def -match '__AVX512F__' -and $def -match '__AVX512BW__' -and $def -match '__AVX512VL__' -and $def -match '__AVX512DQ__') { $alvo = 'avx512' }
     else { $alvo = 'portatil' }
 }
-if ($alvo -eq 'avx512') { $bargs = 'native'; $bdir = 'build_native' } else { $bargs = 'native rz'; $bdir = 'build_nativerz' }
+# sem AVX-512: x86-64-v3 (AVX2), a build testada nos PCs de teste, e não -march=native: tira uma variável dos
+# defeitos gráficos vistos num Ryzen 5 5600X (cores de vértice e texturas erradas) enquanto a causa é investigada
+if ($alvo -eq 'avx512') { $bargs = 'native'; $bdir = 'build_native' } else { $bargs = 'x86-64-v3 rz'; $bdir = 'build_v3rz' }
 Etapa '6_compilar' {
-    Msg "build: $alvo (código SPU com -march=native$(if ($alvo -eq 'portatil') { ', contas de float em para-zero' }))"
+    Msg "build: $alvo (código SPU com $(if ($alvo -eq 'portatil') { '-march=x86-64-v3, contas de float em para-zero' } else { '-march=native' }))"
     $env:GOWA_VS = $VS
     $env:FFMPEG_DIR = Join-Path $R "dl\ffmpeg9\$FFMPEG_NOME"
     $env:GOWA_JOBS = "$Jobs"
