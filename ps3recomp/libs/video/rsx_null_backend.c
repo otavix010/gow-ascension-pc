@@ -9,6 +9,7 @@
 #include "rsx_null_backend.h"
 #include <stdio.h>
 #include <string.h>
+#include <stdlib.h>
 #include "../../runtime/ps3_log.h"
 
 #ifdef _WIN32
@@ -53,6 +54,68 @@ static NullBackendState s_state;
 
 static int s_present_suppressed = 0;
 
+/* GOWA: tela cheia sem bordas (Alt+Enter, F11, o botão maximizar ou Win+Cima;
+ * Alt+Enter, F11 ou Esc voltam). A janela vira um popup no maior retângulo com a
+ * proporção do jogo dentro do monitor, e uma janela preta atrás cobre as faixas
+ * quando o monitor não tem essa proporção. Os buffers da swap chain continuam do
+ * tamanho da janela original: o DXGI (modelo flip) estica a imagem para a janela.
+ * GOWA_TELA_CHEIA=1 já abre assim. */
+static int  s_tela_cheia;
+static RECT s_janela_rc;
+static HWND s_fundo;
+
+static LRESULT CALLBACK gowa_fundo_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
+{
+    if (msg == WM_MOUSEACTIVATE) return MA_NOACTIVATE;
+    return DefWindowProcA(hwnd, msg, wp, lp);
+}
+
+static void gowa_fundo_atras(HWND jogo)
+{
+    if (s_fundo && s_tela_cheia)
+        SetWindowPos(s_fundo, jogo, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW);
+}
+
+static void gowa_tela_cheia(HWND hwnd, int ligar)
+{
+    if (ligar == s_tela_cheia) return;
+    if (ligar) {
+        GetWindowRect(hwnd, &s_janela_rc);
+        MONITORINFO mi; mi.cbSize = sizeof mi;
+        if (!GetMonitorInfoA(MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST), &mi)) return;
+        const RECT m = mi.rcMonitor;
+        const int mw = m.right - m.left, mh = m.bottom - m.top;
+        const int jw = s_state.width ? (int)s_state.width : 16, jh = s_state.height ? (int)s_state.height : 9;
+        int w = mw, h = (int)((long long)mw * jh / jw);
+        if (h > mh) { h = mh; w = (int)((long long)mh * jw / jh); }
+        if (!s_fundo) {
+            WNDCLASSEXA wc = {0};
+            wc.cbSize = sizeof wc;
+            wc.lpfnWndProc = gowa_fundo_proc;
+            wc.hInstance = GetModuleHandle(NULL);
+            wc.hCursor = LoadCursor(NULL, IDC_ARROW);
+            wc.hbrBackground = (HBRUSH)GetStockObject(BLACK_BRUSH);
+            wc.lpszClassName = "gowa_fundo";
+            RegisterClassExA(&wc);
+            s_fundo = CreateWindowExA(WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE, "gowa_fundo", "", WS_POPUP,
+                                      m.left, m.top, mw, mh, NULL, NULL, GetModuleHandle(NULL), NULL);
+        }
+        s_tela_cheia = 1;
+        SetWindowLongPtrA(hwnd, GWL_STYLE, WS_POPUP | WS_VISIBLE);
+        SetWindowPos(hwnd, HWND_TOP, m.left + (mw - w) / 2, m.top + (mh - h) / 2, w, h,
+                     SWP_FRAMECHANGED | SWP_SHOWWINDOW);
+        if (s_fundo) SetWindowPos(s_fundo, hwnd, m.left, m.top, mw, mh, SWP_NOACTIVATE | SWP_SHOWWINDOW);
+    } else {
+        s_tela_cheia = 0;
+        if (s_fundo) ShowWindow(s_fundo, SW_HIDE);
+        SetWindowLongPtrA(hwnd, GWL_STYLE, WS_OVERLAPPEDWINDOW | WS_VISIBLE);
+        SetWindowPos(hwnd, NULL, s_janela_rc.left, s_janela_rc.top,
+                     s_janela_rc.right - s_janela_rc.left, s_janela_rc.bottom - s_janela_rc.top,
+                     SWP_FRAMECHANGED | SWP_NOZORDER | SWP_SHOWWINDOW);
+    }
+    printf("[janela] tela cheia %s\n", ligar ? "ligada (sem bordas)" : "desligada");
+}
+
 static LRESULT CALLBACK null_wndproc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
 {
     switch (msg) {
@@ -94,11 +157,51 @@ static LRESULT CALLBACK null_wndproc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
     }
 
     case WM_KEYDOWN:
+        if (wp == VK_F11) {
+            if (!(lp & (1 << 30))) gowa_tela_cheia(hwnd, !s_tela_cheia);
+            return 0;
+        }
+        if (wp == VK_ESCAPE && s_tela_cheia) {
+            gowa_tela_cheia(hwnd, 0);
+            return 0;
+        }
         if (wp == VK_ESCAPE) {
             s_state.window_closed = 1;
             DestroyWindow(hwnd);
         }
         return 0;
+
+    case WM_SYSKEYDOWN:   /* Alt+Enter */
+        if (wp == VK_RETURN && (lp & (1 << 29))) {
+            if (!(lp & (1 << 30))) gowa_tela_cheia(hwnd, !s_tela_cheia);
+            return 0;
+        }
+        break;
+
+    case WM_SYSCHAR:      /* sem o bipe do Alt+Enter */
+        if (wp == VK_RETURN) return 0;
+        break;
+
+    case WM_SYSCOMMAND:   /* botão maximizar e duplo clique no título */
+        if ((wp & 0xFFF0) == SC_MAXIMIZE) {
+            gowa_tela_cheia(hwnd, 1);
+            return 0;
+        }
+        break;
+
+    case WM_SIZE:
+        if (wp == SIZE_MAXIMIZED && !s_tela_cheia) {   /* Win+Cima */
+            ShowWindow(hwnd, SW_RESTORE);
+            gowa_tela_cheia(hwnd, 1);
+            return 0;
+        }
+        if (wp == SIZE_MINIMIZED && s_fundo) ShowWindow(s_fundo, SW_HIDE);
+        else if (wp == SIZE_RESTORED) gowa_fundo_atras(hwnd);
+        break;
+
+    case WM_ACTIVATE:
+        if (LOWORD(wp) != WA_INACTIVE) gowa_fundo_atras(hwnd);
+        break;
     }
 
     return DefWindowProcA(hwnd, msg, wp, lp);
@@ -270,6 +373,8 @@ int rsx_null_backend_init(u32 width, u32 height, const char* title)
 
     s_state.hdc = GetDC(s_state.hwnd);
     s_state.last_fps_time = GetTickCount64();
+    { const char* tc = getenv("GOWA_TELA_CHEIA");
+      if (tc && *tc == '1') gowa_tela_cheia(s_state.hwnd, 1); }
     snprintf(s_state.title, sizeof(s_state.title), "%s", title ? title : "ps3recomp");
     s_state.title_time = s_state.last_fps_time;
 
