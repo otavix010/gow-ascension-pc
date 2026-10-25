@@ -52,7 +52,7 @@ Versão nova do port: baixe por cima e rode `gerar.cmd -RefazerDe 4` num termina
 Opções (defina antes de abrir o `jogar.cmd`; pelo launcher, elas ficam nas configurações do jogo):
 - `GOWA_FLIP_HZ`: limitador, padrão 60. Acima de 60 o jogo **acelera** (parte da lógica avança por quadro); `0` = sem limite, com teto de 240.
 - `GOWA_RES_SCALE`: resolução interna, 1 = 720p, 2 = 1440p, 3 = 4K.
-- `GOWA_OSD=1`: medidor de desempenho na tela (FPS, ms por quadro, CPU, GPU, temperaturas, VRAM). Vem desligado; **F10** liga e desliga durante o jogo (`GOWA_OSD_TECLA=0` desativa a tecla).
+- `GOWA_OSD=1`: medidor de desempenho na tela (FPS, ms por quadro, uso e temperatura da CPU e da GPU, VRAM e RAM). Vem desligado; **F10** liga e desliga durante o jogo (`GOWA_OSD_TECLA=0` desativa a tecla).
 - `GOWA_AUDIO_MUTE=1`: sem som.
 
 O jogo grava um resumo de desempenho em `desempenho.json`, ao lado do exe (ou em `GOWA_PERF_JSON`): CPU, GPU e FPS médio, p1 e mínimo do tempo jogando. Não é enviado a lugar nenhum; o launcher só manda, e só com a sua autorização.

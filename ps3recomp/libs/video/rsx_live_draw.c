@@ -727,8 +727,13 @@ static void ld_osd_texto(void)
         if (s_osd_vram_mb >= 0) snprintf(vram, sizeof vram, "  VRAM %.1f/%.1f GB", s_osd_vram_mb / 1024.0, s_osd_vram_tot_mb / 1024.0);
         if (s_osd_temp_cpu > 0) snprintf(tc, sizeof tc, " %ld\x7f", (long)s_osd_temp_cpu);
         if (s_osd_temp_gpu > 0) snprintf(tg, sizeof tg, " %ld\x7f", (long)s_osd_temp_gpu);
-        snprintf(s_osd_txt, sizeof s_osd_txt, "FPS %.1f  %.1f ms  CPU %d%%%s  GPU %s%s%s",
-                 fps, fps > 0.05 ? 1000.0 / fps : 0.0, cpu, tc, gpu, tg, vram);
+        char ram[32] = "";   /* RAM do sistema: em uso / total, como o Gerenciador de Tarefas */
+        { MEMORYSTATUSEX ms; ms.dwLength = sizeof ms;
+          if (GlobalMemoryStatusEx(&ms))
+              snprintf(ram, sizeof ram, "  RAM %.1f/%.1f GB", (double)(ms.ullTotalPhys - ms.ullAvailPhys) / 1073741824.0,
+                       (double)ms.ullTotalPhys / 1073741824.0); }
+        snprintf(s_osd_txt, sizeof s_osd_txt, "FPS %.1f  %.1f ms  CPU %d%%%s  GPU %s%s%s%s",
+                 fps, fps > 0.05 ? 1000.0 / fps : 0.0, cpu, tc, gpu, tg, vram, ram);
     } else snprintf(s_osd_txt, sizeof s_osd_txt, "FPS --");
     t0 = agora.QuadPart; f0 = f1; i0 = i1; k0 = k1; u0 = u1;
 }
@@ -13241,6 +13246,7 @@ extern int g_gowa_pin_on;
 static float s_perf_fps[8192];
 static unsigned s_perf_n;
 static double s_perf_seg;
+static unsigned s_perf_ram_max_mb;
 static int ld_perf_cmp(const void* a, const void* b)
 {
     const float x = *(const float*)a, y = *(const float*)b;
@@ -13307,6 +13313,7 @@ static void ld_perf_json_grava(void)
       if (s_osd_temp_cpu_max > 0) snprintf(tc, sizeof tc, "%ld", (long)s_osd_temp_cpu_max);
       if (s_osd_temp_gpu_max > 0) snprintf(tg, sizeof tg, "%ld", (long)s_osd_temp_gpu_max);
       fprintf(f, "  \"temp_max_c\": {\"cpu\": %s, \"gpu\": %s},\n", tc, tg); }
+    fprintf(f, "  \"ram_uso_max_mb\": %u,\n", s_perf_ram_max_mb);
     fprintf(f, "  \"opcoes\": {\"fixacao_threads\": %d, \"resolucao_interna\": %u, \"limitador_hz\": %s}\n}\n",
             g_gowa_pin_on, (unsigned)g.res_scale, lim_txt);
     fclose(f);
@@ -13320,6 +13327,8 @@ static void ld_perf_amostra(double fps, double seg)
     if (!s_jogando_antes) { s_jogando_antes = 1; s_pula = 2; }
     if (s_pula > 0) { s_pula--; return; }
     if (seg <= 0 || fps <= 0) return;
+    { MEMORYSTATUSEX ms; ms.dwLength = sizeof ms;   /* pico de RAM em uso no sistema (desempenho.json) */
+      if (GlobalMemoryStatusEx(&ms)) { const unsigned u = (unsigned)((ms.ullTotalPhys - ms.ullAvailPhys) >> 20); if (u > s_perf_ram_max_mb) s_perf_ram_max_mb = u; } }
     if (s_perf_n < sizeof s_perf_fps / sizeof s_perf_fps[0]) s_perf_fps[s_perf_n++] = (float)fps;
     s_perf_seg += seg;
     if (s_perf_n % 6 == 0) ld_perf_json_grava();
