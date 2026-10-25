@@ -29,7 +29,7 @@ O [Otavix Launcher](https://github.com/otavix010/otavix-launcher/releases/latest
 | O quê | Onde conseguir |
 |---|---|
 | **O jogo**: a cópia do disco do *God of War: Ascension* **BCUS98232** (EUA) | A sua cópia, numa pasta que contenha `PS3_GAME`. |
-| **O update 1.04** (grátis, ~235 MB) | **[Baixar o update 1.04 do servidor da Sony](http://b0.ww.np.dl.playstation.net/tppkg/np/BCUS98232/BCUS98232_T76/5525fbb7b6b5456d/UP9000-BCUS98232_00-GOWABDPATCH00001-A0104-V0100-PE.pkg)** (o arquivo `.pkg`; SHA-1 `cf97c10f313ea25c8b0f9b29891c288375c7d3f5`). Tem que ser a **1.04**: as versões 1.05 em diante não servem. Se você já instalou a 1.04 no RPCS3, serve também a pasta `RPCS3\dev_hdd0\game\BCUS98232`. |
+| **O update 1.04** (grátis, ~235 MB) | **[Baixar o update 1.04 do servidor da Sony](http://b0.ww.np.dl.playstation.net/tppkg/np/BCUS98232/BCUS98232_T76/5525fbb7b6b5456d/UP9000-BCUS98232_00-GOWABDPATCH00001-A0104-V0100-PE.pkg)** (o arquivo `.pkg`; SHA-1 do arquivo `5a94c17aa07cb5181a505d3429c88ea3d9f4e4d0`). Tem que ser a **1.04**: as versões 1.05 em diante não servem. Se você já instalou a 1.04 no RPCS3, serve também a pasta `RPCS3\dev_hdd0\game\BCUS98232`. |
 | **O RPCS3** (grátis) | [rpcs3.net/download](https://rpcs3.net/download). Ele só é usado para instalar o firmware. |
 | **O firmware oficial do PS3** (grátis) | Na [página oficial da PlayStation](https://www.playstation.com/pt-br/support/hardware/ps3/system-software/), botão **"Baixar atualização do PS3"** (o arquivo `PS3UPDAT.PUP`). Instale no RPCS3 em ***File > Install Firmware***. |
 
