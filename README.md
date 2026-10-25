@@ -20,7 +20,7 @@ Como o código do jogo não pode ser distribuído, **o seu PC gera e compila a p
 
 ### Recomendado: pelo Otavix Launcher
 
-O [Otavix Launcher](https://github.com/otavix010/otavix-launcher/releases/latest) junta tudo num lugar só: baixa este port, confere se o Python e as ferramentas do Visual Studio estão instalados, pede as pastas do disco, do update e do RPCS3, gera o jogo para a sua CPU e abre com as opções de vídeo e os saves. Quando sai uma versão nova, ele avisa e atualiza. É o jeito mais simples; o caminho à mão vem a seguir.
+O [Otavix Launcher](https://github.com/otavix010/otavix-launcher/releases/latest) junta tudo num lugar só: baixa este port, confere se o Python e as ferramentas do Visual Studio estão instalados, pede só a pasta do disco (o update 1.04 e o firmware o gerador baixa da Sony; quem já tiver os arquivos, inclusive o PS3UPDAT.PUP, pode escolhê-los), gera o jogo para a sua CPU e abre com as opções de vídeo e os saves. Quando sai uma versão nova, ele avisa e atualiza. É o jeito mais simples; o caminho à mão vem a seguir.
 
 ### À mão
 
