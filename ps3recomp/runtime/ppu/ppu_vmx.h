@@ -270,11 +270,77 @@ VMX_INL float vmx_minf(float x, float y) {
     if (x == 0 && y == 0) return signbit(x) ? x : y;      /* min(-0,+0) = -0 */
     return x < y ? x : y;
 }
+#if defined(__AVX2__) && defined(__FMA__) && !defined(VMX_SCALAR_FP)
+/* GOWA (22/10): the four hot float ops with SSE/FMA -- the same bits as the scalar
+ * versions below (same IEEE single ops under the same MXCSR; NJ flush of inputs and
+ * output; NaN rules: add/sub take vnan2 (A, then B, quieted, else default NaN),
+ * madd/nmsub only replace a NaN result with the default NaN; nmsub is -(a*c - b),
+ * not fnmadd, for the sign of an exact zero). They were ~16% of God of War
+ * Ascension's main PPU thread, byte by byte per element. VMX_SCALAR_FP restores. */
+#include <immintrin.h>
+VMX_INL __m128 vmx_ld4(const void* p)
+{
+    const __m128i bs = _mm_setr_epi8(3, 2, 1, 0, 7, 6, 5, 4, 11, 10, 9, 8, 15, 14, 13, 12);
+    return _mm_castsi128_ps(_mm_shuffle_epi8(_mm_loadu_si128((const __m128i*)p), bs));
+}
+VMX_INL void vmx_st4(void* p, __m128 v)
+{
+    const __m128i bs = _mm_setr_epi8(3, 2, 1, 0, 7, 6, 5, 4, 11, 10, 9, 8, 15, 14, 13, 12);
+    _mm_storeu_si128((__m128i*)p, _mm_shuffle_epi8(_mm_castps_si128(v), bs));
+}
+/* NJ: a zero exponent (zero or denormal) becomes a signed zero */
+VMX_INL __m128 vmx_flush4(__m128 v, uint32_t vscr)
+{
+    if (!(vscr & VMX_NJ)) return v;
+    const __m128i e = _mm_and_si128(_mm_castps_si128(v), _mm_set1_epi32(0x7F800000));
+    const __m128i z = _mm_cmpeq_epi32(e, _mm_setzero_si128());
+    return _mm_castsi128_ps(_mm_andnot_si128(_mm_andnot_si128(_mm_set1_epi32((int)0x80000000u), z), _mm_castps_si128(v)));
+}
+VMX_INL __m128 vmx_isnan4(__m128 v) { return _mm_cmpunord_ps(v, v); }
+VMX_INL __m128 vmx_fix4(__m128 r)    /* NaN result -> default NaN */
+{
+    return _mm_blendv_ps(r, _mm_castsi128_ps(_mm_set1_epi32(0x7FC00000)), vmx_isnan4(r));
+}
+VMX_INL __m128 vmx_vnan2_4(__m128 r, __m128 x, __m128 y)
+{
+    const __m128 q = _mm_castsi128_ps(_mm_set1_epi32(0x7FC00000));
+    __m128 out = vmx_fix4(r);
+    out = _mm_blendv_ps(out, _mm_or_ps(y, q), vmx_isnan4(y));
+    return _mm_blendv_ps(out, _mm_or_ps(x, q), vmx_isnan4(x));
+}
+VMX_INL void vmx_vaddfp(VMX_D, VMX_A, VMX_B, uint32_t vscr)
+{
+    const __m128 x = vmx_flush4(vmx_ld4(a_), vscr), y = vmx_flush4(vmx_ld4(b_), vscr);
+    vmx_st4(d_, vmx_flush4(vmx_vnan2_4(_mm_add_ps(x, y), x, y), vscr));
+}
+VMX_INL void vmx_vsubfp(VMX_D, VMX_A, VMX_B, uint32_t vscr)
+{
+    const __m128 x = vmx_flush4(vmx_ld4(a_), vscr), y = vmx_flush4(vmx_ld4(b_), vscr);
+    vmx_st4(d_, vmx_flush4(vmx_vnan2_4(_mm_sub_ps(x, y), x, y), vscr));
+}
+#define VMX_HAVE_SIMD_FP 1
+#else
 VMX_FBIN(vmx_vaddfp, vmx_f(x) + vmx_f(y), 1)
 VMX_FBIN(vmx_vsubfp, vmx_f(x) - vmx_f(y), 1)
+#endif
 VMX_FBIN(vmx_vmaxfp, vmx_maxf(vmx_f(x), vmx_f(y)), 0)
 VMX_FBIN(vmx_vminfp, vmx_minf(vmx_f(x), vmx_f(y)), 0)
 
+#if defined(VMX_HAVE_SIMD_FP)
+VMX_INL void vmx_vmaddfp(VMX_D, VMX_A, VMX_B, VMX_C, uint32_t vscr)
+{
+    const __m128 x = vmx_flush4(vmx_ld4(a_), vscr), y = vmx_flush4(vmx_ld4(b_), vscr),
+                 z = vmx_flush4(vmx_ld4(c_), vscr);
+    vmx_st4(d_, vmx_flush4(vmx_fix4(_mm_fmadd_ps(x, z, y)), vscr));
+}
+VMX_INL void vmx_vnmsubfp(VMX_D, VMX_A, VMX_B, VMX_C, uint32_t vscr)
+{
+    const __m128 sg = _mm_castsi128_ps(_mm_set1_epi32((int)0x80000000u));
+    const __m128 x = vmx_flush4(vmx_ld4(a_), vscr), y = vmx_flush4(vmx_ld4(b_), vscr),
+                 z = vmx_flush4(vmx_ld4(c_), vscr);
+    vmx_st4(d_, vmx_flush4(vmx_fix4(_mm_xor_ps(_mm_fmadd_ps(x, z, _mm_xor_ps(y, sg)), sg)), vscr));
+}
+#else
 VMX_INL void vmx_vmaddfp(VMX_D, VMX_A, VMX_B, VMX_C, uint32_t vscr) { VMX_ARGS_PREP; const uint8_t* c = (const uint8_t*)c_;
     for (int i = 0; i < 4; i++) {
         float x = vmx_f(vmx_flush(vmx_w(a, i), vscr)), y = vmx_f(vmx_flush(vmx_w(b, i), vscr)),
@@ -285,6 +351,7 @@ VMX_INL void vmx_vnmsubfp(VMX_D, VMX_A, VMX_B, VMX_C, uint32_t vscr) { VMX_ARGS_
         float x = vmx_f(vmx_flush(vmx_w(a, i), vscr)), y = vmx_f(vmx_flush(vmx_w(b, i), vscr)),
               z = vmx_f(vmx_flush(vmx_w(c, i), vscr));
         vmx_sw(r, i, vmx_flush(vmx_fix(vmx_u(-fmaf(x, z, -y))), vscr)); } VMX_OUT; }
+#endif
 
 #define VMX_FUN(name, expr, flush_in, nanmode) \
 VMX_INL void name(VMX_D, VMX_B, uint32_t vscr) { const uint8_t* b = (const uint8_t*)b_; uint8_t r[16]; \

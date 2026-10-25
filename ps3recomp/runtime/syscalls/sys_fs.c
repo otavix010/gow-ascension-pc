@@ -473,6 +473,7 @@ int64_t sys_fs_read(ppu_context* ctx)
      * video. ppu_fs.cpp fs_prefault is the same fix for cellFs. */
     if (size) vm_commit(buf_addr, (uint32_t)size);
     size_t nread = fread(buf, 1, (size_t)size, f->fp);
+    { extern void gowa_ww_marca(const void*, size_t); gowa_ww_marca(buf, nread); }   /* GOWA_TEX_WW */
 
     /* PS3_FSTRACE=<n>: every nth read, the fd and the file offset it came from.
      *

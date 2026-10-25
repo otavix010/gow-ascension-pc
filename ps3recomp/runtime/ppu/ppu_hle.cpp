@@ -23,6 +23,7 @@
 #include <stdlib.h>       /* getenv */
 #include <stdint.h>
 #include <stdio.h>
+#include <string.h>       /* strncpy, strstr (GOWA_SPURS_NSPU_WKL) */
 #include <stdlib.h>       /* getenv, atoi (boot trace) */
 
 /* Single flat NID -> handler table (all modules share it; resolution is by
@@ -80,6 +81,7 @@ void vm_write64(uint64_t addr, uint64_t val);
 /* Breadcrumb for the crash reporter: the last firmware import dispatched, so a
  * host AV inside an HLE handler names the culprit NID/function. */
 extern "C" uint32_t    g_last_hle_nid  = 0;
+extern "C" void ppu_callring_note(unsigned tid, uint32_t kind, uint32_t id, uint32_t ret, uint32_t lr);   /* ppu_loader.cpp */
 extern "C" const char* g_last_hle_name = "";
 
 /* Which HLE each guest thread is currently INSIDE, indexed by ctx->thread_id.
@@ -377,6 +379,190 @@ extern "C" void ps3_hle_call(uint32_t nid, ppu_context* ctx)
                 }
             }
         }
+        /* GOWA_SPURS_NSPU=7|8: o jogo cria o SPURS com 6 SPUs (5 de trabalho +
+         * a do som), o hardware dele. A estrutura CellSpurs comporta 8 (vetores
+         * de prioridade u8[8], spus[8]) e o host tem 16 threads; mais SPUs =
+         * mais vazão para os jobs, que são o gargalo. Troca o nSpus no
+         * _cellSpursAttributeInitialize e completa as prioridades das SPUs
+         * extras (k >= 6) com as da SPU k-6 quando o jogo deixou 0, em todos
+         * os pontos que recebem um vetor priority[8]. maxContention == 6 (ou 5,
+         * "todas as de trabalho") sobe na mesma proporção. GOWA_SPURS_NSPU_LOG=1
+         * mostra cada caso. */
+        if (opd) {
+            static int s_nspu = -1, s_nlog = 0;
+            if (s_nspu < 0) {
+                const char* e = getenv("GOWA_SPURS_NSPU");
+                s_nspu = e ? atoi(e) : 0;
+                if (s_nspu > 8) s_nspu = 8;
+                const char* l = getenv("GOWA_SPURS_NSPU_LOG");
+                s_nlog = l ? atoi(l) : 0;
+            }
+            if (s_nspu > 6) {
+                extern uint8_t* vm_base;
+                uint32_t pr = 0, mxa = 0;          /* vetor priority[8]; u32 maxContention */
+                const char* qual = 0;
+                const char* nome = 0;              /* nome da instância do workload ("ts:..." para taskset) */
+                char nbuf[48];
+                auto gstr = [&](uint32_t ea) -> const char* {
+                    return ea >= 0x10000u && ea < 0x40000000u ? (const char*)(vm_base + ea) : "-";
+                };
+                if (nid == 0x95180230u) {               /* _cellSpursAttributeInitialize(attr, rev, sdk, nSpus, ...) */
+                    if (s_nlog) fprintf(stderr, "[NSPU] AttributeInitialize nSpus=%u spuPrio=%u -> %u\n",
+                                        (uint32_t)ctx->gpr[6], (uint32_t)ctx->gpr[7],
+                                        (uint32_t)ctx->gpr[6] == 6 ? (uint32_t)s_nspu : (uint32_t)ctx->gpr[6]);
+                    if ((uint32_t)ctx->gpr[6] == 6) ctx->gpr[6] = (uint64_t)s_nspu;
+                } else if (nid == 0x9DCBCB5Du) {        /* cellSpursAttributeEnableSystemWorkload(attr, prio, maxSpu, preempt) */
+                    pr = (uint32_t)ctx->gpr[4]; qual = "EnableSystemWorkload";
+                    const uint32_t pe = (uint32_t)ctx->gpr[6];
+                    if (s_nlog) fprintf(stderr, "[NSPU]   maxSpu=%u\n", (uint32_t)ctx->gpr[5]);
+                    if (pe >= 0x10000u) for (int k = 6; k < s_nspu; k++) vm_base[pe + k] = vm_base[pe + k - 6];
+                } else if (nid == 0x80A29E27u) {        /* cellSpursSetPriorities(spurs, wid, prio) */
+                    pr = (uint32_t)ctx->gpr[5]; qual = s_nlog > 1 ? "SetPriorities" : 0;
+                    /* nome pelo wklH1/wklH2 (nameClass, nameInstance) da instância */
+                    const uint32_t sp = (uint32_t)ctx->gpr[3], wid = (uint32_t)ctx->gpr[4];
+                    if (sp && wid < 32) {
+                        const uint32_t h = sp + (wid < 16 ? 0xE00u + wid * 0x10u : 0x1A00u + (wid - 16) * 0x10u);   /* wklH1 / wklH2 */
+                        snprintf(nbuf, sizeof nbuf, "%s/%s", gstr(vm_read32(h + 4)), gstr(vm_read32(h + 12)));   /* u64 nameClass, u64 nameInstance */
+                        nome = nbuf;
+                        if (s_nlog) { static int c; if (c++ < 16)
+                            fprintf(stderr, "[NSPU] SetPriorities wid=%u nome=%s prio %02X %02X %02X %02X %02X %02X %02X %02X\n",
+                                    wid, nome, vm_base[pr], vm_base[pr + 1], vm_base[pr + 2], vm_base[pr + 3],
+                                    vm_base[pr + 4], vm_base[pr + 5], vm_base[pr + 6], vm_base[pr + 7]); }
+                    }
+                } else if (nid == 0xC0158D8Bu) {        /* cellSpursAddWorkloadWithAttribute(spurs, wid*, attr) */
+                    const uint32_t at = (uint32_t)ctx->gpr[5];  /* CellSpursWorkloadAttribute: prio +0x18, max +0x24 */
+                    if (at >= 0x10000u) {
+                        pr = at + 0x18u; mxa = at + 0x24u; qual = "AddWorkloadWithAttribute";
+                        snprintf(nbuf, sizeof nbuf, "%s/%s", gstr(vm_read32(at + 0x28)), gstr(vm_read32(at + 0x2C)));
+                        nome = nbuf;
+                        if (s_nlog) {
+                            const uint32_t nc = vm_read32(at + 0x28), ni = vm_read32(at + 0x2C);
+                            fprintf(stderr, "[NSPU] wkl pm=0x%08X size=0x%X data=0x%08X%08X min=%u name=%s/%s\n",
+                                    vm_read32(at + 0x8), vm_read32(at + 0xC), vm_read32(at + 0x10), vm_read32(at + 0x14),
+                                    vm_read32(at + 0x20), nc && nc < 0x40000000u ? (const char*)(vm_base + nc) : "-",
+                                    ni && ni < 0x40000000u ? (const char*)(vm_base + ni) : "-");
+                        }
+                    }
+                } else if (nid == 0x4A6465E3u || nid == 0xC10931CBu) {  /* CreateTaskset2 / CreateTasksetWithAttribute(spurs, ts, attr) */
+                    const uint32_t at = (uint32_t)ctx->gpr[5];  /* prio +0x10, max_contention +0x18 nas duas versões */
+                    if (at >= 0x10000u) {
+                        pr = at + 0x10u; mxa = at + 0x18u; qual = nid == 0x4A6465E3u ? "CreateTaskset2" : "CreateTasksetWithAttribute";
+                        snprintf(nbuf, sizeof nbuf, "ts:%s", gstr(vm_read32(at + (nid == 0x4A6465E3u ? 0x4u : 0x1Cu))));
+                        nome = nbuf;
+                    }
+                }
+                /* GOWA_SPURS_NSPU_WKL=lista,de,trechos (padrão "*"): só os workloads
+                 * cujo nome contém um dos trechos ganham as SPUs extras; "-trecho"
+                 * exclui (vale o último que casar). Os outros ficam com 0 nelas. */
+                bool ok = true;
+                if (nome) {
+                    static const char* s_wl = (const char*)1;
+                    if (s_wl == (const char*)1) s_wl = getenv("GOWA_SPURS_NSPU_WKL");
+                    if (s_wl && *s_wl) {
+                        ok = false;
+                        char lb[512]; strncpy(lb, s_wl, sizeof lb - 1); lb[sizeof lb - 1] = 0;
+                        for (char* t = strtok(lb, ","); t; t = strtok(nullptr, ",")) {
+                            const bool neg = *t == '-';
+                            const char* q = neg ? t + 1 : t;
+                            if (!strcmp(q, "*") || strstr(nome, q)) ok = !neg;
+                        }
+                    }
+                    if (s_nlog && (qual || s_nlog > 1)) fprintf(stderr, "[NSPU]   nome=%s extra=%d\n", nome, ok ? 1 : 0);
+                }
+                if (pr >= 0x10000u) {
+                    if (qual && s_nlog) fprintf(stderr, "[NSPU] %s prio %02X %02X %02X %02X %02X %02X %02X %02X max=%d (lr=0x%08X)\n", qual,
+                                                vm_base[pr], vm_base[pr + 1], vm_base[pr + 2], vm_base[pr + 3],
+                                                vm_base[pr + 4], vm_base[pr + 5], vm_base[pr + 6], vm_base[pr + 7],
+                                                mxa ? (int)vm_read32(mxa) : -1, (uint32_t)ctx->lr);
+                    /* GOWA_SPU_SPLIT=1 (with GOWA_SPURS_NSPU=8 and GOWA_SPU_NUM_REMAP=2):
+                     * SPUs 0-3 run only EDGE0-2, whose per-SPU rings exist for
+                     * exactly those four; every other Wws_Job workload and the
+                     * tasksets leave SPUs 0-3 for SPUs 6/7, which take the roles
+                     * (and, for the WWS job manager, the numbers) of SPUs 0/1. */
+                    static int s_split = -1;
+                    if (s_split < 0) { const char* e = getenv("GOWA_SPU_SPLIT"); s_split = e ? atoi(e) : 0; }
+                    if (s_split && nome) {
+                        uint8_t* p = vm_base + pr;
+                        if (strstr(nome, "EDGE")) {
+                            for (int k = 4; k < 8; k++) p[k] = 0;
+                        } else if (!strncmp(nome, "Wws_Job/", 8) || !strncmp(nome, "ts:", 3)) {
+                            if (!p[6]) p[6] = p[0];
+                            if (!p[7]) p[7] = p[1];
+                            p[0] = p[1] = 0;
+                            if (s_split == 1) p[2] = p[3] = 0;   /* =2: SPUs 2/3 stay shared */
+                        }
+                    } else
+                    for (int k = 6; k < s_nspu; k++)
+                        if (ok && !vm_base[pr + k]) vm_base[pr + k] = vm_base[pr + k - 6];
+                        else if (!ok && nome) vm_base[pr + k] = 0;
+                    /* GOWA_SPURS_TS_AWAY=<hex SPU mask>: the tasksets (not the
+                     * EDGE decompressor) get priority 0 on those SPUs -- F takes
+                     * them off SPUs 0-3, the only ones EDGE runs on, so they run
+                     * on SPU 4 and the extra SPUs. God of War Ascension's
+                     * MeshProc tasks (HighPrio5) took ~9% of SPUs 0-3. */
+                    static int s_away = -2;
+                    if (s_away == -2) { const char* e = getenv("GOWA_SPURS_TS_AWAY"); s_away = e ? (int)strtoul(e, nullptr, 16) : 0; }
+                    if (s_away && nome && !strncmp(nome, "ts:", 3) && !strstr(nome, "edge")) {
+                        for (int k = 0; k < 8; k++) if (s_away & (1 << k)) vm_base[pr + k] = 0;
+                        if (s_nlog) fprintf(stderr, "[NSPU]   %s fora das SPUs 0x%X\n", nome, s_away);
+                    }
+                    /* GOWA_SPURS_PRIO=trecho=PPPPPPPPPPPPPPPP[;trecho=...]: troca o
+                     * vetor priority[8] (um byte hex por SPU, 0 = não roda nela)
+                     * dos workloads cujo nome contém o trecho, na criação e em
+                     * todo cellSpursSetPriorities (o balanceador do jogo). Para
+                     * testar quem segura a thread principal. */
+                    { static char s_pl[512]; static int s_pi = -1;
+                      if (s_pi < 0) { const char* e = getenv("GOWA_SPURS_PRIO"); s_pi = e ? 1 : 0;
+                                      if (e) { strncpy(s_pl, e, sizeof s_pl - 1); s_pl[sizeof s_pl - 1] = 0; } }
+                      if (s_pi && nome) {
+                          char lb[512]; strncpy(lb, s_pl, sizeof lb - 1); lb[sizeof lb - 1] = 0;
+                          for (char* t = strtok(lb, ";"); t; t = strtok(nullptr, ";")) {
+                              char* eq = strchr(t, '=');
+                              if (!eq || strlen(eq + 1) < 16) continue;
+                              *eq = 0;
+                              if (!strstr(nome, t)) continue;
+                              for (int k = 0; k < 8; k++) {
+                                  const char hx[3] = { eq[1 + 2 * k], eq[2 + 2 * k], 0 };
+                                  vm_base[pr + k] = (uint8_t)strtoul(hx, nullptr, 16);
+                              }
+                              if (s_nlog) fprintf(stderr, "[NSPU]   %s prioridades trocadas por %s\n", nome, eq + 1);
+                          }
+                      } }
+                }
+                static int s_nmax = -1;
+                if (s_nmax < 0) { const char* m = getenv("GOWA_SPURS_NSPU_MAX"); s_nmax = m ? atoi(m) : 1; }
+                if (mxa && ok && s_nmax) {
+                    const uint32_t mx = vm_read32(mxa);
+                    if (mx == 5 || mx == 6) vm_write32(mxa, mx + (uint32_t)s_nspu - 6);
+                }
+            }
+        }
+        /* GOWA: cellSpursSetPriorities (0x80A29E27) com as MESMAS prioridades
+         * que o workload já tem. A libsre grava wklInfo.prio64 e manda
+         * sysSrvMessage = 0xFF, que obriga todos os SPUs a rodar o system
+         * service para recarregar a tabela. O balanceador do God of War
+         * (func_00413F38, thread própria, usleep(800)) chama isso ~1.200x/s,
+         * quase sempre sem mudança; no hardware o system service custa
+         * microssegundos, aqui ele é interpretado e tomava quase todo o tempo
+         * de SPU (as tarefas do taskset ficavam sem SPU e os sinais delas se
+         * acumulavam). Sem mudança => nada a recarregar: devolve CELL_OK.
+         * GOWA_SETPRIO_ALWAYS=1 volta ao comportamento antigo. */
+        if (opd && nid == 0x80A29E27u) {
+            static int s_always = -1;
+            if (s_always < 0) s_always = getenv("GOWA_SETPRIO_ALWAYS") ? 1 : 0;
+            const uint32_t spurs = (uint32_t)ctx->gpr[3], wid = (uint32_t)ctx->gpr[4],
+                           pp = (uint32_t)ctx->gpr[5];
+            if (!s_always && spurs && pp && wid < 32) {
+                const uint32_t wi = spurs + (wid < 16 ? 0xB00u + wid * 0x20u : 0x1000u + (wid - 16) * 0x20u);
+                extern uint64_t vm_read64(uint64_t a);
+                if (vm_read64(pp) == vm_read64(wi + 0x18)) {
+                    static volatile long s_skip;
+                    __atomic_add_fetch(&s_skip, 1, __ATOMIC_RELAXED);
+                    ctx->gpr[3] = 0;
+                    return;
+                }
+            }
+        }
         if (opd) {
             uint32_t code = vm_read32(opd);
             uint32_t toc  = vm_read32(opd + 4);
@@ -574,6 +760,9 @@ extern "C" void ps3_hle_call(uint32_t nid, ppu_context* ctx)
             /* A real PRX serving this import is a different implementation of it,
              * so it gets its own prefix rather than reading as the HLE stub. */
             ps3_msf("prx:0x%08X", nid);
+            { static int _tr = -1; if (_tr < 0) _tr = getenv("PS3_HLE_TRACE_RET") ? 1 : 0;
+              if (_tr) fprintf(stderr, "[HLERET] tid=%u nid=0x%08X (prx) -> r3=0x%08X lr=0x%08X\n",
+                               (unsigned)ctx->thread_id, nid, (uint32_t)ctx->gpr[3], (uint32_t)ctx->lr); }
             { static int64_t st=-2; if(st==-2){const char*e=getenv("SPURS_TRACE"); st=e?1:0;}
               if (st) fprintf(stderr, "[SPURSTRACE] nid=0x%08X RETURNED r3=0x%08X\n",
                   nid, (uint32_t)ctx->gpr[3]);
@@ -638,6 +827,14 @@ extern "C" void ps3_hle_call(uint32_t nid, ppu_context* ctx)
             g_ctx[i].fn(ctx);
             { unsigned t = (unsigned)ctx->thread_id;
               if (t < PS3_HLE_INFLIGHT_MAX) g_hle_inflight[t] = nullptr; }
+            ppu_callring_note((unsigned)ctx->thread_id, 2, nid, (uint32_t)ctx->gpr[3], (uint32_t)ctx->lr);
+            /* GOWA: PS3_HLE_TRACE_RET=1 -- the result of every HLE call. The
+             * call trace (PS3_HLE_TRACE) only shows the arguments, and "which
+             * import failed" is the question a dead init path asks. */
+            { static int _tr = -1; if (_tr < 0) _tr = getenv("PS3_HLE_TRACE_RET") ? 1 : 0;
+              if (_tr) fprintf(stderr, "[HLERET] tid=%u nid=0x%08X %s -> r3=0x%08X lr=0x%08X\n",
+                               (unsigned)ctx->thread_id, nid, g_ctx[i].name,
+                               (uint32_t)ctx->gpr[3], (uint32_t)ctx->lr); }
             return;
         }
 
@@ -725,6 +922,11 @@ extern "C" void ps3_hle_call(uint32_t nid, ppu_context* ctx)
     uint64_t r = fn(ctx->gpr[3], ctx->gpr[4], ctx->gpr[5], ctx->gpr[6],
                     ctx->gpr[7], ctx->gpr[8], ctx->gpr[9], ctx->gpr[10]);
     ctx->gpr[3] = r;   /* PPC return value */
+    ppu_callring_note((unsigned)ctx->thread_id, 2, nid, (uint32_t)r, (uint32_t)ctx->lr);
+    { static int _tr = -1; if (_tr < 0) _tr = getenv("PS3_HLE_TRACE_RET") ? 1 : 0;
+      if (_tr) fprintf(stderr, "[HLERET] tid=%u nid=0x%08X %s -> r3=0x%08X lr=0x%08X\n",
+                       (unsigned)ctx->thread_id, nid, e->name ? e->name : "?",
+                       (uint32_t)r, (uint32_t)ctx->lr); }
     /* PS3_HLE_PTRCHECK: the guest stores HLE return values as guest pointers, so
      * an HLE returning a value outside guest RAM (>= 0x10000000) that is not a
      * CELL_ERROR code (0x8001xxxx / 0x8002xxxx) is leaking a truncated HOST

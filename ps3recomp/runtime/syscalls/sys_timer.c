@@ -217,6 +217,37 @@ int64_t sys_timer_usleep(ppu_context* ctx)
         ppu_log_host_chain("usleep1ms"); } }
 
 #ifdef _WIN32
+    /* GOWA_USLEEP_SPIN_MAX=<us> (default 200): from that length on, the
+     * thread really sleeps, on a per-thread high-resolution waitable timer.
+     * Shorter ones keep the SwitchToThread spin below. The spin used to cover
+     * everything under 1 ms, so a thread polling with usleep(800) -- God of
+     * War Ascension's SPURS priority balancer, a thread of its own -- burned a
+     * whole core while "sleeping", next to six SPU threads that are the
+     * bottleneck. 1000 restores the old split. */
+    { static long s_max = -1;
+      if (s_max < 0) { const char* e = getenv("GOWA_USLEEP_SPIN_MAX");
+                       s_max = e ? strtol(e, 0, 10) : 200; if (s_max < 0) s_max = 0; }
+      if (usec >= (uint64_t)s_max && usec > 0 && usec < 1000) {
+#ifndef CREATE_WAITABLE_TIMER_HIGH_RESOLUTION
+#define CREATE_WAITABLE_TIMER_HIGH_RESOLUTION 0x00000002
+#endif
+          static __declspec(thread) HANDLE t_timer;
+          static __declspec(thread) int t_tried;
+          if (!t_timer && !t_tried) {
+              t_tried = 1;
+              t_timer = CreateWaitableTimerExW(NULL, NULL, CREATE_WAITABLE_TIMER_HIGH_RESOLUTION,
+                                               TIMER_ALL_ACCESS);
+              if (!t_timer) t_timer = CreateWaitableTimerW(NULL, TRUE, NULL);
+          }
+          if (t_timer) {
+              LARGE_INTEGER due;
+              due.QuadPart = -((LONGLONG)usec * 10);
+              if (SetWaitableTimer(t_timer, &due, 0, NULL, NULL, FALSE)) {
+                  WaitForSingleObject(t_timer, INFINITE);
+                  return CELL_OK;
+              }
+          }
+      } }
     /* Use high-resolution sleep via waitable timer for better precision */
     if (usec >= 1000) {
         HANDLE timer = CreateWaitableTimerW(NULL, TRUE, NULL);
@@ -243,8 +274,15 @@ int64_t sys_timer_usleep(ppu_context* ctx)
         QueryPerformanceCounter(&qpc_start);
         const int64_t qpc_deadline = qpc_start.QuadPart +
             (int64_t)((usec * (uint64_t)s_qpc_freq.QuadPart) / 1000000ULL);
+        /* GOWA: spin on PAUSE instead of SwitchToThread (a kernel transition
+         * per turn), lighter on the sibling hardware thread -- with 8 busy
+         * threads on 8 cores, often an SPU thread (A/B: +1%).
+         * GOWA_USLEEP_PAUSE=0 restores SwitchToThread. */
+        static int s_pause = -1;
+        if (s_pause < 0) { const char* e = getenv("GOWA_USLEEP_PAUSE"); s_pause = !(e && *e == '0'); }
         do {
-            SwitchToThread();
+            if (s_pause) { for (int k = 0; k < 32; k++) YieldProcessor(); }
+            else SwitchToThread();
             QueryPerformanceCounter(&qpc_now);
         } while (qpc_now.QuadPart < qpc_deadline);
     }

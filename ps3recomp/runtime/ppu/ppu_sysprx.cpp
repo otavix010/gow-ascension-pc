@@ -117,9 +117,12 @@ static void sys_lwmutex_create(ppu_context* ctx)
       if (getenv("LWM_COUNT") && (_n<=24 || (_n%50000)==0))
         fprintf(stderr, "[LWM] create #%lld lwm=0x%08X attr=0x%08X\n", _n, lwm, attr); }
     uint32_t protocol = attr ? vm_read32(attr + 0) : 0;
+    /* The firmware stores protocol | recursive (SYS_SYNC_RECURSIVE 0x10,
+     * SYS_SYNC_NOT_RECURSIVE 0x20); lock/trylock below read it back. */
+    uint32_t recursive = attr ? vm_read32(attr + 4) : 0;
     vm_write32(lwm + 0x00, 0);          /* owner */
     vm_write32(lwm + 0x04, 0);          /* waiter */
-    vm_write32(lwm + LWM_ATTR, protocol);
+    vm_write32(lwm + LWM_ATTR, protocol | recursive);
     vm_write32(lwm + LWM_RECUR, 0);     /* recursive_count */
     vm_write32(lwm + 0x10, 0);          /* sleep_queue */
     vm_write32(lwm + 0x14, 0);
@@ -207,6 +210,30 @@ static HANDLE lwm_sem(uint32_t addr)
  * diagnostic code may set it around a suspect wait to uncap the [LWM-BLOCK]
  * logging during that window only (park hunts: gate on state, not counts). */
 volatile int g_nd_inpump = 0;
+/* A re-lock by the owner. lv2 grants it only to a SYS_SYNC_RECURSIVE mutex;
+ * any other answers CELL_EDEADLK (0x80010008) and the count stays put. This
+ * runtime used to count the re-lock on every mutex: God of War Ascension's
+ * FIOS schedulers try-lock "FIOSmutx" (not recursive) while possibly already
+ * holding it, take EDEADLK as "not acquired" and unlock once -- with the count
+ * at 2 the mutex stayed owned forever and the intro hung ~1 run in 3.
+ * GOWA_LWMUTEX_ALWAYS_RECURSIVE=1 restores the old behaviour. Returns 1 when
+ * the call was answered here (re-lock), 0 to take the normal path. */
+static int lwm_relock(ppu_context* ctx, uint32_t lwm, uint32_t self)
+{
+    if (vm_read32(lwm + LWM_OWNER) != self || vm_read32(lwm + LWM_RECUR) == 0) return 0;
+    static int always = -1; if (always < 0) always = getenv("GOWA_LWMUTEX_ALWAYS_RECURSIVE") ? 1 : 0;
+    if (always || (vm_read32(lwm + LWM_ATTR) & 0x10u)) {
+        vm_write32(lwm + LWM_RECUR, vm_read32(lwm + LWM_RECUR) + 1);
+        ctx->gpr[3] = 0;
+    } else {
+        static volatile long n = 0; const long k = _InterlockedIncrement(&n);
+        if (k <= 10 || (k % 1000) == 0)
+            fprintf(stderr, "[lwmutex] EDEADLK #%ld tid=%llu lwm=0x%08X attr=0x%X\n",
+                    k, (unsigned long long)ctx->thread_id, lwm, vm_read32(lwm + LWM_ATTR));
+        ctx->gpr[3] = (uint64_t)(int64_t)(int32_t)0x80010008u;   /* CELL_EDEADLK */
+    }
+    return 1;
+}
 static void sys_lwmutex_lock(ppu_context* ctx)
 {
     uint32_t lwm = (uint32_t)ctx->gpr[3];
@@ -219,13 +246,10 @@ static void sys_lwmutex_lock(ppu_context* ctx)
     uint64_t timeout_us = ctx->gpr[4];
     HANDLE s = lwm_sem(lwm);
     if (s) {
-        /* Recursive re-lock by the current holder: bump the count, no wait.
-         * Only the holder ever stamps owner=self, so this check is race-free. */
-        if (vm_read32(lwm + LWM_OWNER) == self && vm_read32(lwm + LWM_RECUR) > 0) {
-            vm_write32(lwm + LWM_RECUR, vm_read32(lwm + LWM_RECUR) + 1);
-            ctx->gpr[3] = 0;
-            return;
-        }
+        /* Re-lock by the current holder (lwm_relock: recursive mutex -> count,
+         * otherwise EDEADLK). Only the holder ever stamps owner=self, so this
+         * check is race-free. */
+        if (lwm_relock(ctx, lwm, self)) return;
         if (WaitForSingleObject(s, 0) != WAIT_OBJECT_0) {
             /* Contended: log who we're stuck behind (owner stamped at acquire),
              * then block. Bounded diagnostics for park hunts; uncapped while the
@@ -264,12 +288,10 @@ static void sys_lwmutex_trylock(ppu_context* ctx)
     uint32_t self = LWM_SELF(ctx);
     HANDLE s = lwm_sem(lwm);
     if (s) {
-        if (vm_read32(lwm + LWM_OWNER) == self && vm_read32(lwm + LWM_RECUR) > 0) {
-            vm_write32(lwm + LWM_RECUR, vm_read32(lwm + LWM_RECUR) + 1);
-            ctx->gpr[3] = 0;
-            return;
-        }
-        if (WaitForSingleObject(s, 0) != WAIT_OBJECT_0) { ctx->gpr[3] = (uint64_t)(int64_t)(int32_t)0x8001000Bu; return; } // EBUSY
+        if (lwm_relock(ctx, lwm, self)) return;
+        /* CELL_EBUSY is 0x8001000A; this used to answer 0x8001000B, which is
+         * ETIMEDOUT. FIOS polls trylock while it waits for an I/O op. */
+        if (WaitForSingleObject(s, 0) != WAIT_OBJECT_0) { ctx->gpr[3] = (uint64_t)(int64_t)(int32_t)0x8001000Au; return; } // EBUSY
     }
     if (lwm_trace()) { struct LwmSlot* sl = lwm_find(lwm); if (sl) { sl->holder = (long)self; sl->acq_us = lwm_now_us(); sl->acq_fences = g_gcm_ref_pub_count; sl->acq_cpu_us = ppu_thread_cpu_us(self); } }
     vm_write32(lwm + LWM_OWNER, self);
@@ -341,9 +363,57 @@ static void sys_lwcond_create(ppu_context* ctx)
     ctx->gpr[3] = 0;
 }
 static void sys_lwcond_destroy(ppu_context* ctx)    { ctx->gpr[3] = 0; }
-static void sys_lwcond_signal(ppu_context* ctx)     { ctx->gpr[3] = 0; }
-static void sys_lwcond_signal_all(ppu_context* ctx) { ctx->gpr[3] = 0; }
-static void sys_lwcond_signal_to(ppu_context* ctx)  { ctx->gpr[3] = 0; }
+
+/* GOWA_LWCOND=1: a real lwcond. The default below is a poll -- wait drops the
+ * lwmutex, sleeps 1 ms and takes it back, and signal does nothing -- which is
+ * only correct for callers that re-test their predicate in a loop. Here each
+ * lwcond gets a counting semaphore and a waiter count: signal wakes one
+ * waiter, signal_all every current waiter, wait honours its timeout (u64 us in
+ * r4, 0 = forever) and answers ETIMEDOUT. signal_to wakes one waiter (the
+ * target thread is not tracked). */
+static int lwc_real(void) { static int on = -1; if (on < 0) on = getenv("GOWA_LWCOND") ? 1 : 0; return on; }
+struct lwc_slot { volatile long addr; HANDLE sem; volatile long waiters; };
+#define LWC_HASH 4096
+static lwc_slot g_lwc[LWC_HASH];
+static volatile long g_lwc_lock = 0;
+static lwc_slot* lwc_get(uint32_t addr)
+{
+    if (!addr) return nullptr;
+    uint32_t h = (addr * 2654435761u) & (LWC_HASH - 1);
+    for (uint32_t i = 0; i < LWC_HASH; i++) {
+        lwc_slot* e = &g_lwc[(h + i) & (LWC_HASH - 1)];
+        if ((uint32_t)e->addr == addr) return e;
+        if (e->addr == 0) {
+            while (_InterlockedExchange(&g_lwc_lock, 1)) YieldProcessor();
+            lwc_slot* r = nullptr;
+            if (e->addr == 0) { e->sem = CreateSemaphoreA(NULL, 0, 0x7FFFFFFF, NULL); e->waiters = 0; e->addr = (long)addr; r = e; }
+            else if ((uint32_t)e->addr == addr) r = e;
+            _InterlockedExchange(&g_lwc_lock, 0);
+            if (r) return r;
+        }
+    }
+    return nullptr;
+}
+static void lwc_wake_one(uint32_t lwcond)
+{
+    lwc_slot* e = lwc_get(lwcond);
+    if (!e) return;
+    for (;;) {
+        long w = e->waiters;
+        if (w <= 0) return;
+        if (_InterlockedCompareExchange(&e->waiters, w - 1, w) == w) { ReleaseSemaphore(e->sem, 1, NULL); return; }
+    }
+}
+static void sys_lwcond_signal(ppu_context* ctx)     { if (lwc_real()) lwc_wake_one((uint32_t)ctx->gpr[3]); ctx->gpr[3] = 0; }
+static void sys_lwcond_signal_all(ppu_context* ctx)
+{
+    if (lwc_real()) {
+        lwc_slot* e = lwc_get((uint32_t)ctx->gpr[3]);
+        if (e) { long w = _InterlockedExchange(&e->waiters, 0); if (w > 0) ReleaseSemaphore(e->sem, w, NULL); }
+    }
+    ctx->gpr[3] = 0;
+}
+static void sys_lwcond_signal_to(ppu_context* ctx)  { if (lwc_real()) lwc_wake_one((uint32_t)ctx->gpr[3]); ctx->gpr[3] = 0; }
 /* Now that the lwmutex is REAL, a no-op wait that keeps holding it deadlocks the
  * signaler. Release the paired lwmutex, wait briefly, reacquire (poll-style: the
  * guest's while(!predicate) loop re-checks; signalers stay no-ops). Handles the
@@ -356,8 +426,50 @@ static void sys_lwcond_wait(ppu_context* ctx)
     if (s) {
         uint32_t own = vm_read32(lwmutex + LWM_OWNER);
         uint32_t rc  = vm_read32(lwmutex + LWM_RECUR);
+        /* lv2 answers CELL_EPERM when the caller does not hold the paired
+         * lwmutex. Without the check this wait released a semaphore another
+         * thread held -- two threads then ran inside the lock -- and on the
+         * way out wrote that thread's id back as owner, so the lock could end
+         * up taken by nobody and never released: God of War Ascension's FIOS
+         * schedulers hung the intro ~1 run in 3 on "FIOSmutx". GOWA_LWCOND_NOCHECK=1
+         * restores the old behaviour. */
+        { static int nochk = -1; if (nochk < 0) nochk = getenv("GOWA_LWCOND_NOCHECK") ? 1 : 0;
+          if (!nochk && (own != LWM_SELF(ctx) || rc == 0)) {
+              static volatile long n_eperm = 0; const long k = _InterlockedIncrement(&n_eperm);
+              if (k <= 20 || (k % 1000) == 0)
+                  fprintf(stderr, "[lwcond] EPERM #%ld tid=%llu lwcond=0x%08X lwmutex=0x%08X owner=%u recur=%u\n",
+                          k, (unsigned long long)ctx->thread_id, lwcond, lwmutex, own, rc);
+              ctx->gpr[3] = (uint64_t)(int64_t)(int32_t)0x80010009u;   /* CELL_EPERM */
+              return;
+          } }
         vm_write32(lwmutex + LWM_RECUR, 0);
         vm_write32(lwmutex + LWM_OWNER, 0);
+        if (lwc_real()) {
+            lwc_slot* e = lwc_get(lwcond);
+            uint64_t us = ctx->gpr[4];
+            int timed = 0;
+            if (e) _InterlockedIncrement(&e->waiters);
+            ReleaseSemaphore(s, 1, NULL);
+            if (e) {
+                DWORD ms = us ? (DWORD)((us + 999) / 1000) : INFINITE;
+                if (WaitForSingleObject(e->sem, ms) == WAIT_TIMEOUT) {
+                    /* Leave the waiter count -- unless a signal already took us
+                     * out of it, in which case its token is ours to consume. */
+                    for (;;) {
+                        long w = e->waiters;
+                        if (w <= 0) { WaitForSingleObject(e->sem, INFINITE); break; }
+                        if (_InterlockedCompareExchange(&e->waiters, w - 1, w) == w) { timed = 1; break; }
+                    }
+                }
+            } else {
+                Sleep(1);
+            }
+            WaitForSingleObject(s, INFINITE);
+            vm_write32(lwmutex + LWM_OWNER, own);
+            vm_write32(lwmutex + LWM_RECUR, rc ? rc : 1);
+            ctx->gpr[3] = timed ? (uint64_t)(int64_t)(int32_t)0x8001000Bu : 0;   /* CELL_ETIMEDOUT */
+            return;
+        }
         ReleaseSemaphore(s, 1, NULL);
         Sleep(1);
         WaitForSingleObject(s, INFINITE);

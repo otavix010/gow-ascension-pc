@@ -72,6 +72,32 @@ static int64_t sys_tty_write(ppu_context* ctx)
         /* Write guest string data to host stderr */
         fwrite(vm_base + buf_ea, 1, len, stderr);
         fflush(stderr);
+        /* GOWA: a title assertion -- the guest back-chain and this thread's
+         * last syscalls / HLE calls with their results (ppu_callring_*),
+         * always: it fires only when the title itself says it broke. */
+        if (len < 4096) {
+            char tmp[512]; uint32_t n = len < 511 ? len : 511;
+            memcpy(tmp, vm_base + buf_ea, n); tmp[n] = 0;
+            if (strstr(tmp, "assertion failed")) {
+                static int _na = 0;
+                if (_na++ < 4) {
+                    extern void ppu_callring_dump(unsigned tid);
+                    uint32_t sp = (uint32_t)ctx->gpr[1];
+                    fprintf(stderr, "[assert-bt] tid=%llu cia=0x%08X lr=0x%08X chain:", (unsigned long long)ctx->thread_id,
+                            (uint32_t)ctx->cia, (uint32_t)ctx->lr);
+                    for (int i = 0; i < 24 && sp && sp < 0x10000000u; i++) {
+                        uint32_t nsp; memcpy(&nsp, vm_base + sp, 4);
+                        nsp = ((nsp>>24)&0xFF)|((nsp>>8)&0xFF00)|((nsp<<8)&0xFF0000)|((nsp<<24)&0xFF000000);
+                        if (nsp <= sp || nsp >= 0x10000000u) break;
+                        uint32_t lr; memcpy(&lr, vm_base + nsp + 0x10, 4);
+                        lr = ((lr>>24)&0xFF)|((lr>>8)&0xFF00)|((lr<<8)&0xFF0000)|((lr<<24)&0xFF000000);
+                        fprintf(stderr, " %08X", lr); sp = nsp;
+                    }
+                    fprintf(stderr, "\n");
+                    ppu_callring_dump((unsigned)ctx->thread_id);
+                }
+            }
+        }
         /* TTY_BT=<substring>: dump the guest LR back-chain whenever the title
          * prints a line containing it. The two hooks below do exactly this for
          * one hardcoded string each, which only ever helped the title they were
@@ -713,6 +739,30 @@ static void* spu_exec_thread_proc(void* arg)
     { ULONG g = 256 * 1024; SetThreadStackGuarantee(&g); }  /* let SO reach the reporter */
 #endif
     spu_thread_t* t = (spu_thread_t*)arg;
+    /* GOWA: MXCSR.DAZ -- the lifted SPU code built with SPU_SX_DAZ relies on
+     * the hardware reading denormal operands as zero (spu_helpers.h). */
+    { extern void spu_daz_enter(void); spu_daz_enter(); }
+#ifdef _WIN32
+    /* GOWA (23/10): the SPU index in the host thread name, so [pin] tells which
+     * SPU a thread is (a whole run slow at ~3/4 speed showed one heavy thread
+     * missing and no way to say which). */
+    { wchar_t nm[24]; swprintf(nm, 24, L"SPU%u", (unsigned)(t->tid & 0xFF)); SetThreadDescription(GetCurrentThread(), nm); }
+    /* GOWA_SPU_SPREAD=1: the SPU threads are the frame's critical path (God of
+     * War Ascension: ~95% busy, the main thread waits on them). Ask for one
+     * physical core each (ideal processor 2*index: the first SMT sibling of a
+     * distinct core on Windows' usual numbering) at above-normal priority, so
+     * two of them do not share a core while another sits idle. A hint, not an
+     * affinity mask. */
+    { static int s_sp = -1;
+      if (s_sp < 0) { const char* e = getenv("GOWA_SPU_SPREAD"); s_sp = (e && *e == '1') ? 1 : 0; }
+      if (s_sp) {
+          SYSTEM_INFO si; GetSystemInfo(&si);
+          const DWORD ncpu = si.dwNumberOfProcessors ? si.dwNumberOfProcessors : 1;
+          const DWORD idx = (DWORD)(t->tid & 0xFF);
+          SetThreadIdealProcessor(GetCurrentThread(), (2u * idx) % ncpu);
+          SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_ABOVE_NORMAL);
+      } }
+#endif
     spu_lifted_thread_result r;
     spu_lifted_thread_run(t->sctx, &r);
     t->exit_status = r.exit_status;
@@ -835,7 +885,7 @@ static int32_t spu_interp_fallback(uint32_t tid, uint32_t args_ea,
             tid, entry, t->img_ea, args_ea);
     int32_t sc = spu_run_interp_job(ls, entry, args_ea, -1,  /* pure interp: no fast-path rejoin */
                                     t->tid, t->group_id, 0); /* identify for mbox->event delivery */
-    { extern uint32_t g_spu_interp_last_pc; extern uint64_t g_spu_interp_steps;
+    { extern SPU_THREAD_LOCAL uint32_t g_spu_interp_last_pc; extern SPU_THREAD_LOCAL uint64_t g_spu_interp_steps;
       fprintf(stderr, "[SPU-INTERP] tid=0x%X done (stop=0x%X, %llu insns, last pc=0x%05X)\n",
               tid, sc, (unsigned long long)g_spu_interp_steps, g_spu_interp_last_pc); }
     return sc;
@@ -914,13 +964,13 @@ int spu_dispatch_frame_by_queue(uint32_t comp_queue, uint32_t work_ea)
                                          getenv("RD_SPU_FRAME_MBOX") ? work_ea : 0u);
         { static int _sp = -1; if (_sp < 0) _sp = getenv("SPU_SPEED") ? 1 : 0;
           if (_sp) { QueryPerformanceCounter(&_t1); QueryPerformanceFrequency(&_fq);
-              extern uint64_t g_spu_interp_steps;
+              extern SPU_THREAD_LOCAL uint64_t g_spu_interp_steps;
               double sec = (double)(_t1.QuadPart - _t0.QuadPart) / (double)_fq.QuadPart;
               static int _n = 0; if (_n++ < 20)
                   fprintf(stderr, "[spu-speed] tid=0x%X %llu insns in %.3f s = %.1f M/s%c",
                           t->tid, (unsigned long long)g_spu_interp_steps, sec,
                           sec > 0 ? g_spu_interp_steps / sec / 1e6 : 0.0, 10); } }
-        { extern uint32_t g_spu_interp_last_pc; extern uint64_t g_spu_interp_steps;
+        { extern SPU_THREAD_LOCAL uint32_t g_spu_interp_last_pc; extern SPU_THREAD_LOCAL uint64_t g_spu_interp_steps;
           fprintf(stderr, "[SPU-FRAME] tid=0x%X done (stop=0x%X, %llu insns, last pc=0x%05X)\n",
                   t->tid, frc, (unsigned long long)g_spu_interp_steps, g_spu_interp_last_pc); }
         return 1;
@@ -2279,6 +2329,13 @@ static int64_t sys_process_is_spu_lock_line_reservation_address(ppu_context* ctx
         rc = (int64_t)(int32_t)CELL_EINVAL;
     } else if (addr >= VM_MAIN_MEM_BASE && addr < VM_MAIN_MEM_BASE + VM_MAIN_MEM_SIZE) {
         rc = 0;                                   /* main memory */
+    } else if (addr < 0x30000000u) {
+        /* RPCS3 (sys_process.cpp) accepts the whole 0x0/0x1/0x2 nibble: main
+         * memory and user 64k memory. In this runtime the sys_mmapper window
+         * (0x11000000+, ppu_loader.cpp case 330/337) lives there too -- God of
+         * War Ascension puts its CellSpurs at 0x1101AD00 and real libsre's
+         * cellSpursInitializeWithAttribute2 failed with CORE_ERROR_PERM. */
+        rc = 0;
     } else if (addr >= 0x40000000u && addr < 0x50000000u) {
         rc = 0;                                   /* sys_memory window */
     } else if (addr >= 0xC0000000u && addr < 0xD0000000u) {

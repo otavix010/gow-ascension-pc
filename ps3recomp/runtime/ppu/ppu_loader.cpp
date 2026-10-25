@@ -33,6 +33,7 @@
 
 #include "ppu_tls.h"   /* PPU_THREAD_LOCAL, without a second ppu_context */
 #define PPU_NO_INLINE_LOADS   /* this file defines the out-of-line accessors */
+#define PPU_RECOMP_NO_CTX_SYNC   /* defines ppu_stwcx32/ppu_stdcx64 (see ppu_recomp.h) */
 #include "ppu_recomp.h"
 #include "ps3emu/milestone.h"   /* ps3_ms / ps3_msf -- boot milestone log */     /* ppu_context, func decls, ppu_recomp_register */
 #include "../memory/vm.h"   /* vm_commit -- sys_mmapper_search_and_map maps for real */
@@ -770,6 +771,8 @@ extern "C" void ppu_log_host_chain(const char* tag);  /* fwd decl (defined below
 extern "C" int  spu_coh_is_reserved(uint32_t addr);
 extern "C" void spu_lockline_lock(void);
 extern "C" void spu_lockline_unlock(void);
+extern "C" void spu_lockline_lock_ea(uint32_t ea);     /* GOWA: that line's stripe */
+extern "C" void spu_lockline_unlock_ea(uint32_t ea);
 extern "C" void spu_coh_notify_write(uint32_t addr);
 
 /* ---------------------------------------------------------------------------
@@ -846,6 +849,30 @@ extern "C" void ppu_resv_register(ppu_context* c)
  * while calling out every pass. Reading a pinned lr as "no calls since
  * entry" narrowed a search to the wrong loop once already. lr names the
  * last DIRECT call site and nothing more. */
+extern "C" uint32_t vm_read32(uint64_t a);   /* GOWA: guest stack walk below */
+extern "C" const char* g_hle_inflight[64];  /* ppu_hle.cpp (PS3_HLE_INFLIGHT_MAX) */
+/* GOWA: out[0] = lr, out[1..n-1] = return addresses up the guest stack of
+ * guest thread `tid`. Returns how many were filled (0: no such thread).
+ * Unlocked and racy by design -- it is a sampling profiler's read. */
+extern "C" int ppu_guest_sample(uint32_t tid, uint32_t* out, int n)
+{
+    long cnt = g_resv_ctx_n; if (cnt > PPU_RESV_MAX) cnt = PPU_RESV_MAX;
+    for (long i = 0; i < cnt; i++) {
+        ppu_context* c = g_resv_ctxs[i];
+        if (!c || (uint32_t)c->thread_id != tid) continue;
+        int k = 0;
+        out[k++] = (uint32_t)c->lr;
+        uint32_t sp = (uint32_t)c->gpr[1];
+        while (k < n && sp) {
+            const uint32_t back = vm_read32(sp + 4);
+            if (!back || back <= sp || back - sp > 0x100000u) break;
+            out[k++] = vm_read32(back + 20);
+            sp = back;
+        }
+        return k;
+    }
+    return 0;
+}
 extern "C" void ppu_report_guest_lrs(void)
 {
     long n = g_resv_ctx_n; if (n > PPU_RESV_MAX) n = PPU_RESV_MAX;
@@ -855,6 +882,67 @@ extern "C" void ppu_report_guest_lrs(void)
         fprintf(stderr, "[WATCHDOG]   guest-tid %-3u lr=0x%08X  r3=0x%08X sp=0x%08X\n",
                 (unsigned)c->thread_id, (uint32_t)c->lr,
                 (uint32_t)c->gpr[3], (uint32_t)c->gpr[1]);
+        /* GOWA: the guest call chain. Lifted code keeps the PPU ABI frames in
+         * guest memory (stdu r1 back chain, LR saved at caller sp+16), so the
+         * stack can be walked like on the console. lr alone is usually just
+         * the usleep/HLE stub the thread is parked in. */
+        {
+          uint32_t sp = (uint32_t)c->gpr[1];
+          char buf[400]; int p = 0;
+          for (int k = 0; k < 16 && sp && p < 360; k++) {
+              const uint32_t back = vm_read32(sp + 4);
+              if (!back || back <= sp || back - sp > 0x100000u) break;
+              const uint32_t lr = vm_read32(back + 20);
+              p += snprintf(buf + p, sizeof buf - p, " %08X", lr);
+              sp = back;
+          }
+          if (p) fprintf(stderr, "[WATCHDOG]       chain:%s\n", buf); }
+        /* GOWA: a thread parked in sys_lwmutex_lock -- whom is it waiting for?
+         * (sys_lwmutex_t: +0x00 owner, +0x0C recursion; r3 is the mutex at
+         * entry and the handler does not change it while it blocks.) */
+        { const unsigned t = (unsigned)c->thread_id;
+          const char* hn = t < 64 ? g_hle_inflight[t] : nullptr;
+          /* GOWA_WD_PEEK=<lr hex>:<sp offset hex>: a thread whose lr is <lr>
+           * keeps an object pointer at sp+<off> (low word of a 64-bit slot);
+           * print it, its words, and the vtable entries +0x10/+0x14 of the
+           * object at +0x18 (God of War's FIOS op -> media -> isDone). */
+          { static int pk = -1; static uint32_t plr, poff;
+            if (pk < 0) { const char* e = getenv("GOWA_WD_PEEK"); pk = 0;
+                if (e && *e) { char* q = nullptr; plr = (uint32_t)strtoul(e, &q, 16);
+                               if (q && *q == ':') { poff = (uint32_t)strtoul(q + 1, nullptr, 16); pk = 1; } } }
+            if (pk && (uint32_t)c->lr == plr) {
+                const uint32_t sp = (uint32_t)c->gpr[1];
+                const uint32_t obj = vm_read32(sp + poff);
+                const uint32_t media = obj ? vm_read32(obj + 0x18) : 0;
+                const uint32_t vt = media ? vm_read32(media) : 0;
+                const uint32_t f10 = vt ? vm_read32(vm_read32(vt + 0x10)) : 0;
+                const uint32_t f14 = vt ? vm_read32(vm_read32(vt + 0x14)) : 0;
+                fprintf(stderr, "[WATCHDOG]       peek obj=0x%08X [%08X %08X %08X %08X %08X %08X %08X %08X] media=0x%08X vt=0x%08X isDone=0x%08X f14=0x%08X\n",
+                        obj, obj ? vm_read32(obj) : 0, obj ? vm_read32(obj + 4) : 0, obj ? vm_read32(obj + 8) : 0,
+                        obj ? vm_read32(obj + 12) : 0, obj ? vm_read32(obj + 16) : 0, obj ? vm_read32(obj + 20) : 0,
+                        obj ? vm_read32(obj + 24) : 0, obj ? vm_read32(obj + 28) : 0, media, vt, f10, f14);
+            } }
+          if (hn && strstr(hn, "lwcond_wait")) {
+              const uint32_t lwc = (uint32_t)c->gpr[3];
+              const uint32_t lwm = vm_read32(lwc + 0x00);
+              fprintf(stderr, "[WATCHDOG]       lwcond 0x%08X -> lwmutex 0x%08X: owner=%u recur=%u\n",
+                      lwc, lwm, lwm ? vm_read32(lwm + 0x00) : 0, lwm ? vm_read32(lwm + 0x0C) : 0);
+          }
+          if (hn && strstr(hn, "lwmutex_lock")) {
+              const uint32_t lwm = (uint32_t)c->gpr[3];
+              fprintf(stderr, "[WATCHDOG]       lwmutex 0x%08X: owner=%u recur=%u\n",
+                      lwm, vm_read32(lwm + 0x00), vm_read32(lwm + 0x0C));
+              /* the words around it (FIOS wraps the lwmutex at +0x10 of its own
+               * mutex object) and the TOC-relative global its wrapper compares
+               * against lwm+8 before calling lock/unlock (0x004CEFB8) */
+              char wb[300]; int wp = 0;
+              for (int k = -4; k < 8; k++) wp += snprintf(wb + wp, sizeof wb - wp, " %08X", vm_read32(lwm + (uint32_t)(k * 4)));
+              /* the import stub saved the caller's r2 (game TOC) at sp+0x28 */
+              const uint32_t toc = vm_read32((uint32_t)c->gpr[1] + 0x2Cu);
+              const uint32_t g = vm_read32(toc - 0x6334u);
+              fprintf(stderr, "[WATCHDOG]       palavras lwm-0x10..+0x1C:%s | toc=0x%08X G=0x%08X *(G+0x10)=0x%08X\n",
+                      wb, toc, g, g ? vm_read32(g + 0x10) : 0);
+          } }
         /* With BCTRL_RING armed, follow it with that thread's recent INDIRECT
          * targets. lr cannot see those (bctrl does not write it), so for a
          * thread looping on a vtable call the ring is the only record of where
@@ -877,6 +965,29 @@ extern "C" void ppu_resv_break_store(uint64_t ea)
     for (long i = 0; i < n; i++) {
         ppu_context* c = g_resv_ctxs[i];
         if (c && c->reserve_addr < PPU_RESV_INVALID && ((uint32_t)c->reserve_addr & ~3u) == a)
+            c->reserve_addr = PPU_RESV_INVALID;
+    }
+}
+/* Break every PPU reservation in ea's 128-byte line. The PowerPC reservation
+ * granule is the cache line: ANY store into the line by another agent kills a
+ * lwarx reservation, not only a store to the reserved word. Called by the SPU
+ * side for every line commit (PUTLLC / PUTLLUC / coherent PUT, all under the
+ * lock-line lock -- see spu_coh_notify_write). Without it a PPU lwarx/stwcx
+ * that READS a neighbouring word between the two (libsre cellSpursSendSignal:
+ * lwarx signalled, read waiting, stwcx signalled) commits on a stale view when
+ * an SPU rewrote the line in between: the taskset PM set waiting=1 under it,
+ * the PPU still saw 0, sent no workload signal, and the task slept forever
+ * with its signal pending (God of War Ascension's level-load inflate task).
+ * GOWA_RESV_WORD=1 restores the old word-only behaviour. */
+static int resv_word_only(void) { static int v = -1; if (v < 0) v = getenv("GOWA_RESV_WORD") ? 1 : 0; return v; }
+extern "C" void ppu_resv_break_line(uint32_t ea)
+{
+    if (resv_word_only()) return;
+    const uint32_t line = ea & ~127u;
+    long n = g_resv_ctx_n; if (n > PPU_RESV_MAX) n = PPU_RESV_MAX;
+    for (long i = 0; i < n; i++) {
+        ppu_context* c = g_resv_ctxs[i];
+        if (c && c->reserve_addr < PPU_RESV_INVALID && ((uint32_t)c->reserve_addr & ~127u) == line)
             c->reserve_addr = PPU_RESV_INVALID;
     }
 }
@@ -939,7 +1050,11 @@ extern "C" int ppu_stwcx32(uint64_t ea, uint32_t expected, uint32_t val)
      * notify: the same serialization the coherent stores use, so a PPU commit
      * cannot land inside an SPU PUTLLC's compare/commit window (nor the
      * reverse), and the reserving SPU gets its lost-reservation event. */
-    int coh = spu_coh_is_reserved((uint32_t)ea);
+    /* Line-granular reservations (ppu_resv_break_line): an SPU commit breaks
+     * our reservation under the lock-line lock, so take that lock for every
+     * commit and re-check the reservation inside it -- otherwise an SPU commit
+     * landing between the check above and the CAS below slips through. */
+    int coh = resv_word_only() ? spu_coh_is_reserved((uint32_t)ea) : 1;
     /* SPU_PUTLLC_WHY=1: count PPU commits that land on a line an SPU has
      * reserved. If an SPU's PUTLLC never succeeds for "no reservation", the
      * PPU hammering the same 128-byte line is one of only two agents that can
@@ -950,12 +1065,15 @@ extern "C" int ppu_stwcx32(uint64_t ea, uint32_t expected, uint32_t val)
             if ((++n % 100000) == 1)
                 fprintf(stderr, "[ppu-steals-resv] %llu: PPU CAS on reserved line 0x%08X\n",
                         n, (uint32_t)ea & ~127u); } }
-    if (coh) spu_lockline_lock();
+    if (coh) spu_lockline_lock_ea((uint32_t)ea);
+    if (coh && self && self->reserve_addr != (uint32_t)ea) {   /* broken by an SPU line commit */
+        spu_lockline_unlock_ea((uint32_t)ea); resv_unlock(L); return 0; }
     int ok = __atomic_compare_exchange_n((uint32_t*)(vm_base + ea), &exp_raw, new_raw,
                                          0, __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST) ? 1 : 0;
     if (coh) {
-        if (ok) spu_coh_notify_write((uint32_t)ea);
-        spu_lockline_unlock();
+        if (ok && spu_coh_is_reserved((uint32_t)ea)) spu_coh_notify_write((uint32_t)ea);
+        else if (ok) ppu_resv_break_line((uint32_t)ea);
+        spu_lockline_unlock_ea((uint32_t)ea);
     }
     if (ok) ppu_resv_break(ea);
     resv_unlock(L);
@@ -1020,12 +1138,15 @@ extern "C" int ppu_stdcx64(uint64_t ea, uint64_t expected, uint64_t val)
     volatile LONG* L = resv_slot(ea);   /* ea and ea+4 share a 16-byte-block slot */
     resv_lock(L);
     if (self && self->reserve_addr != (uint32_t)ea) { resv_unlock(L); return 0; }
-    int coh = spu_coh_is_reserved((uint32_t)ea);
-    if (coh) spu_lockline_lock();
+    int coh = resv_word_only() ? spu_coh_is_reserved((uint32_t)ea) : 1;   /* see ppu_stwcx32 */
+    if (coh) spu_lockline_lock_ea((uint32_t)ea);
+    if (coh && self && self->reserve_addr != (uint32_t)ea) {
+        spu_lockline_unlock_ea((uint32_t)ea); resv_unlock(L); return 0; }
     int ok = __atomic_compare_exchange_n((uint64_t*)(vm_base + ea), &exp_raw, new_raw, 0, __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST) ? 1 : 0;
     if (coh) {
-        if (ok) spu_coh_notify_write((uint32_t)ea);
-        spu_lockline_unlock();
+        if (ok && spu_coh_is_reserved((uint32_t)ea)) spu_coh_notify_write((uint32_t)ea);
+        else if (ok) ppu_resv_break_line((uint32_t)ea);
+        spu_lockline_unlock_ea((uint32_t)ea);
     }
     if (ok) { ppu_resv_break(ea); ppu_resv_break(ea + 4); }  /* 8-byte store spans two words */
     resv_unlock(L);
@@ -1453,10 +1574,10 @@ extern "C" int* ps3_ppu_vcall_sp_slot(void) { return &g_vcall_sp; }
 #define VM_WRITE_COH(a, src, n)                                               \
     do {                                                                      \
         if (spu_coh_is_reserved((uint32_t)(a))) {                             \
-            spu_lockline_lock();                                              \
+            spu_lockline_lock_ea((uint32_t)(a));                              \
             memcpy(vm_base + (uint32_t)(a), (src), (n));                      \
             spu_coh_notify_write((uint32_t)(a));                              \
-            spu_lockline_unlock();                                            \
+            spu_lockline_unlock_ea((uint32_t)(a));                            \
         } else {                                                              \
             memcpy(vm_base + (uint32_t)(a), (src), (n));                      \
         }                                                                     \
@@ -1546,6 +1667,13 @@ static inline void ppu_null_read_report(uint32_t a, int width, void* ra)
 /* ppu_recomp.h's inline loads (vm_read*_inl) skip the out-of-line accessors'
  * probes, so they run only while no read diagnostic is armed. */
 extern "C" int vm_inline_ok = 0;
+extern "C" int vm_inline_st_ok = 0;
+extern "C" uint32_t vm_inl_lim = 0, vm_inl_st_lim = 0, vm_inl_hole = 0, vm_inl_st_hole16 = 0;   /* ppu_recomp.h */
+/* GOWA_PUT_KICK: called on an out-of-line store into the GCM control line
+ * (put/get/ref, vm_inl_st_hole16); cellGcmSys.c wakes the RSX thread on a
+ * put write. */
+extern "C" void (*g_gcm_put_hook)(uint32_t a) = 0;
+extern "C" uint32_t ppu_hle_inject_base;
 static struct VmInlineInit {
     VmInlineInit() {
         static const char* const vars[] = {
@@ -1554,6 +1682,25 @@ static struct VmInlineInit {
         int d = 0;
         for (int i = 0; vars[i]; i++) if (getenv(vars[i])) d = 1;
         vm_inline_ok = !d;
+        /* GOWA: the inline stores (vm_write*_inl) skip the write probes, the
+         * PT detector, the null sweep and the SPU_ATOM_EA barrier log. */
+        static const char* const wvars[] = {
+            "GOWA_TSRACE", "PPU_WVAL", "PPU_WVAL_LO", "PPU_WVAL_HI", "PPU_WVAL_GATE",
+            "PPU_WWATCH", "PPU_WWATCH_LEN", "PPU_WW_GUARD", "PPU_WWATCH_MAX",
+            "SPU_ATOM_EA", "PT", "PS3_NULL_SWEEP", "GOWA_NO_INLINE_STORES", 0 };
+        int w = d;
+        for (int i = 0; wvars[i]; i++) if (getenv(wvars[i])) w = 1;
+        vm_inline_st_ok = !w;
+        /* GOWA: the folded form ppu_recomp.h's vm_inl_ok/vm_inl_st_ok test.
+         * ppu_hle_inject_base is constant-initialised (cellGcmSys.c), and the
+         * Windows VM backs the whole 4 GB (ppu_vm_size 0); a bounded VM takes
+         * 8 bytes off the end for the widest access. */
+        uint32_t lim = 0xE0000000u - 0x10000u;
+        if (ppu_vm_size && ppu_vm_size - 0x10000u - 8u < lim) lim = ppu_vm_size - 0x10000u - 8u;
+        vm_inl_lim = vm_inline_ok ? lim : 0u;
+        vm_inl_st_lim = vm_inline_st_ok ? vm_inl_lim : 0u;
+        vm_inl_hole = ppu_hle_inject_base + 0x2008u;
+        vm_inl_st_hole16 = ppu_hle_inject_base + 0x2000u;
     }
 } s_vm_inline_init;
 
@@ -1773,6 +1920,36 @@ static void ww_arm_inline_window(uint32_t ww)
 }
 static inline void barrier_watch_hit(uint32_t a, uint32_t v, int width, void* ra)
 {
+    /* GOWA_TSRACE=1 (God of War Ascension): PPU stores into the texture
+     * streaming state table (guest *(u32*)0x9B1718, 0xA28 entries x 16 B)
+     * while the UpdateTexStreaming SPU job is in flight (job counter: u16 at 0x9AA4A4 != 0 -- the game's own wait, func_0038D9A0, polls 0x9AA4A8, which nothing ever writes).
+     * The job PUTs the whole table back when it ends and erases them. One line
+     * per distinct (host function, guest lr). */
+    { static int s_ts = -1;
+      if (s_ts < 0) s_ts = getenv("GOWA_TSRACE") ? 1 : 0;
+      if (s_ts && vm_base) {
+          const uint32_t t = vm_read32(0x9B1718);
+          if (t && a >= t && a < t + 0xA280u && vm_read16(0x9AA4A4)) {
+              extern PPU_THREAD_LOCAL ppu_context* g_active_ctx;
+              const uint32_t fn = ppu_prof_resolve_host(ra);
+              const uint32_t lr = g_active_ctx ? (uint32_t)g_active_ctx->lr : 0u;
+              static volatile uint64_t s_seen[128]; static volatile long s_n, s_hits;
+              const uint64_t key = ((uint64_t)fn << 32) | lr;
+              int fresh = 1;
+              for (int k = 0; k < 128 && s_seen[k]; k++) if (s_seen[k] == key) { fresh = 0; break; }
+              const long h = InterlockedIncrement(&s_hits);
+              if (fresh) { const long slot = InterlockedIncrement(&s_n) - 1;
+                           if (slot < 128) s_seen[slot] = key; else fresh = 0; }
+              if (fresh) {
+                  fprintf(stderr, "[tsrace] job em voo: 0x%08X (ent %u +%u) <- 0x%X (w%d) guest-fn=0x%08X lr=0x%08X tid=%u\n",
+                          a, (a - t) / 16, (a - t) & 15, v, width, fn, lr,
+                          g_active_ctx ? (unsigned)g_active_ctx->thread_id : 0u);
+                  if (g_active_ctx) { extern void ppu_dump_guest_stack(ppu_context*, const char*); ppu_dump_guest_stack(g_active_ctx, "tsrace"); }
+                  fflush(stderr);
+              }
+              if ((h % 500) == 0) { fprintf(stderr, "[tsrace] %ld escritas com o job em voo\n", h); fflush(stderr); }
+          }
+      } }
     /* PPU_WVAL=<hexvalue>: log every PPU store that WRITES this value, wherever
      * it lands. PPU_WWATCH answers "who writes this address"; when a bad value is
      * copied from node to node down a list, that only ever catches the copy.
@@ -1920,7 +2097,8 @@ void vm_write32(uint64_t a, uint32_t v) { barrier_watch_hit((uint32_t)a, v, 4, _
       /* Raw SPU problem state: run control, mailboxes and signal notification
        * have side effects. The plain store above still happens -- the registers
        * are guest memory and the PPU reads most of them straight back. */
-      if (spu_raw_is_reg((uint32_t)a)) spu_raw_reg_store((uint32_t)a, _v, 4); } }
+      if (spu_raw_is_reg((uint32_t)a)) spu_raw_reg_store((uint32_t)a, _v, 4); }
+    if (__builtin_expect(((uint32_t)a & ~0xFu) == vm_inl_st_hole16, 0) && g_gcm_put_hook) g_gcm_put_hook((uint32_t)a); }
 void vm_write64(uint64_t a, uint64_t v) {
     /* PPU_WWATCH covers the 64-bit store too. It did not, which made the watch
      * blind to exactly the code that matters most for it: every bignum and
@@ -1930,7 +2108,8 @@ void vm_write64(uint64_t a, uint64_t v) {
     barrier_watch_hit((uint32_t)a,     (uint32_t)(v >> 32), 4, __builtin_return_address(0));
     barrier_watch_hit((uint32_t)a + 4, (uint32_t)v,         4, __builtin_return_address(0));
     if (vm_oob((uint32_t)a,8) || vm_null_store((uint32_t)a, (uint32_t)(v >> 32), 8, __builtin_return_address(0))) return;
-    v = __builtin_bswap64(v); VM_WRITE_COH(a, &v, 8); }
+    v = __builtin_bswap64(v); VM_WRITE_COH(a, &v, 8);
+    if (__builtin_expect(((uint32_t)a & ~0xFu) == vm_inl_st_hole16, 0) && g_gcm_put_hook) g_gcm_put_hook((uint32_t)a); }
 }
 
 /* ---- malloc allocation tracker (PS3_ALLOCTAG) -------------------------------
@@ -2420,8 +2599,14 @@ extern "C" void ps3_indirect_call_to(ppu_context* ctx, uint32_t target)
     ps3_indirect_call(ctx);
 }
 
+extern "C" int g_gowa_slow_ppu;
+extern "C" void gowa_slow_tick(int);
 extern "C" void ps3_indirect_call(ppu_context* ctx)
 {
+    if (__builtin_expect(g_gowa_slow_ppu != 0, 0)) {   /* GOWA_SLOW_PPU_PCT (spu_drain.c) */
+        if (g_gowa_slow_ppu < 0) { const char* e = getenv("GOWA_SLOW_PPU_PCT"); g_gowa_slow_ppu = e ? atoi(e) : 0; }
+        if (g_gowa_slow_ppu > 0) gowa_slow_tick(g_gowa_slow_ppu);
+    }
     static int on = -1;
     if (on < 0) on = getenv("PPU_CSCHECK") ? 1 : 0;
     { static int hg = -1; if (hg < 0) hg = getenv("PS3_ICALL_GATE") ? 1 : 0;
@@ -3035,6 +3220,33 @@ extern "C" void ppu_prof_stamp(void* ctx, unsigned lr);
 #define PS3_SC_INFLIGHT_MAX 64
 extern "C" uint32_t g_sc_inflight[PS3_SC_INFLIGHT_MAX] = { 0 };
 
+/* GOWA: the last 32 lv2 syscalls and HLE calls of each guest thread with
+ * their results (kind 1 = syscall number, 2 = HLE nid), dumped when the
+ * title prints an assertion (sys_tty_write, "assertion failed"): God of War
+ * Ascension's rare load hang is edgezlib_inflate_queue.cpp:425 (0 == ret),
+ * and this names the call that returned the error. A few stores per call. */
+struct ppu_callring_ent { uint32_t kind, id, ret, lr; };
+static ppu_callring_ent s_callring[PS3_SC_INFLIGHT_MAX][32];
+static uint32_t s_callring_pos[PS3_SC_INFLIGHT_MAX];
+extern "C" void ppu_callring_note(unsigned tid, uint32_t kind, uint32_t id, uint32_t ret, uint32_t lr)
+{
+    if (tid >= PS3_SC_INFLIGHT_MAX) return;
+    ppu_callring_ent* e = &s_callring[tid][s_callring_pos[tid]++ & 31u];
+    e->kind = kind; e->id = id; e->ret = ret; e->lr = lr;
+}
+extern "C" void ppu_callring_dump(unsigned tid)
+{
+    if (tid >= PS3_SC_INFLIGHT_MAX) return;
+    fprintf(stderr, "[callring] tid=%u, ultimas chamadas (antiga -> nova):\n", tid);
+    const uint32_t n = s_callring_pos[tid] < 32u ? s_callring_pos[tid] : 32u;
+    for (uint32_t i = s_callring_pos[tid] - n; i != s_callring_pos[tid]; i++) {
+        const ppu_callring_ent* e = &s_callring[tid][i & 31u];
+        fprintf(stderr, "[callring]   %s %-10u (0x%08X) -> 0x%08X  lr=0x%08X\n",
+                e->kind == 1 ? "syscall" : "hle    ", e->id, e->id, e->ret, e->lr);
+    }
+    fflush(stderr);
+}
+
 extern "C" void lv2_syscall(ppu_context* ctx)
 {
     /* One-shot: PPU_GUARD_EA=<hex> arms the page guard on that address without
@@ -3056,10 +3268,11 @@ extern "C" void lv2_syscall(ppu_context* ctx)
      * through ps3_hle_call) and a stale CTR, so without this a wedged thread is
      * just "somewhere in ntdll". Cleared on every exit path by the guard. */
     struct _ScGuard {
-        ppu_context* c;
+        ppu_context* c; uint32_t n;
         ~_ScGuard() { unsigned t = (unsigned)c->thread_id;
-                      if (t < PS3_SC_INFLIGHT_MAX) g_sc_inflight[t] = 0; }
-    } _sg{ ctx };
+                      if (t < PS3_SC_INFLIGHT_MAX) g_sc_inflight[t] = 0;
+                      ppu_callring_note(t, 1, n, (uint32_t)c->gpr[3], (uint32_t)c->lr); }
+    } _sg{ ctx, (uint32_t)num };
     { unsigned t = (unsigned)ctx->thread_id;
       if (t < PS3_SC_INFLIGHT_MAX) g_sc_inflight[t] = (uint32_t)num; }
     /* Guest-PC breadcrumb for the sampling profiler: record the syscall

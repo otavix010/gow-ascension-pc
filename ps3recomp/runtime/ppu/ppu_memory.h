@@ -134,6 +134,8 @@ void        ppu_resv_break_store(uint64_t ea);
 int         spu_coh_is_reserved(uint32_t addr);
 void        spu_lockline_lock(void);
 void        spu_lockline_unlock(void);
+void        spu_lockline_lock_ea(uint32_t addr);     /* GOWA: that line's stripe */
+void        spu_lockline_unlock_ea(uint32_t addr);
 void        spu_coh_notify_write(uint32_t addr);
 #ifdef __cplusplus
 }
@@ -142,10 +144,10 @@ void        spu_coh_notify_write(uint32_t addr);
 #define VM_WRITE_COH(addr, src, n)                                            \
     do {                                                                      \
         if (spu_coh_is_reserved((uint32_t)(addr))) {                          \
-            spu_lockline_lock();                                              \
+            spu_lockline_lock_ea((uint32_t)(addr));                           \
             memcpy(vm_ptr8((uint32_t)(addr)), (src), (n));                    \
             spu_coh_notify_write((uint32_t)(addr));                           \
-            spu_lockline_unlock();                                            \
+            spu_lockline_unlock_ea((uint32_t)(addr));                         \
         } else {                                                              \
             memcpy(vm_ptr8((uint32_t)(addr)), (src), (n));                    \
         }                                                                     \
@@ -320,12 +322,12 @@ static inline int ppu_stwcx(ppu_context* ctx, uint32_t addr, uint32_t val)
      * reverse), and the reserving SPU gets its lost-reservation event. */
     int ok;
     if (spu_coh_is_reserved(addr)) {
-        spu_lockline_lock();
+        spu_lockline_lock_ea(addr);
         ok = atomic_compare_exchange_strong_explicit(
             atom, &expected, desired,
             memory_order_acq_rel, memory_order_acquire);
         if (ok) spu_coh_notify_write(addr);
-        spu_lockline_unlock();
+        spu_lockline_unlock_ea(addr);
     } else {
         ok = atomic_compare_exchange_strong_explicit(
             atom, &expected, desired,
@@ -369,12 +371,12 @@ static inline int ppu_stdcx(ppu_context* ctx, uint32_t addr, uint64_t val)
 
     int ok;
     if (spu_coh_is_reserved(addr)) {
-        spu_lockline_lock();
+        spu_lockline_lock_ea(addr);
         ok = atomic_compare_exchange_strong_explicit(
             atom, &expected, desired,
             memory_order_acq_rel, memory_order_acquire);
         if (ok) spu_coh_notify_write(addr);
-        spu_lockline_unlock();
+        spu_lockline_unlock_ea(addr);
     } else {
         ok = atomic_compare_exchange_strong_explicit(
             atom, &expected, desired,

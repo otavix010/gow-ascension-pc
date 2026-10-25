@@ -14,6 +14,7 @@
  * through vm_base in big-endian.
  */
 #include "ppu_recomp.h"      /* ppu_context */
+extern "C" void gowa_ww_marca(const void* p, size_t n);   /* rsx_live_draw.c (GOWA_TEX_WW) */
 #include "../../libs/filesystem/edat.h"
 #include "ps3emu/nid.h"      /* ps3_compute_nid */
 #include "ps3emu/guest_call.h" /* ps3_invoke_guest: AIO completion is a guest OPD */
@@ -402,6 +403,57 @@ static inline void fs_prefault(uint32_t buf, uint64_t len)
     p[len - 1] = p[len - 1];
 }
 
+/* GOWA: a read whose destination overlaps the executable's code or its OPD
+ * table is a stray buffer pointer -- neither is ever a file read target. God
+ * of War Ascension's gameplay had something land DXT texture blocks on the OPD
+ * at 0x833840 (an NpService callback), after which that thread jumped through
+ * garbage. Report it and skip the read (the caller gets a short read) instead
+ * of trashing the image. GOWA_FS_IMAGE_GUARD=0 lets it through (report only).
+ * Ranges: the GoW ELF's text 0x10000..0x815000 and OPD 0x8283D0..0x8371F0
+ * (the RW data segment after it legitimately receives data). */
+extern "C" int gowa_image_protected(uint32_t ea, uint64_t n)
+{
+    return ((uint64_t)ea < 0x00815000u && (uint64_t)ea + n > 0x00010000u) ||
+           ((uint64_t)ea < 0x008371F0u && (uint64_t)ea + n > 0x008283D0u);
+}
+static int fs_dst_in_image(const char* who, ppu_context* ctx, int fd, uint32_t buf, uint64_t n)
+{
+    static int block = -1;
+    if (block < 0) { const char* e = getenv("GOWA_FS_IMAGE_GUARD"); block = !(e && e[0] == '0'); }
+    if (!n || !gowa_image_protected(buf, n)) return 0;
+    static volatile long cnt = 0;
+    if (cnt++ < 32)
+        fprintf(stderr, "[fs-dst] %s fd=%d '%s' buf=0x%08X n=%llu DENTRO DA IMAGEM DO EXECUTAVEL lr=0x%08X cia=0x%08X tid=%u%s\n",
+                who, fd, (fd >= 0 && fd < FS_MAX) ? g_fd_path[fd] : "?", buf, (unsigned long long)n,
+                (uint32_t)ctx->lr, (uint32_t)ctx->cia, (unsigned)ctx->thread_id, block ? " -- BLOQUEADA" : "");
+    return block;
+}
+
+/* GOWA_FS_MBPS=<n>: file reads complete no faster than n MB/s overall (one
+ * shared budget, like the single drive they come from). Host reads finish
+ * instantly; a streamer tuned for a Blu-ray/HDD may request far more than it
+ * can hold at once when everything it asked for arrives immediately. */
+static void fs_throttle(uint64_t bytes)
+{
+    static double mbps = -1.0, lat_ms = 0.0;
+    if (mbps < 0) { const char* e = getenv("GOWA_FS_MBPS"); mbps = e ? atof(e) : 0.0;
+                    const char* l = getenv("GOWA_FS_LAT_MS"); lat_ms = l ? atof(l) : 0.0; }
+    if (mbps <= 0.0 || !bytes) return;
+    static volatile LONG64 s_busy_until_us = 0;   /* drive busy until (QPC us) */
+    LARGE_INTEGER f, t; QueryPerformanceFrequency(&f); QueryPerformanceCounter(&t);
+    const LONG64 now = (LONG64)(t.QuadPart * 1000000.0 / f.QuadPart);
+    /* GOWA_FS_LAT_MS: plus a fixed per-request cost (a seek) */
+    const LONG64 dur = (LONG64)((double)bytes / (mbps * 1.0e6) * 1.0e6 + lat_ms * 1000.0);
+    LONG64 cur, end;
+    for (;;) {                                    /* reserve the next slot on the "drive" */
+        cur = s_busy_until_us;
+        end = (cur > now ? cur : now) + dur;
+        if (InterlockedCompareExchange64(&s_busy_until_us, end, cur) == cur) break;
+    }
+    const LONG64 wait = end - now;
+    if (wait > 1000) Sleep((DWORD)(wait / 1000));
+}
+
 static void cellFsRead(ppu_context* ctx)
 {
     int fd          = (int)(uint32_t)ctx->gpr[3];
@@ -412,8 +464,11 @@ static void cellFsRead(ppu_context* ctx)
     uint64_t raw_nbytes = ctx->gpr[5];
     long fpos_before = ftell(g_files[fd]);
     if (ppu_vm_size && (uint64_t)buf + nbytes > ppu_vm_size) nbytes = ppu_vm_size - buf;
+    if (fs_dst_in_image("cellFsRead", ctx, fd, buf, nbytes)) nbytes = 0;
     fs_prefault(buf, nbytes);
-    size_t n = fread(vm_base + buf, 1, (size_t)nbytes, g_files[fd]);   /* raw bytes, no swap */
+    size_t n = nbytes ? fread(vm_base + buf, 1, (size_t)nbytes, g_files[fd]) : 0;   /* raw bytes, no swap */
+    gowa_ww_marca(vm_base + buf, n);   /* GOWA_TEX_WW */
+    fs_throttle(n);
     /* PS3_FSLOG_EOF=<fd>,<bytes>: report end-of-file past <bytes> on one descriptor.
      * The intro cinematic is 28 seconds and this port renders it at a few frames
      * a second, so it cannot be watched to its end -- truncating the stream makes
@@ -862,11 +917,14 @@ static void cellFsAioRead(ppu_context* ctx)
     int32_t err = CELL_FS_ENOENT;
     if (fd >= 0 && fd < FS_MAX && g_files[fd]) {
         if (ppu_vm_size && (uint64_t)buf + size > ppu_vm_size) size = ppu_vm_size - buf;
+        if (fs_dst_in_image("cellFsAioRead", ctx, fd, buf, size)) size = 0;
         fs_prefault(buf, size);
         /* AIO reads are absolute -- they do not disturb the fd's own file
          * position, and the guest interleaves them freely across threads. */
         if (HOST_FSEEK64(g_files[fd], offset) == 0)
             n = fread(vm_base + buf, 1, (size_t)size, g_files[fd]);
+            gowa_ww_marca(vm_base + buf, n);   /* GOWA_TEX_WW */
+        fs_throttle(n);
         err = CELL_OK;
     }
     if (getenv("PS3_FSLOG"))

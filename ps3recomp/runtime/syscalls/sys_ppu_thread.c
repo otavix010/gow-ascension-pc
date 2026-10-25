@@ -453,6 +453,8 @@ int64_t sys_ppu_thread_create(ppu_context* ctx)
         return (int64_t)(int32_t)CELL_EAGAIN;
     }
     if (_gate_this && g_gate_n < 256) g_gate_pending[g_gate_n++] = t->host_thread;
+    { wchar_t nm[40]; int k = 0; nm[k++] = L'P'; nm[k++] = L':'; for (const char* c = t->name; *c && k < 39; c++) nm[k++] = (wchar_t)(unsigned char)*c; nm[k] = 0;
+      SetThreadDescription(t->host_thread, nm); }   /* GOWA: guest name in [pin]/debuggers */
     /* The guest's top priorities (0 is highest, 3071 lowest) are its audio and
      * I/O pollers. At normal host priority they wake late under a busy frame:
      * The Simpsons Arcade Game's music thread (prio 0) polls the audio read
