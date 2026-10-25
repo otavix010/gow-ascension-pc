@@ -551,6 +551,19 @@ extern "C" { int g_gowa_pin_on = -1; }   /* 25/10: fixação de threads ligada? 
  * first logical CPU; the rest stay free (the siblings). Role-agnostic: it
  * follows whatever is heavy (loading, menu, gameplay). A thread that drops out
  * gets the process mask back. GOWA_PIN_START=<s> (default 30). */
+/* Núcleos físicos (RelationProcessorCore), para decidir o padrão do GOWA_PIN. */
+static int gowa_nucleos_fisicos(void)
+{
+    DWORD len = 0;
+    GetLogicalProcessorInformationEx(RelationProcessorCore, NULL, &len);
+    if (!len) return 0;
+    uint8_t* buf = (uint8_t*)malloc(len);
+    int n = 0;
+    if (buf && GetLogicalProcessorInformationEx(RelationProcessorCore, (SYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX*)buf, &len))
+        for (DWORD off = 0; off < len; off += ((const SYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX*)(buf + off))->Size) n++;
+    free(buf);
+    return n;
+}
 static DWORD WINAPI gowa_pin_thread(LPVOID)
 {
     const char* st = getenv("GOWA_PIN_START");
@@ -2737,17 +2750,20 @@ int main(int argc, char** argv)
         CreateThread(NULL, 0, gowa_hostprof_thread, NULL, 0, NULL);
     if (getenv("GOWA_TL"))
         CreateThread(NULL, 0, gowa_tl_thread, (LPVOID)(uintptr_t)GetCurrentThreadId(), 0, NULL);
-    /* GOWA_PIN: padrão ligado desde 20/10 (A/B: cap. 16 +8,6%, fase 1 +8,3%); =0 desliga.
-     * 25/10: só com 12 ou mais CPUs lógicas. Com ~9 threads pesadas, fixar as 4 mais
-     * pesadas num i5-10300H (4 núcleos / 8 lógicas) tira do Windows a chance de usar a
-     * CPU lógica que ficou livre: sem fixar, cap. 16 8,06 x 7,75 (+4%, 3 pares
-     * intercalados, mesma janela). =1 força. */
+    /* GOWA_PIN: padrão ligado desde 20/10 (A/B no 9800X3D, 8 núcleos com SMT: cap. 16
+     * +8,6%, fase 1 +8,3%); =0 desliga, =1 força.
+     * 25/10: com ~9 threads pesadas, a fixação só ajuda com 8 núcleos físicos ou mais e
+     * SMT. Num i5-10300H (4 núcleos / 8 lógicas), sem fixar: cap. 16 8,06 x 7,75 (+4%,
+     * 3 pares). Num i5-11400F (6 núcleos / 12 lógicas, AVX-512), sem fixar: 32,80 / 32,54
+     * / 32,78 x 30,41 / 31,34 / 31,23 (+5%, 3 pares, mesma carga de fundo). */
     { const char* pe = getenv("GOWA_PIN");
       SYSTEM_INFO si; GetSystemInfo(&si);
-      const int pin = pe ? (*pe != '0') : (si.dwNumberOfProcessors >= 12);
+      const int nucleos = gowa_nucleos_fisicos();
+      const int pin = pe ? (*pe != '0') : (nucleos >= 8 && (int)si.dwNumberOfProcessors > nucleos);
       { extern int g_gowa_pin_on; g_gowa_pin_on = pin; }   /* desempenho.json */
       if (pin) CreateThread(NULL, 0, gowa_pin_thread, NULL, 0, NULL);
-      else if (!pe) fprintf(stderr, "[pin] desligado: %lu CPUs lógicas (fixa só com 12 ou mais; GOWA_PIN=1 força)\n", (unsigned long)si.dwNumberOfProcessors); }
+      else if (!pe) fprintf(stderr, "[pin] desligado: %d núcleos físicos, %lu CPUs lógicas (fixa só com 8 núcleos ou mais e SMT; GOWA_PIN=1 força)\n",
+                            nucleos, (unsigned long)si.dwNumberOfProcessors); }
     if (getenv("GOWA_GUESTPROF"))
         CreateThread(NULL, 0, gowa_guestprof_thread, NULL, 0, NULL);
     if (getenv("GOWA_GUARD"))
