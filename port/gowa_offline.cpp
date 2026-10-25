@@ -199,6 +199,7 @@ extern "C" __declspec(noinline) void spu_cru_check_store(void* ctx, uint32_t lsa
 /* GOWA_EDGE_NOCULL=1 (21/10, experimento; scripts/nocull_remendo.py): o 0x72DF80 pula o
  * descarte de triângulos onde o próprio jogo permite (o caminho do bit 4096 das flags do
  * desenho) -- a GPU descarta. Lido uma vez na partida. */
+extern "C" { volatile int g_gowa_jogando = 0; }   /* 25/10: ver o gancho do log do jogo */
 extern "C" { int g_gowa_edge_nocull = [] { const char* e = getenv("GOWA_EDGE_NOCULL"); return e ? atoi(e) : 0; }(); }
 /* GOWA_PULA_LUZ=1: o 0x72DF80 pula a iluminação por vértice (0x73E0 + 6AC8/7040) -- experimento de
  * teto do EDGE na GPU (opção (a)): a luz sai errada na tela, o resto do job igual. */
@@ -1325,6 +1326,9 @@ extern "C" void gowa_probe(unsigned int addr, ppu_context* ctx)
     if (addr == 0x001C05A4u) {
         char c[64], m[200]; uint32_t pc_ = (uint32_t)ctx->gpr[4], pm = (uint32_t)ctx->gpr[5];
         for (int k = 0; k < 63; k++) { c[k] = pc_ ? (char)vm_read8(pc_ + k) : 0; if (!c[k]) break; } c[63] = 0;
+        /* 25/10: "go to playing" e os outros estados ("go to loading ui", "go to game
+         * shell", ...): o resumo de desempenho (desempenho.json) só conta o tempo jogando */
+        if (!strncmp(c, "go to ", 6)) { extern volatile int g_gowa_jogando; g_gowa_jogando = !strcmp(c, "go to playing"); }
         for (int k = 0; k < 199; k++) { m[k] = pm ? (char)vm_read8(pm + k) : 0; if (!m[k]) break; } m[199] = 0;
         extern uint64_t ppu_timebase_now(void);
         fprintf(stderr, "[jogo-log] t=%llums tid=%u [%s] %s (r6=0x%08X r7=0x%08X)\n",

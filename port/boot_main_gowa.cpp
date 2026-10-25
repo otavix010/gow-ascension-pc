@@ -473,6 +473,75 @@ static DWORD WINAPI guest_prof_thread(LPVOID)
 
 #include <tlhelp32.h>
 #include <algorithm>
+#include <vector>
+#include <wincodec.h>
+#pragma comment(lib, "windowscodecs")
+/* GOWA (25/10): o ícone da janela (barra de tarefas, Alt+Tab) é o ICON0.PNG da cópia do
+ * jogador (PS3_VFS_ROOT\PS3_GAME\ICON0.PNG, 320x176), lido pela WIC, em quadrado com
+ * faixas transparentes. Sem o arquivo, fica o ícone de antes. */
+static HICON gowa_icone_png(const wchar_t* caminho, int lado)
+{
+    IWICImagingFactory* fab = NULL; IWICBitmapDecoder* dec = NULL; IWICBitmapFrameDecode* qd = NULL;
+    IWICBitmapScaler* esc = NULL; IWICFormatConverter* cnv = NULL; HICON ic = NULL;
+    if (FAILED(CoCreateInstance(CLSID_WICImagingFactory, NULL, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&fab)))) return NULL;
+    UINT w = 0, h = 0;
+    if (SUCCEEDED(fab->CreateDecoderFromFilename(caminho, NULL, GENERIC_READ, WICDecodeMetadataCacheOnDemand, &dec)) &&
+        SUCCEEDED(dec->GetFrame(0, &qd)) && SUCCEEDED(qd->GetSize(&w, &h)) && w && h) {
+        UINT tw = (UINT)lado, th = (UINT)((double)lado * h / w + 0.5);
+        if (th > (UINT)lado) { th = (UINT)lado; tw = (UINT)((double)lado * w / h + 0.5); }
+        if (!tw) tw = 1;
+        if (!th) th = 1;
+        if (SUCCEEDED(fab->CreateBitmapScaler(&esc)) &&
+            SUCCEEDED(esc->Initialize(qd, tw, th, WICBitmapInterpolationModeHighQualityCubic)) &&
+            SUCCEEDED(fab->CreateFormatConverter(&cnv)) &&
+            SUCCEEDED(cnv->Initialize(esc, GUID_WICPixelFormat32bppBGRA, WICBitmapDitherTypeNone, NULL, 0.0, WICBitmapPaletteTypeCustom))) {
+            std::vector<uint32_t> px((size_t)tw * th);
+            if (SUCCEEDED(cnv->CopyPixels(NULL, tw * 4, (UINT)(px.size() * 4), (BYTE*)px.data()))) {
+                BITMAPV5HEADER bh; memset(&bh, 0, sizeof bh);
+                bh.bV5Size = sizeof bh; bh.bV5Width = lado; bh.bV5Height = -lado; bh.bV5Planes = 1; bh.bV5BitCount = 32;
+                bh.bV5Compression = BI_BITFIELDS; bh.bV5RedMask = 0x00FF0000; bh.bV5GreenMask = 0x0000FF00;
+                bh.bV5BlueMask = 0x000000FF; bh.bV5AlphaMask = 0xFF000000;
+                void* bits = NULL; HDC dc = GetDC(NULL);
+                HBITMAP cor = CreateDIBSection(dc, (BITMAPINFO*)&bh, DIB_RGB_COLORS, &bits, NULL, 0);
+                ReleaseDC(NULL, dc);
+                std::vector<BYTE> zeros((size_t)((lado + 15) / 16) * 2 * lado, 0);
+                HBITMAP masc = CreateBitmap(lado, lado, 1, 1, zeros.data());
+                if (cor && masc && bits) {
+                    uint32_t* dst = (uint32_t*)bits;
+                    memset(dst, 0, (size_t)lado * lado * 4);
+                    const UINT ox = ((UINT)lado - tw) / 2, oy = ((UINT)lado - th) / 2;
+                    for (UINT y = 0; y < th; y++) memcpy(dst + (size_t)(oy + y) * lado + ox, px.data() + (size_t)y * tw, tw * 4);
+                    ICONINFO ii; memset(&ii, 0, sizeof ii); ii.fIcon = TRUE; ii.hbmColor = cor; ii.hbmMask = masc;
+                    ic = CreateIconIndirect(&ii);
+                }
+                if (cor) DeleteObject(cor);
+                if (masc) DeleteObject(masc);
+            }
+        }
+    }
+    if (cnv) cnv->Release();
+    if (esc) esc->Release();
+    if (qd) qd->Release();
+    if (dec) dec->Release();
+    fab->Release();
+    return ic;
+}
+static void gowa_icone_janela(HWND hw)
+{
+    if (!hw) return;
+    wchar_t raiz[MAX_PATH]; const DWORD n = GetEnvironmentVariableW(L"PS3_VFS_ROOT", raiz, MAX_PATH);
+    if (!n || n >= MAX_PATH - 32) return;
+    wchar_t cam[MAX_PATH]; swprintf(cam, MAX_PATH, L"%s\\PS3_GAME\\ICON0.PNG", raiz);
+    if (GetFileAttributesW(cam) == INVALID_FILE_ATTRIBUTES) return;
+    const HRESULT co = CoInitializeEx(NULL, COINIT_MULTITHREADED);
+    HICON grande = gowa_icone_png(cam, GetSystemMetrics(SM_CXICON) * 3 / 2);   /* a barra de tarefas reduz o grande */
+    HICON pequeno = gowa_icone_png(cam, GetSystemMetrics(SM_CXSMICON));
+    if (grande) SendMessageW(hw, WM_SETICON, ICON_BIG, (LPARAM)grande);
+    if (pequeno) SendMessageW(hw, WM_SETICON, ICON_SMALL, (LPARAM)pequeno);
+    fprintf(stderr, "[janela] ícone do jogo: %s\n", grande || pequeno ? "ICON0.PNG" : "não carregou");
+    if (SUCCEEDED(co)) CoUninitialize();
+}
+extern "C" { int g_gowa_pin_on = -1; }   /* 25/10: fixação de threads ligada? (desempenho.json) */
 /* ---- GOWA: one heavy thread per physical core (GOWA_PIN=1) -------------
  * The frame needs ~9 busy threads (6-7 SPUs, the main PPU thread, the RSX /
  * present thread) on 8 cores, and Windows stacked them on SMT siblings with a
@@ -1548,6 +1617,7 @@ static DWORD WINAPI vblank_ticker(LPVOID)
         if (rsx_ok && rsx_live_draw_init(rsx_null_backend_get_hwnd(), rsx_w, rsx_h,
                                          rsx_live_guest_ptr, nullptr) == 0) {
             s_rsx_live = 1;
+            gowa_icone_janela((HWND)rsx_null_backend_get_hwnd());   /* 25/10: ícone na barra de tarefas */
             rsx_null_backend_suppress_present(1);
             fprintf(stderr, "[rsx] live-draw engine up (D3D12); GDI present suppressed\n");
         } else {
@@ -2675,6 +2745,7 @@ int main(int argc, char** argv)
     { const char* pe = getenv("GOWA_PIN");
       SYSTEM_INFO si; GetSystemInfo(&si);
       const int pin = pe ? (*pe != '0') : (si.dwNumberOfProcessors >= 12);
+      { extern int g_gowa_pin_on; g_gowa_pin_on = pin; }   /* desempenho.json */
       if (pin) CreateThread(NULL, 0, gowa_pin_thread, NULL, 0, NULL);
       else if (!pe) fprintf(stderr, "[pin] desligado: %lu CPUs lógicas (fixa só com 12 ou mais; GOWA_PIN=1 força)\n", (unsigned long)si.dwNumberOfProcessors); }
     if (getenv("GOWA_GUESTPROF"))
