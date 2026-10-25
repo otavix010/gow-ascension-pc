@@ -63,6 +63,7 @@ static int s_present_suppressed = 0;
 static int  s_tela_cheia;
 static RECT s_janela_rc;
 static HWND s_fundo;
+static ULONGLONG s_tela_cheia_em;   /* GOWA_TELA_CHEIA=1: quando entrar (0 = nada pendente) */
 
 static LRESULT CALLBACK gowa_fundo_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
 {
@@ -101,6 +102,11 @@ static void gowa_tela_cheia(HWND hwnd, int ligar)
                                       m.left, m.top, mw, mh, NULL, NULL, GetModuleHandle(NULL), NULL);
         }
         s_tela_cheia = 1;
+        { UINT dpi = 96; HMODULE u = GetModuleHandleA("user32.dll");
+          UINT (WINAPI *por_janela)(HWND) = u ? (UINT (WINAPI*)(HWND))(void*)GetProcAddress(u, "GetDpiForWindow") : NULL;
+          if (por_janela) dpi = por_janela(hwnd);
+          printf("[janela] tela cheia: monitor %dx%d em (%ld,%ld), janela %dx%d, jogo %ux%u, DPI %u\n",
+                 mw, mh, m.left, m.top, w, h, s_state.width, s_state.height, dpi); fflush(stdout); }
         SetWindowLongPtrA(hwnd, GWL_STYLE, WS_POPUP | WS_VISIBLE);
         SetWindowPos(hwnd, HWND_TOP, m.left + (mw - w) / 2, m.top + (mh - h) / 2, w, h,
                      SWP_FRAMECHANGED | SWP_SHOWWINDOW);
@@ -120,11 +126,13 @@ static LRESULT CALLBACK null_wndproc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
 {
     switch (msg) {
     case WM_CLOSE:
+        printf("[janela] fechada: pedido de fechar (WM_CLOSE)\n"); fflush(stdout);
         s_state.window_closed = 1;
         DestroyWindow(hwnd);
         return 0;
 
     case WM_DESTROY:
+        printf("[janela] destruida\n"); fflush(stdout);
         PostQuitMessage(0);
         return 0;
 
@@ -161,11 +169,16 @@ static LRESULT CALLBACK null_wndproc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
             if (!(lp & (1 << 30))) gowa_tela_cheia(hwnd, !s_tela_cheia);
             return 0;
         }
+        /* Esc é a pausa (Start) do teclado novo (cellPad.c); com GOWA_TECLADO=0 volta
+         * a sair da tela cheia e, na janela, a fechar o jogo */
+        { static int tec = -1; if (tec < 0) { const char* e = getenv("GOWA_TECLADO"); tec = (e && *e == '0') ? 0 : 1; }
+          if (wp == VK_ESCAPE && tec) return 0; }
         if (wp == VK_ESCAPE && s_tela_cheia) {
             gowa_tela_cheia(hwnd, 0);
             return 0;
         }
         if (wp == VK_ESCAPE) {
+            printf("[janela] fechada: Esc\n"); fflush(stdout);
             s_state.window_closed = 1;
             DestroyWindow(hwnd);
         }
@@ -373,8 +386,12 @@ int rsx_null_backend_init(u32 width, u32 height, const char* title)
 
     s_state.hdc = GetDC(s_state.hwnd);
     s_state.last_fps_time = GetTickCount64();
+    /* GOWA_TELA_CHEIA=1: a tela cheia entra 1 s depois, pelo mesmo caminho do F11 (o laço de
+     * mensagens a aplica, com a swap chain já criada e quadros sendo apresentados). Ligada já
+     * aqui, ao criar a janela, o jogo fechava sozinho no PC de um jogador (2 monitores,
+     * RTX 3060 Ti), e alternar depois funcionava. */
     { const char* tc = getenv("GOWA_TELA_CHEIA");
-      if (tc && *tc == '1') gowa_tela_cheia(s_state.hwnd, 1); }
+      if (tc && *tc == '1') s_tela_cheia_em = GetTickCount64() + 1000; }
     snprintf(s_state.title, sizeof(s_state.title), "%s", title ? title : "ps3recomp");
     s_state.title_time = s_state.last_fps_time;
 
@@ -406,6 +423,10 @@ void rsx_null_backend_shutdown(void)
 int rsx_null_backend_pump_messages(void)
 {
     MSG msg;
+    if (s_tela_cheia_em && GetTickCount64() >= s_tela_cheia_em && s_state.hwnd) {   /* GOWA_TELA_CHEIA=1 */
+        s_tela_cheia_em = 0;
+        gowa_tela_cheia(s_state.hwnd, 1);
+    }
     while (PeekMessageA(&msg, NULL, 0, 0, PM_REMOVE)) {
         if (msg.message == WM_QUIT)
             return -1;

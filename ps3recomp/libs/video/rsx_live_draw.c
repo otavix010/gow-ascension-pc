@@ -3105,9 +3105,14 @@ static u64 texture_content_hash(const rsx_dsp_texture* t, int* readable)
      * always the same function of the same texture, so frame-to-frame
      * comparison stays consistent; the game's texture streaming rewrites whole
      * textures, which moves the samples. */
+    /* GOWA (25/10): com o write-watch (GOWA_TEX_WW) só chega aqui a textura que FOI escrita
+     * (as intactas pulam o hash antes), e ela tem o hash completo. Por amostra, um jogo que
+     * carrega a textura em partes ao longo de vários quadros (disco mais lento) mudava as
+     * tiras só na 1a parte: o resto ficava velho, em blocos, e havia materiais sem textura
+     * (inimigos pretos, mãos amarelas; relato de jogador, 5600X + RTX 3060 Ti). */
     { static long thr = -1;
       if (thr < 0) { const char* e = getenv("GOWA_TEX_HASH_SAMPLE"); thr = (e ? atol(e) : 1024L) * 1024L; }
-      if (thr > 0 && span > (u32)thr && span >= 256u * 64u) {
+      if (thr > 0 && span > (u32)thr && span >= 256u * 64u && !(g_gowa_vm_ww && vm_base)) {
           u64 h = 1469598103934665603ull ^ span;
           const u64 step = ((u64)(span - 64u) << 16) / 255u;   /* 16.16 fixed point */
           for (u32 k = 0; k < 256u; k++) {
@@ -13220,7 +13225,23 @@ static int ld_fg_present_guest(ID3D12Resource* src, u32 src_srv)
     ld_fg_luma(k);
     const LONGLONG dt = now - s_fg.last_guest;
     s_fg.last_guest = now;
-    const int interp = s_fg.have_prev && dt > 0 && dt < s_fg.freq * 60 / 1000;
+    /* GOWA (25/10): só interpola com a média do jogo acima de GOWA_FRAMEGEN_MIN_FPS (padrão
+     * 30). Abaixo disso o quadro inventado borra o movimento ("efeito fantasma") e, num PC
+     * limitado pela CPU, os apresentados a mais custam quadros reais (5600X: 25,0 sem contra
+     * 19,7 com). A média (móvel, 1/10 por quadro) evita alternar perto do limite. */
+    static double s_fg_dt_medio;
+    static LONGLONG s_fg_dt_max = -1;
+    if (s_fg_dt_max < 0) {
+        const char* e = getenv("GOWA_FRAMEGEN_MIN_FPS");
+        long f = e ? strtol(e, NULL, 10) : 30;
+        if (f < 1) f = 1;
+        if (f > 240) f = 240;
+        s_fg_dt_max = s_fg.freq / f;
+    }
+    if (dt > 0 && dt < s_fg.freq / 4)
+        s_fg_dt_medio = s_fg_dt_medio > 0 ? 0.9 * s_fg_dt_medio + 0.1 * (double)dt : (double)dt;
+    const int interp = s_fg.have_prev && dt > 0 && dt < s_fg.freq * 60 / 1000 &&
+                       s_fg_dt_medio <= (double)s_fg_dt_max;
     s_fg.cur = k;
     s_fg.have_prev = 1;
     if (!interp) { ld_flush(LD_FLUSH_PRESENT); ld_fg_present_real(); return 1; }   /* fg[k] submitted first */

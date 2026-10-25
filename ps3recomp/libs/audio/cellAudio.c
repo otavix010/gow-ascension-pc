@@ -307,8 +307,19 @@ static int audio_backend_init(void)
     }
     printf("[cellAudio] output: %u channels\n", (unsigned)s_out_ch);
 
-    /* Request event-driven mode with a ~20ms buffer */
+    /* Request event-driven mode with a ~20ms buffer.
+     * GOWA (25/10): GOWA_AUDIO_BUFFER_MS=20..250 (padrão 20) aumenta o buffer: num PC
+     * lento, uma queda de FPS maior que o buffer esvazia a saída e o som corta (relato de
+     * dois jogadores, 5600X e 5700G). 100 é o padrão do RPCS3; custa essa latência a mais. */
     REFERENCE_TIME buf_duration = 200000; /* 20ms in 100ns units */
+    { const char* bm = getenv("GOWA_AUDIO_BUFFER_MS");
+      if (bm && *bm) {
+          long ms = strtol(bm, NULL, 10);
+          if (ms < 20) ms = 20;
+          if (ms > 250) ms = 250;
+          buf_duration = (REFERENCE_TIME)ms * 10000;
+          printf("[cellAudio] buffer de saída: %ld ms\n", ms);
+      } }
     s_wasapi_event = CreateEventW(NULL, FALSE, FALSE, NULL);
 
     /* GOWA: in shared mode the stream format must equal the engine's mix

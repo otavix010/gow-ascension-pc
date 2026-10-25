@@ -1768,7 +1768,7 @@ static DWORD WINAPI vblank_ticker(LPVOID)
             if(++s_q3 % 8 == 0){ int r=sys_event_queue_inject(qid, 0x1234, 0, 0, 0);
               static int _n=0; if(_n++<12) fprintf(stderr,"[INJQ3] injected q%u event rc=%d\n",qid,r); } }
         if (rsx_ok) {
-            if (rsx_pump_messages() != 0) { rsx_ok = 0; }
+            if (rsx_pump_messages() != 0) { rsx_ok = 0; fprintf(stderr, "[janela] a janela fechou; o jogo vai encerrar\n"); }
             if (getenv("YDKJ_PACETRACE")) {
                 static ULONGLONG s_win=0; static int s_pf=0, s_pres=0; static ULONGLONG s_presms=0;
                 s_pf += fired; s_pres++;

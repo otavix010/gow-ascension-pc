@@ -188,6 +188,79 @@ static void pad_poll_keyboard(void)
 }
 #endif
 
+#ifdef _WIN32
+/* GOWA (25/10): teclado e mouse de jogo de PC, SOMADOS ao controle no port 0 (pedido
+ * de jogador). Só com a janela do jogo em foco. GOWA_TECLADO=0 volta ao modo de
+ * emergência acima (só sem controle, setas + Z/X/A/S).
+ *   WASD = analógico esquerdo        Shift + WASD = analógico direito (esquiva)
+ *   Espaço = X (pular)                mouse esquerdo = quadrado (ataque leve)
+ *   mouse direito = triângulo (forte) E, Backspace ou botão do meio = círculo
+ *   Q = L1   F = R1   C = L2   R = R2   setas = direcional
+ *   Esc ou Enter = Start (pausa)      Tab = Select */
+static int pad_teclado_modo(void)
+{
+    static int m = -1;
+    if (m < 0) { const char* e = getenv("GOWA_TECLADO"); m = (e && *e == '0') ? 0 : 1; }
+    return m;
+}
+static void pad_poll_teclado_mouse(void)
+{
+    PadHostState* hs = &s_host_state[0];
+    if (!hs->connected) {                  /* sem controle: parte do neutro */
+        memset(hs, 0, sizeof *hs);
+        hs->analog_lx = hs->analog_ly = hs->analog_rx = hs->analog_ry = 128;
+        hs->connected = 1;
+    }
+    if (!pad_host_window_focused()) return;
+#define PAD_K(vk) ((GetAsyncKeyState(vk) & 0x8000) != 0)
+    u16 b = 0;
+    if (PAD_K(VK_SPACE))                                        b |= CELL_PAD_CTRL_CROSS;
+    if (PAD_K(VK_LBUTTON))                                      b |= CELL_PAD_CTRL_SQUARE;
+    if (PAD_K(VK_RBUTTON))                                      b |= CELL_PAD_CTRL_TRIANGLE;
+    if (PAD_K('E') || PAD_K(VK_BACK) || PAD_K(VK_MBUTTON))      b |= CELL_PAD_CTRL_CIRCLE;
+    if (PAD_K('Q'))                                             b |= CELL_PAD_CTRL_L1;
+    if (PAD_K('F'))                                             b |= CELL_PAD_CTRL_R1;
+    if (PAD_K('C'))                                             b |= CELL_PAD_CTRL_L2;
+    if (PAD_K('R'))                                             b |= CELL_PAD_CTRL_R2;
+    if (PAD_K(VK_UP))                                           b |= CELL_PAD_CTRL_UP;
+    if (PAD_K(VK_DOWN))                                         b |= CELL_PAD_CTRL_DOWN;
+    if (PAD_K(VK_LEFT))                                         b |= CELL_PAD_CTRL_LEFT;
+    if (PAD_K(VK_RIGHT))                                        b |= CELL_PAD_CTRL_RIGHT;
+    if (PAD_K(VK_ESCAPE) || PAD_K(VK_RETURN))                   b |= CELL_PAD_CTRL_START;
+    if (PAD_K(VK_TAB))                                          b |= CELL_PAD_CTRL_SELECT;
+    const int dx = (PAD_K('D') ? 1 : 0) - (PAD_K('A') ? 1 : 0);
+    const int dy = (PAD_K('S') ? 1 : 0) - (PAD_K('W') ? 1 : 0);
+    const int shift = PAD_K(VK_SHIFT);
+#undef PAD_K
+    hs->buttons |= b;
+    { static int dito;
+      if (!dito && (b || dx || dy)) {
+          dito = 1;
+          printf("[teclado] teclado e mouse ativos (primeira tecla: botoes 0x%04X, direcao %d,%d%s)\n",
+                 (unsigned)b, dx, dy, shift ? ", com Shift" : "");
+          fflush(stdout);
+      } }
+    if (dx || dy) {
+        const u8 x = (u8)(dx < 0 ? 0 : dx > 0 ? 255 : 128), y = (u8)(dy < 0 ? 0 : dy > 0 ? 255 : 128);
+        if (shift) { hs->analog_rx = x; hs->analog_ry = y; }
+        else       { hs->analog_lx = x; hs->analog_ly = y; }
+    }
+    if (b & CELL_PAD_CTRL_L2) hs->trigger_l2 = 255;
+    if (b & CELL_PAD_CTRL_R2) hs->trigger_r2 = 255;
+    const u16 t = hs->buttons;
+    hs->press_up       = (t & CELL_PAD_CTRL_UP)       ? 255 : hs->press_up;
+    hs->press_down     = (t & CELL_PAD_CTRL_DOWN)     ? 255 : hs->press_down;
+    hs->press_left     = (t & CELL_PAD_CTRL_LEFT)     ? 255 : hs->press_left;
+    hs->press_right    = (t & CELL_PAD_CTRL_RIGHT)    ? 255 : hs->press_right;
+    hs->press_triangle = (t & CELL_PAD_CTRL_TRIANGLE) ? 255 : hs->press_triangle;
+    hs->press_circle   = (t & CELL_PAD_CTRL_CIRCLE)   ? 255 : hs->press_circle;
+    hs->press_cross    = (t & CELL_PAD_CTRL_CROSS)    ? 255 : hs->press_cross;
+    hs->press_square   = (t & CELL_PAD_CTRL_SQUARE)   ? 255 : hs->press_square;
+    hs->press_l1       = (t & CELL_PAD_CTRL_L1)       ? 255 : hs->press_l1;
+    hs->press_r1       = (t & CELL_PAD_CTRL_R1)       ? 255 : hs->press_r1;
+}
+#endif
+
 static void pad_poll_xinput(void)
 {
     for (int i = 0; i < PAD_MAX_HOST_PORTS; i++) {
@@ -440,7 +513,8 @@ static void pad_poll_backend(void)
     pad_poll_sdl2();
 #endif
 #ifdef _WIN32
-    if (!s_host_state[0].connected) pad_poll_keyboard();
+    if (pad_teclado_modo()) pad_poll_teclado_mouse();
+    else if (!s_host_state[0].connected) pad_poll_keyboard();
 #endif
 }
 
