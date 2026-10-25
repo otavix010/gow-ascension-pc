@@ -539,6 +539,7 @@ static DWORD WINAPI ld_osd_amostrador(LPVOID arg)
     wchar_t cam[128], luid_txt[48];
     swprintf(cam, 128, L"\\GPU Engine(pid_%lu*engtype_3D)\\Utilization Percentage", (unsigned long)GetCurrentProcessId());
     PDH_HQUERY q = NULL; PDH_HCOUNTER c = NULL, ct = NULL; int idade = 0, ct_decimos = 1;
+    long ct_ult = -100000; int ct_iguais = 0, ct_parada = 0;
     for (;;) {
         if (!q || ++idade >= 10) {   /* as instâncias por processo aparecem depois: refaz a consulta a cada 10 s */
             if (q) PdhCloseQuery(q);
@@ -584,7 +585,19 @@ static DWORD WINAPI ld_osd_amostrador(LPVOID arg)
                         const double cel = (ct_decimos ? it[k].FmtValue.doubleValue / 10.0 : it[k].FmtValue.doubleValue) - 273.15;
                         if (cel > mx) mx = cel;
                     }
-                    if (mx > 5.0 && mx < 125.0) {
+                    /* zona parada: em muitos desktops a ACPI devolve um valor fixo, que não é
+                     * o processador (28 graus com a CPU a 70% no PC teste 2). 90 s sem mudar
+                     * nem um décimo -> o medidor mostra "--" e o JSON não grava a máxima */
+                    if (mx > 5.0 && mx < 125.0 && !ct_parada) {
+                        const long dec = (long)(mx * 10.0 + 0.5);
+                        if (dec != ct_ult) { ct_ult = dec; ct_iguais = 0; }
+                        else if (++ct_iguais >= 90) {
+                            ct_parada = 1;
+                            InterlockedExchange(&s_osd_temp_cpu, -1);
+                            InterlockedExchange(&s_osd_temp_cpu_max, -1);
+                        }
+                    }
+                    if (mx > 5.0 && mx < 125.0 && !ct_parada) {
                         InterlockedExchange(&s_osd_temp_cpu, (LONG)(mx + 0.5));
                         if ((LONG)(mx + 0.5) > s_osd_temp_cpu_max) InterlockedExchange(&s_osd_temp_cpu_max, (LONG)(mx + 0.5));
                     }
