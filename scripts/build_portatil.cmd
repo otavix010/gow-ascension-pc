@@ -21,8 +21,10 @@ if exist "%RAIZ%\port\pgo\gowa.profdata" set "PGO=-DGOWA_PGO=use -DGOWA_PGO_PROF
 rem FFmpeg 9 (shared, LGPL): FFMPEG_DIR = pasta com include\ e bin\ (padrão: dl\ffmpeg9\...)
 if "%FFMPEG_DIR%"=="" set "FFMPEG_DIR=%RAIZ%\dl\ffmpeg9\ffmpeg-n9.0-latest-win64-lgpl-shared-9.0"
 set "FFMPEG_F=%FFMPEG_DIR:\=/%"
-call "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Auxiliary\Build\vcvars64.bat" >nul
-set "PATH=C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\Llvm\x64\bin;%PATH%"
+rem GOWA_VS = pasta do Visual Studio 2022 com "C++ Clang tools" (o gerar.ps1 acha com o vswhere)
+if "%GOWA_VS%"=="" set "GOWA_VS=C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools"
+call "%GOWA_VS%\VC\Auxiliary\Build\vcvars64.bat" >nul
+set "PATH=%GOWA_VS%\VC\Tools\Llvm\x64\bin;%PATH%"
 if not exist "%DIR%\build.ninja" (
   cmake -S "%RAIZ%\port" -B "%DIR%" -G Ninja ^
     -DCMAKE_MAKE_PROGRAM=ninja ^
@@ -35,6 +37,6 @@ if not exist "%DIR%\build.ninja" (
   if errorlevel 1 goto fim
 )
 cd /d "%DIR%"
-ninja gowa.exe
+if "%GOWA_JOBS%"=="" (ninja gowa.exe) else (ninja -j %GOWA_JOBS% gowa.exe)
 :fim
 echo exit=%ERRORLEVEL%
