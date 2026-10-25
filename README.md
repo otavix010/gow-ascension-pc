@@ -18,6 +18,12 @@ Como o código do jogo não pode ser distribuído, **o seu PC gera e compila a p
 
 ## Como jogar
 
+### Recomendado: pelo Otavix Launcher
+
+O [Otavix Launcher](https://github.com/otavix010/otavix-launcher/releases/latest) junta tudo num lugar só: baixa este port, confere se o Python e as ferramentas do Visual Studio estão instalados, pede as pastas do disco, do update e do RPCS3, gera o jogo para a sua CPU e abre com as opções de vídeo e os saves. Quando sai uma versão nova, ele avisa e atualiza. É o jeito mais simples; o caminho à mão vem a seguir.
+
+### À mão
+
 **1. O que você precisa ter**
 - A cópia do **disco** do *God of War: Ascension* **BCUS98232** (EUA), numa pasta que contenha `PS3_GAME`.
 - O **update 1.04**: instalado no [RPCS3](https://rpcs3.net) (fica em `RPCS3\dev_hdd0\game\BCUS98232`) ou o arquivo `.pkg`.
@@ -107,7 +113,7 @@ O PS3 tem um processador central (PPU, PowerPC), seis co-processadores vetoriais
 
 A **native PC port** of *God of War: Ascension* (PS3), made by **static recompilation**: the game's PPU and SPU code is translated to C/C++ and compiled for x86-64 on top of [ps3recomp](https://github.com/sp00nznet/ps3recomp). The GPU command stream is rendered with Direct3D 12, and SPURS runs the official libsre module (LLE).
 
-**Bring your own disc**: no game code or data and no firmware here. You need your own copy (BCUS98232 + update 1.04, installed in RPCS3 or as the .pkg) and RPCS3 with the official PS3 firmware installed. Install Python and the Visual Studio 2022 Build Tools with Clang (commands above), download this repository to a path without spaces, double-click **`gerar.cmd`** (it asks for the folders, then decrypts your copy, translates and builds; ~4 minutes on an 8-core Ryzen 7 9800X3D), then play with **`jogar.cmd`**.
+**Easiest: the [Otavix Launcher](https://github.com/otavix010/otavix-launcher/releases/latest)**, which downloads this port, asks for your folders, generates the game for your CPU and starts it. **Bring your own disc**: no game code or data and no firmware here. You need your own copy (BCUS98232 + update 1.04, installed in RPCS3 or as the .pkg) and RPCS3 with the official PS3 firmware installed. Install Python and the Visual Studio 2022 Build Tools with Clang (commands above), download this repository to a path without spaces, double-click **`gerar.cmd`** (it asks for the folders, then decrypts your copy, translates and builds; ~4 minutes on an 8-core Ryzen 7 9800X3D), then play with **`jogar.cmd`**.
 
 Status: boots, menus, chapter 1 and chapter 16 play with correct image, 60 FPS locked on a Ryzen 7 9800X3D; the full game is not verified yet. Performance is CPU-bound and much better with AVX-512: ~68 FPS uncapped in chapter 16 on a 9800X3D, ~32 on an i5-11400F, ~8 on a 4-core laptop without AVX-512. The build `gerar.cmd` produces includes the same performance passes as ours (`scripts/otimizar.py`); only PGO is left out. Thread pinning is now off on CPUs with fewer than 12 logical processors (+4% on the laptop), and the GPU command reader no longer hangs on slow PCs.
 
