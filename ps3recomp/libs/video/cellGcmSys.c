@@ -117,10 +117,16 @@ static double gcm_flip_hz(void)
     if (hz < 0.0) {
         const char* e = getenv("GOWA_FLIP_HZ");
         hz = e ? atof(e) : 60.0;
+        /* 25/10: "ilimitado" (0) e qualquer valor acima ficam em 240 -- sem teto, telas de
+         * abertura e menus chegavam a milhares de FPS (calor e chiado de bobina).
+         * GOWA_FLIP_SEM_TETO=1 volta ao ilimitado de verdade (só para medir). */
+        { const char* s = getenv("GOWA_FLIP_SEM_TETO");
+          if (!(s && *s == '1') && (hz <= 0.0 || hz > 240.0)) hz = 240.0; }
         QueryPerformanceFrequency(&s_flip_qpf);
     }
     return hz;
 }
+double cellGcm_flip_hz_atual(void) { return gcm_flip_hz(); }   /* desempenho.json */
 int cellGcm_flip_hold_us(void)
 {
     if (!s_flip_pending || !s_flip_held) return -1;

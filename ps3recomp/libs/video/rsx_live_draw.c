@@ -486,8 +486,305 @@ static int g_ld_edge_luz;
 static const gowa_luz_set* g_ld_edge_luz_set;
 static u64 g_ld_luz_n[5];   /* desenhos marcados, usados, gen velha, sem atributos 0/4/5, id inválido */
 static volatile long long g_ld_present_qpc;
+/* GOWA (25/10): medidor de desempenho na tela, como o do MSI Afterburner ou o da
+ * Steam. GOWA_OSD=1 liga na partida; F10 liga e desliga. Desligado, custa um teste
+ * por apresentação. Vem DESLIGADO por padrão (o launcher liga pela opção dele);
+ * GOWA_OSD_TECLA=0 desliga a tecla F10. Ligado: um desenho por quadro, no backbuffer, antes do
+ * Present -- o texto vai em constantes da raiz e a fonte (Consolas 8x14, gerada uma
+ * vez pelo GDI) num buffer de 1,5 KB; uso de GPU e VRAM vêm de uma thread que lê a
+ * cada segundo os contadores do Windows (os mesmos do Gerenciador de Tarefas) e a
+ * DXGI. FPS = quadros que o jogo pediu por segundo (o jogo= do [fps]). */
+#include <pdh.h>
+#include <pdhmsg.h>   /* PDH_MORE_DATA */
+#pragma comment(lib, "pdh")
+static D3D12_CPU_DESCRIPTOR_HANDLE rtv_handle(u32 idx);
+IDXGIAdapter3* g_ld_osd_adapter;
+static int s_osd_on = -1, s_osd_f10, s_osd_tecla = -1;
+static ID3D12RootSignature* s_osd_rs;
+static ID3D12PipelineState* s_osd_pso;
+static ID3D12Resource* s_osd_fonte;
+static ID3D12CommandAllocator* s_osd_alloc[3];
+static ID3D12GraphicsCommandList* s_osd_list;
+static u64 s_osd_alloc_fence[3];
+static u32 s_osd_ai, s_osd_falhou;
+static char s_osd_txt[96];
+static volatile LONG s_osd_gpu_pct = -1, s_osd_vram_mb = -1, s_osd_vram_tot_mb = -1;
+static volatile LONG s_osd_temp_cpu = -1, s_osd_temp_gpu = -1, s_osd_temp_cpu_max = -1, s_osd_temp_gpu_max = -1;
+LUID g_ld_osd_luid;
+/* D3DKMT (gdi32), estruturas de d3dkmthk.h: KMTQAITYPE_ADAPTERPERFDATA = 62, temperatura em décimos de grau */
+typedef struct { LUID luid; UINT h; } ld_kmt_abre;
+typedef struct { UINT h; int tipo; void* dados; UINT tam; } ld_kmt_consulta;
+typedef struct { UINT32 indice; ULONGLONG mf, mmf, mmfoc, mb, pcie; ULONG fan, potencia, temperatura; UCHAR ps; } ld_kmt_perf;
+static int ld_osd_temp_gpu(void)
+{
+    static LONG (APIENTRY *abre)(ld_kmt_abre*); static LONG (APIENTRY *consulta)(const ld_kmt_consulta*);
+    static UINT h; static int pronto;
+    if (!pronto) {
+        pronto = -1;
+        HMODULE m = GetModuleHandleA("gdi32.dll");
+        if (m) { abre = (LONG (APIENTRY*)(ld_kmt_abre*))GetProcAddress(m, "D3DKMTOpenAdapterFromLuid");
+                 consulta = (LONG (APIENTRY*)(const ld_kmt_consulta*))GetProcAddress(m, "D3DKMTQueryAdapterInfo"); }
+        ld_kmt_abre a; a.luid = g_ld_osd_luid; a.h = 0;
+        if (abre && consulta && (g_ld_osd_luid.LowPart || g_ld_osd_luid.HighPart) && abre(&a) == 0) { h = a.h; pronto = 1; }
+    }
+    if (pronto != 1) return -1;
+    ld_kmt_perf p; memset(&p, 0, sizeof p);
+    ld_kmt_consulta q = { h, 62, &p, sizeof p };
+    if (consulta(&q) != 0 || !p.temperatura) return -1;
+    return (int)(p.temperatura / 10);
+}
+static DWORD WINAPI ld_osd_amostrador(LPVOID arg)
+{
+    (void)arg;
+    wchar_t cam[128], luid_txt[48];
+    swprintf(cam, 128, L"\\GPU Engine(pid_%lu*engtype_3D)\\Utilization Percentage", (unsigned long)GetCurrentProcessId());
+    PDH_HQUERY q = NULL; PDH_HCOUNTER c = NULL, ct = NULL; int idade = 0, ct_decimos = 1;
+    for (;;) {
+        if (!q || ++idade >= 10) {   /* as instâncias por processo aparecem depois: refaz a consulta a cada 10 s */
+            if (q) PdhCloseQuery(q);
+            q = NULL; c = NULL; ct = NULL; idade = 0;
+            if (PdhOpenQueryW(NULL, 0, &q) == ERROR_SUCCESS) {
+                if (PdhAddEnglishCounterW(q, cam, 0, &c) != ERROR_SUCCESS) c = NULL;
+                /* temperatura da CPU: as zonas térmicas da ACPI (sem driver nem administrador);
+                 * em muitos desktops não existem ou ficam paradas, e aí o medidor mostra "--" */
+                ct_decimos = 1;
+                if (PdhAddEnglishCounterW(q, L"\\Thermal Zone Information(*)\\High Precision Temperature", 0, &ct) != ERROR_SUCCESS) {
+                    ct_decimos = 0;
+                    if (PdhAddEnglishCounterW(q, L"\\Thermal Zone Information(*)\\Temperature", 0, &ct) != ERROR_SUCCESS) ct = NULL;
+                }
+                PdhCollectQueryData(q);
+            }
+        }
+        Sleep(1000);
+        /* "luid_0x%08X_0x%08X" no nome das instâncias: só os motores do adaptador do jogo
+         * (num notebook com duas GPUs, a integrada também aparece para o processo) */
+        swprintf(luid_txt, 48, L"luid_0x%08lx_0x%08lx", (unsigned long)g_ld_osd_luid.HighPart, (unsigned long)g_ld_osd_luid.LowPart);
+        if (q && PdhCollectQueryData(q) == ERROR_SUCCESS) {
+            DWORD tam = 0, n = 0;
+            if (c && PdhGetFormattedCounterArrayW(c, PDH_FMT_DOUBLE, &tam, &n, NULL) == PDH_MORE_DATA && tam) {
+                PDH_FMT_COUNTERVALUE_ITEM_W* it = (PDH_FMT_COUNTERVALUE_ITEM_W*)malloc(tam);
+                if (it && PdhGetFormattedCounterArrayW(c, PDH_FMT_DOUBLE, &tam, &n, it) == ERROR_SUCCESS) {
+                    double mx = -1;
+                    for (DWORD k = 0; k < n; k++) {
+                        wchar_t nome[256]; wcsncpy(nome, it[k].szName ? it[k].szName : L"", 255); nome[255] = 0;
+                        for (wchar_t* w = nome; *w; w++) *w = (wchar_t)towlower(*w);
+                        if (!g_ld_osd_luid.LowPart && !g_ld_osd_luid.HighPart) { if (it[k].FmtValue.doubleValue > mx) mx = it[k].FmtValue.doubleValue; }
+                        else if (wcsstr(nome, luid_txt) && it[k].FmtValue.doubleValue > mx) mx = it[k].FmtValue.doubleValue;
+                    }
+                    if (mx >= 0) InterlockedExchange(&s_osd_gpu_pct, (LONG)(mx > 100.0 ? 100.0 : mx + 0.5));
+                }
+                free(it);
+            }
+            tam = 0; n = 0;
+            if (ct && PdhGetFormattedCounterArrayW(ct, PDH_FMT_DOUBLE, &tam, &n, NULL) == PDH_MORE_DATA && tam) {
+                PDH_FMT_COUNTERVALUE_ITEM_W* it = (PDH_FMT_COUNTERVALUE_ITEM_W*)malloc(tam);
+                if (it && PdhGetFormattedCounterArrayW(ct, PDH_FMT_DOUBLE, &tam, &n, it) == ERROR_SUCCESS) {
+                    double mx = -1000;
+                    for (DWORD k = 0; k < n; k++) {
+                        const double cel = (ct_decimos ? it[k].FmtValue.doubleValue / 10.0 : it[k].FmtValue.doubleValue) - 273.15;
+                        if (cel > mx) mx = cel;
+                    }
+                    if (mx > 5.0 && mx < 125.0) {
+                        InterlockedExchange(&s_osd_temp_cpu, (LONG)(mx + 0.5));
+                        if ((LONG)(mx + 0.5) > s_osd_temp_cpu_max) InterlockedExchange(&s_osd_temp_cpu_max, (LONG)(mx + 0.5));
+                    }
+                }
+                free(it);
+            }
+        }
+        { const int tg = ld_osd_temp_gpu();
+          if (tg > 0 && tg < 125) { InterlockedExchange(&s_osd_temp_gpu, tg); if (tg > s_osd_temp_gpu_max) InterlockedExchange(&s_osd_temp_gpu_max, tg); } }
+        if (g_ld_osd_adapter) {
+            DXGI_QUERY_VIDEO_MEMORY_INFO mi;
+            if (SUCCEEDED(g_ld_osd_adapter->lpVtbl->QueryVideoMemoryInfo(g_ld_osd_adapter, 0, DXGI_MEMORY_SEGMENT_GROUP_LOCAL, &mi))) {
+                InterlockedExchange(&s_osd_vram_mb, (LONG)(mi.CurrentUsage >> 20));
+                InterlockedExchange(&s_osd_vram_tot_mb, (LONG)(mi.Budget >> 20));
+            }
+        }
+    }
+}
+static int ld_osd_pipeline(void)
+{
+    if (s_osd_pso) return 1;
+    if (s_osd_falhou) return 0;
+    s_osd_falhou = 1;
+    /* a fonte: ASCII 32..127 em células de 8x14, uma linha por byte (bit 7 = coluna 0) */
+    u32 fonte[96 * 4]; memset(fonte, 0, sizeof fonte);
+    { HDC dc = CreateCompatibleDC(NULL);
+      BITMAPINFO bi; memset(&bi, 0, sizeof bi);
+      bi.bmiHeader.biSize = sizeof bi.bmiHeader; bi.bmiHeader.biWidth = 8; bi.bmiHeader.biHeight = -14;
+      bi.bmiHeader.biPlanes = 1; bi.bmiHeader.biBitCount = 32; bi.bmiHeader.biCompression = BI_RGB;
+      u32* px = NULL;
+      HBITMAP bm = dc ? CreateDIBSection(dc, &bi, DIB_RGB_COLORS, (void**)&px, NULL, 0) : NULL;
+      HFONT fo = CreateFontA(-12, 7, 0, 0, FW_BOLD, 0, 0, 0, ANSI_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
+                             NONANTIALIASED_QUALITY, FIXED_PITCH | FF_MODERN, "Consolas");
+      if (!bm || !fo) { if (bm) DeleteObject(bm); if (fo) DeleteObject(fo); if (dc) DeleteDC(dc); return 0; }
+      HGDIOBJ ob = SelectObject(dc, bm), of = SelectObject(dc, fo);
+      SetTextColor(dc, RGB(255, 255, 255)); SetBkColor(dc, RGB(0, 0, 0)); SetBkMode(dc, OPAQUE);
+      for (int ch = 32; ch < 128; ch++) {
+          memset(px, 0, 8 * 14 * 4);
+          char s1 = ch == 127 ? (char)0xB0 : (char)ch; TextOutA(dc, 0, 1, &s1, 1); GdiFlush();   /* 127 = grau */
+          for (int y = 0; y < 14; y++) {
+              u32 b = 0;
+              for (int x = 0; x < 8; x++) if ((px[y * 8 + x] & 0xFF) > 96) b |= 0x80u >> x;
+              fonte[(ch - 32) * 4 + (y >> 2)] |= b << ((y & 3) * 8);
+          }
+      }
+      SelectObject(dc, ob); SelectObject(dc, of); DeleteObject(bm); DeleteObject(fo); DeleteDC(dc); }
+    { D3D12_HEAP_PROPERTIES hp = {0}; hp.Type = D3D12_HEAP_TYPE_UPLOAD;
+      D3D12_RESOURCE_DESC rd = {0}; rd.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER; rd.Width = sizeof fonte;
+      rd.Height = rd.DepthOrArraySize = rd.MipLevels = 1; rd.SampleDesc.Count = 1; rd.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
+      if (FAILED(g.dev->lpVtbl->CreateCommittedResource(g.dev, &hp, D3D12_HEAP_FLAG_NONE, &rd, D3D12_RESOURCE_STATE_GENERIC_READ,
+                                                        NULL, &IID_ID3D12Resource, (void**)&s_osd_fonte))) return 0;
+      void* m = NULL; D3D12_RANGE nada = {0, 0};
+      if (FAILED(s_osd_fonte->lpVtbl->Map(s_osd_fonte, 0, &nada, &m))) return 0;
+      memcpy(m, fonte, sizeof fonte); s_osd_fonte->lpVtbl->Unmap(s_osd_fonte, 0, NULL); }
+    D3D12_ROOT_PARAMETER rp[2]; memset(rp, 0, sizeof rp);
+    rp[0].ParameterType = D3D12_ROOT_PARAMETER_TYPE_CBV; rp[0].Descriptor.ShaderRegister = 0;
+    rp[0].ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
+    rp[1].ParameterType = D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS; rp[1].Constants.ShaderRegister = 1;
+    rp[1].Constants.Num32BitValues = 32; rp[1].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
+    D3D12_ROOT_SIGNATURE_DESC rsd = {0}; rsd.NumParameters = 2; rsd.pParameters = rp;
+    ID3DBlob* sig = NULL; ID3DBlob* err = NULL;
+    if (FAILED(D3D12SerializeRootSignature(&rsd, D3D_ROOT_SIGNATURE_VERSION_1, &sig, &err))) { if (err) err->lpVtbl->Release(err); return 0; }
+    HRESULT hr = g.dev->lpVtbl->CreateRootSignature(g.dev, 0, sig->lpVtbl->GetBufferPointer(sig), sig->lpVtbl->GetBufferSize(sig),
+                                                    &IID_ID3D12RootSignature, (void**)&s_osd_rs);
+    sig->lpVtbl->Release(sig);
+    if (FAILED(hr)) return 0;
+    static const char src[] =
+        "cbuffer F : register(b0) { uint4 fonte[96]; };\n"
+        "cbuffer T : register(b1) { uint4 p; uint4 q; uint4 txt[6]; };\n"   /* p = x0, y0, escala, n; q = largura, altura */
+        "uint comp(uint4 v, uint j) { return j == 0 ? v.x : j == 1 ? v.y : j == 2 ? v.z : v.w; }\n"
+        "float4 vs(uint id : SV_VertexID) : SV_Position {\n"
+        "    float2 c = float2(id & 1, id >> 1); float s = (float)p.z;\n"
+        "    float2 sz = float2(p.w * 8.0 * s + 8.0 * s, 14.0 * s + 6.0 * s);\n"
+        "    float2 px = float2(p.x, p.y) + c * sz;\n"
+        "    return float4(px.x / q.x * 2.0 - 1.0, 1.0 - px.y / q.y * 2.0, 0, 1); }\n"
+        "float4 ps(float4 pos : SV_Position) : SV_Target {\n"
+        "    float s = (float)p.z; float4 fundo = float4(0, 0, 0, 0.6);\n"
+        "    float2 l = pos.xy - float2(p.x, p.y) - float2(4.0 * s, 3.0 * s);\n"
+        "    if (l.x < 0 || l.y < 0) return fundo;\n"
+        "    uint ci = (uint)(l.x / (8.0 * s)), col = (uint)(l.x / s) & 7, lin = (uint)(l.y / s);\n"
+        "    if (ci >= p.w || lin >= 14) return fundo;\n"
+        "    uint code = (comp(txt[ci >> 4], (ci >> 2) & 3) >> ((ci & 3) * 8)) & 0xFF;\n"
+        "    if (code < 32 || code > 127) return fundo;\n"
+        "    uint bits = (comp(fonte[code - 32], lin >> 2) >> ((lin & 3) * 8)) & 0xFF;\n"
+        "    return ((bits >> (7 - col)) & 1) ? float4(1.0, 1.0, 0.55, 1.0) : fundo; }\n";
+    ID3DBlob *vsb = NULL, *psb = NULL;
+    if (FAILED(D3DCompile(src, sizeof src - 1, "ld_osd", NULL, NULL, "vs", "vs_5_0", 0, 0, &vsb, &err))) {
+        if (err) { fprintf(stderr, "[osd] vs: %s\n", (const char*)err->lpVtbl->GetBufferPointer(err)); err->lpVtbl->Release(err); }
+        return 0;
+    }
+    if (FAILED(D3DCompile(src, sizeof src - 1, "ld_osd", NULL, NULL, "ps", "ps_5_0", 0, 0, &psb, &err))) {
+        if (err) { fprintf(stderr, "[osd] ps: %s\n", (const char*)err->lpVtbl->GetBufferPointer(err)); err->lpVtbl->Release(err); }
+        vsb->lpVtbl->Release(vsb); return 0;
+    }
+    D3D12_GRAPHICS_PIPELINE_STATE_DESC pd; memset(&pd, 0, sizeof pd);
+    pd.pRootSignature = s_osd_rs;
+    pd.VS.pShaderBytecode = vsb->lpVtbl->GetBufferPointer(vsb); pd.VS.BytecodeLength = vsb->lpVtbl->GetBufferSize(vsb);
+    pd.PS.pShaderBytecode = psb->lpVtbl->GetBufferPointer(psb); pd.PS.BytecodeLength = psb->lpVtbl->GetBufferSize(psb);
+    D3D12_RENDER_TARGET_BLEND_DESC* bl = &pd.BlendState.RenderTarget[0];
+    bl->BlendEnable = TRUE; bl->SrcBlend = D3D12_BLEND_SRC_ALPHA; bl->DestBlend = D3D12_BLEND_INV_SRC_ALPHA; bl->BlendOp = D3D12_BLEND_OP_ADD;
+    bl->SrcBlendAlpha = D3D12_BLEND_ONE; bl->DestBlendAlpha = D3D12_BLEND_ZERO; bl->BlendOpAlpha = D3D12_BLEND_OP_ADD;
+    bl->RenderTargetWriteMask = D3D12_COLOR_WRITE_ENABLE_ALL;
+    pd.RasterizerState.FillMode = D3D12_FILL_MODE_SOLID; pd.RasterizerState.CullMode = D3D12_CULL_MODE_NONE;
+    pd.SampleMask = 0xFFFFFFFFu; pd.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
+    pd.NumRenderTargets = 1; pd.RTVFormats[0] = DXGI_FORMAT_R8G8B8A8_UNORM; pd.SampleDesc.Count = 1;
+    hr = g.dev->lpVtbl->CreateGraphicsPipelineState(g.dev, &pd, &IID_ID3D12PipelineState, (void**)&s_osd_pso);
+    vsb->lpVtbl->Release(vsb); psb->lpVtbl->Release(psb);
+    if (FAILED(hr)) { fprintf(stderr, "[osd] PSO hr=0x%08lX\n", (unsigned long)hr); return 0; }
+    for (int i = 0; i < 3; i++)
+        if (FAILED(g.dev->lpVtbl->CreateCommandAllocator(g.dev, D3D12_COMMAND_LIST_TYPE_DIRECT, &IID_ID3D12CommandAllocator, (void**)&s_osd_alloc[i]))) return 0;
+    if (FAILED(g.dev->lpVtbl->CreateCommandList(g.dev, 0, D3D12_COMMAND_LIST_TYPE_DIRECT, s_osd_alloc[0], NULL,
+                                                &IID_ID3D12GraphicsCommandList, (void**)&s_osd_list))) return 0;
+    s_osd_list->lpVtbl->Close(s_osd_list);
+    CreateThread(NULL, 0, ld_osd_amostrador, NULL, 0, NULL);
+    s_osd_falhou = 0;
+    fprintf(stderr, "[osd] medidor na tela pronto (F10 liga e desliga)\n");
+    return 1;
+}
+/* o texto, refeito a cada 500 ms: FPS do jogo, tempo de quadro, CPU (sistema), GPU, VRAM */
+static void ld_osd_texto(void)
+{
+    static LONGLONG t0; static u32 f0; static ULONGLONG i0, k0, u0;
+    LARGE_INTEGER agora, fr; QueryPerformanceCounter(&agora); QueryPerformanceFrequency(&fr);
+    if (t0 && (agora.QuadPart - t0) * 2 < fr.QuadPart) return;
+    extern u32 cellGcm_flip_request_count(void);
+    const u32 f1 = cellGcm_flip_request_count();
+    FILETIME fi, fk, fu; ULONGLONG i1 = 0, k1 = 0, u1 = 0;
+    if (GetSystemTimes(&fi, &fk, &fu)) {
+        i1 = ((ULONGLONG)fi.dwHighDateTime << 32) | fi.dwLowDateTime;
+        k1 = ((ULONGLONG)fk.dwHighDateTime << 32) | fk.dwLowDateTime;
+        u1 = ((ULONGLONG)fu.dwHighDateTime << 32) | fu.dwLowDateTime;
+    }
+    if (t0) {
+        const double seg = (double)(agora.QuadPart - t0) / (double)fr.QuadPart;
+        const double fps = (f1 - f0) / seg;
+        const ULONGLONG tot = (k1 - k0) + (u1 - u0), oc = tot - (i1 - i0);
+        const int cpu = tot ? (int)(100.0 * (double)oc / (double)tot + 0.5) : 0;
+        char gpu[16] = "--", vram[32] = "", tc[12] = "", tg[12] = "";
+        if (s_osd_gpu_pct >= 0) snprintf(gpu, sizeof gpu, "%ld%%", (long)s_osd_gpu_pct);
+        if (s_osd_vram_mb >= 0) snprintf(vram, sizeof vram, "  VRAM %.1f/%.1f GB", s_osd_vram_mb / 1024.0, s_osd_vram_tot_mb / 1024.0);
+        if (s_osd_temp_cpu > 0) snprintf(tc, sizeof tc, " %ld\x7f", (long)s_osd_temp_cpu);
+        if (s_osd_temp_gpu > 0) snprintf(tg, sizeof tg, " %ld\x7f", (long)s_osd_temp_gpu);
+        snprintf(s_osd_txt, sizeof s_osd_txt, "FPS %.1f  %.1f ms  CPU %d%%%s  GPU %s%s%s",
+                 fps, fps > 0.05 ? 1000.0 / fps : 0.0, cpu, tc, gpu, tg, vram);
+    } else snprintf(s_osd_txt, sizeof s_osd_txt, "FPS --");
+    t0 = agora.QuadPart; f0 = f1; i0 = i1; k0 = k1; u0 = u1;
+}
+static void ld_osd_desenha(void)
+{
+    if (s_osd_on < 0) { const char* e = getenv("GOWA_OSD"); s_osd_on = e && *e == '1';
+                        e = getenv("GOWA_OSD_TECLA"); s_osd_tecla = !(e && *e == '0'); }
+    if (s_osd_tecla) { const int f10 = (GetAsyncKeyState(VK_F10) & 0x8000) != 0;
+      HWND w = GetForegroundWindow(); DWORD pid = 0; if (w) GetWindowThreadProcessId(w, &pid);
+      if (f10 && !s_osd_f10 && pid == GetCurrentProcessId()) s_osd_on = !s_osd_on;
+      s_osd_f10 = f10; }
+    if (!s_osd_on || !g.ready || !ld_osd_pipeline()) return;
+    ld_osd_texto();
+    const u32 ai = s_osd_ai; s_osd_ai = (ai + 1u) % 3u;
+    if (s_osd_alloc_fence[ai] && g.fence->lpVtbl->GetCompletedValue(g.fence) < s_osd_alloc_fence[ai] &&
+        SUCCEEDED(g.fence->lpVtbl->SetEventOnCompletion(g.fence, s_osd_alloc_fence[ai], g.fence_event)))
+        WaitForSingleObject(g.fence_event, INFINITE);
+    s_osd_alloc[ai]->lpVtbl->Reset(s_osd_alloc[ai]);
+    ID3D12GraphicsCommandList* l = s_osd_list;
+    l->lpVtbl->Reset(l, s_osd_alloc[ai], NULL);
+    const u32 bbi = g.swap->lpVtbl->GetCurrentBackBufferIndex(g.swap);
+    ID3D12Resource* bb = g.backbuf[bbi];
+    D3D12_RESOURCE_DESC bd; bb->lpVtbl->GetDesc(bb, &bd);
+    D3D12_RESOURCE_BARRIER b; memset(&b, 0, sizeof b);
+    b.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION; b.Transition.pResource = bb;
+    b.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+    b.Transition.StateBefore = D3D12_RESOURCE_STATE_PRESENT; b.Transition.StateAfter = D3D12_RESOURCE_STATE_RENDER_TARGET;
+    l->lpVtbl->ResourceBarrier(l, 1, &b);
+    const D3D12_CPU_DESCRIPTOR_HANDLE rtv = rtv_handle(bbi);
+    l->lpVtbl->OMSetRenderTargets(l, 1, &rtv, FALSE, NULL);
+    D3D12_VIEWPORT vp = {0, 0, (float)bd.Width, (float)bd.Height, 0.0f, 1.0f};
+    D3D12_RECT sc = {0, 0, (LONG)bd.Width, (LONG)bd.Height};
+    l->lpVtbl->RSSetViewports(l, 1, &vp); l->lpVtbl->RSSetScissorRects(l, 1, &sc);
+    l->lpVtbl->SetPipelineState(l, s_osd_pso);
+    l->lpVtbl->SetGraphicsRootSignature(l, s_osd_rs);
+    l->lpVtbl->SetGraphicsRootConstantBufferView(l, 0, s_osd_fonte->lpVtbl->GetGPUVirtualAddress(s_osd_fonte));
+    u32 k[32]; memset(k, 0, sizeof k);
+    const u32 esc = bd.Height >= 1400 ? 3u : bd.Height >= 900 ? 2u : 1u;   /* legível de 720p a 4K */
+    const u32 n = (u32)strlen(s_osd_txt);
+    k[0] = 8u * esc; k[1] = 8u * esc; k[2] = esc; k[3] = n < 96 ? n : 96; k[4] = (u32)bd.Width; k[5] = (u32)bd.Height;
+    memcpy(&k[8], s_osd_txt, n < 96 ? n : 96);
+    l->lpVtbl->SetGraphicsRoot32BitConstants(l, 1, 32, k, 0);
+    l->lpVtbl->IASetPrimitiveTopology(l, D3D_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP);
+    l->lpVtbl->DrawInstanced(l, 4, 1, 0, 0);
+    b.Transition.StateBefore = D3D12_RESOURCE_STATE_RENDER_TARGET; b.Transition.StateAfter = D3D12_RESOURCE_STATE_PRESENT;
+    l->lpVtbl->ResourceBarrier(l, 1, &b);
+    l->lpVtbl->Close(l);
+    ID3D12CommandList* lists[] = {(ID3D12CommandList*)l};
+    g.queue->lpVtbl->ExecuteCommandLists(g.queue, 1, lists);
+    const u64 v = ++g.fence_value;
+    g.queue->lpVtbl->Signal(g.queue, g.fence, v);
+    s_osd_alloc_fence[ai] = v;
+}
 static HRESULT ld_swap_present(void)
 {
+    ld_osd_desenha();
     LARGE_INTEGER a, b; QueryPerformanceCounter(&a);
     const HRESULT hr = g.swap->lpVtbl->Present(g.swap, g_ld_present_sync ? 1 : 0,
                                                (!g_ld_present_sync && g_ld_present_tearing) ? DXGI_PRESENT_ALLOW_TEARING : 0);
@@ -11035,6 +11332,11 @@ int rsx_live_draw_init(void* hwnd, u32 width, u32 height,
           char name[128]; WideCharToMultiByte(CP_UTF8, 0, ad.Description, -1, name, sizeof name, NULL, NULL);
           fprintf(stderr, "[D3D12] adaptador: %s (%llu MB de VRAM dedicada)\n", name,
                   (unsigned long long)(ad.DedicatedVideoMemory >> 20));
+          { extern char g_ld_gpu_nome[128]; extern unsigned g_ld_gpu_vram_mb;   /* desempenho.json */
+            memcpy(g_ld_gpu_nome, name, sizeof name); g_ld_gpu_vram_mb = (unsigned)(ad.DedicatedVideoMemory >> 20); }
+          { extern LUID g_ld_osd_luid; g_ld_osd_luid = luid; }   /* GPU%/temperatura do adaptador do jogo */
+          { extern IDXGIAdapter3* g_ld_osd_adapter;   /* VRAM em uso para o medidor na tela */
+            used->lpVtbl->QueryInterface(used, &IID_IDXGIAdapter3, (void**)&g_ld_osd_adapter); }
           used->lpVtbl->Release(used);
       } }
 #if defined(YZ_PERF_PROFILE)
@@ -12925,6 +13227,104 @@ void rsx_live_draw_framegen_tick(void)
     if (s_fg.pending && g.ready && ld_fg_now() >= s_fg.due) ld_fg_present_real();
 }
 
+/* GOWA (25/10): resumo de desempenho para o launcher. A cada amostra de ~5 s do
+ * [fps], se o jogo está jogando (g_gowa_jogando: o estado "go to playing" do log do
+ * jogo; carregamentos e menus não contam), guarda o FPS do jogo; a cada 6 amostras
+ * (~30 s) grava o JSON em GOWA_PERF_JSON ou <pasta do exe>\desempenho.json, por um
+ * .tmp trocado de uma vez -- vale mesmo se o jogo for fechado à força. "p1" é o
+ * percentil 1 das amostras de 5 s (com poucas amostras, perto do mínimo). */
+#include <intrin.h>
+char g_ld_gpu_nome[128];
+unsigned g_ld_gpu_vram_mb;
+extern volatile int g_gowa_jogando;
+extern int g_gowa_pin_on;
+static float s_perf_fps[8192];
+static unsigned s_perf_n;
+static double s_perf_seg;
+static int ld_perf_cmp(const void* a, const void* b)
+{
+    const float x = *(const float*)a, y = *(const float*)b;
+    return x < y ? -1 : x > y ? 1 : 0;
+}
+static void ld_perf_json_grava(void)
+{
+    static char caminho[MAX_PATH];
+    if (!caminho[0]) {
+        const char* e = getenv("GOWA_PERF_JSON");
+        if (e && *e) snprintf(caminho, sizeof caminho, "%s", e);
+        else {
+            char exe[MAX_PATH]; DWORD n = GetModuleFileNameA(NULL, exe, sizeof exe);
+            char* barra = n ? strrchr(exe, '\\') : NULL;
+            if (barra) { barra[1] = 0; snprintf(caminho, sizeof caminho, "%sdesempenho.json", exe); }
+            else snprintf(caminho, sizeof caminho, "desempenho.json");
+        }
+    }
+    /* CPU: nome e AVX2 / AVX-512 (F, BW, VL e DQ, como o gerar.ps1 confere) */
+    char cpu[49] = ""; int r[4];
+    __cpuid(r, 0x80000000);
+    if ((unsigned)r[0] >= 0x80000004u) {
+        for (int k = 0; k < 3; k++) { __cpuid(r, 0x80000002 + k); memcpy(cpu + 16 * k, r, 16); }
+        cpu[48] = 0;
+    }
+    char* c0 = cpu; while (*c0 == ' ') c0++;
+    __cpuidex(r, 7, 0);
+    const int avx2 = (r[1] >> 5) & 1;
+    const int avx512 = ((r[1] >> 16) & 1) && ((r[1] >> 30) & 1) && ((r[1] >> 31) & 1) && ((r[1] >> 17) & 1);
+    SYSTEM_INFO si; GetSystemInfo(&si);
+    MEMORYSTATUSEX ms; ms.dwLength = sizeof ms; GlobalMemoryStatusEx(&ms);
+    /* FPS: média ponderada pelo tempo, percentil 1, mínimo e máximo das amostras */
+    double soma = 0; float mn = 0, mx = 0, p1 = 0;
+    if (s_perf_n) {
+        static float ord[8192];
+        memcpy(ord, s_perf_fps, s_perf_n * sizeof(float));
+        qsort(ord, s_perf_n, sizeof(float), ld_perf_cmp);
+        for (unsigned k = 0; k < s_perf_n; k++) soma += s_perf_fps[k];
+        mn = ord[0]; mx = ord[s_perf_n - 1]; p1 = ord[s_perf_n / 100];
+    }
+    extern double cellGcm_flip_hz_atual(void);
+    char lim_txt[16]; { const double hz = cellGcm_flip_hz_atual(); if (hz > 0) snprintf(lim_txt, sizeof lim_txt, "%.0f", hz); else snprintf(lim_txt, sizeof lim_txt, "0"); }
+    char tmp[MAX_PATH + 8]; snprintf(tmp, sizeof tmp, "%s.tmp", caminho);
+    FILE* f = fopen(tmp, "w");
+    if (!f) return;
+    /* o nome da CPU e da GPU sem aspas nem barras (vão no JSON como estão) */
+    for (char* q = c0; *q; q++) if (*q == '"' || *q == '\\') *q = ' ';
+    for (char* q = g_ld_gpu_nome; *q; q++) if (*q == '"' || *q == '\\') *q = ' ';
+    SYSTEMTIME st; GetSystemTime(&st);
+#ifdef SPU_SX_RZ
+    const char* build = "portatil";   /* sem AVX-512: contas de float das SPUs em arredondamento para zero */
+#else
+    const char* build = "avx512";
+#endif
+    fprintf(f, "{\n  \"versao\": 1,\n  \"jogo\": \"gow-ascension\",\n  \"quando\": \"%04u-%02u-%02uT%02u:%02u:%02uZ\",\n",
+            st.wYear, st.wMonth, st.wDay, st.wHour, st.wMinute, st.wSecond);
+    fprintf(f, "  \"build\": \"%s\",\n  \"cpu\": \"%s\",\n  \"cpu_recursos\": [%s%s],\n  \"threads\": %lu,\n  \"ram_mb\": %llu,\n"
+               "  \"gpu\": \"%s\",\n  \"vram_mb\": %u,\n",
+            build, c0, avx2 ? "\"avx2\"" : "", avx512 ? (avx2 ? ", \"avx512\"" : "\"avx512\"") : "",
+            (unsigned long)si.dwNumberOfProcessors, (unsigned long long)(ms.ullTotalPhys >> 20), g_ld_gpu_nome, g_ld_gpu_vram_mb);
+    fprintf(f, "  \"fps\": {\"medio\": %.2f, \"p1\": %.2f, \"min\": %.2f, \"max\": %.2f, \"amostras\": %u},\n  \"minutos\": %.1f,\n",
+            s_perf_n ? soma / (double)s_perf_n : 0.0, p1, mn, mx, s_perf_n, s_perf_seg / 60.0);
+    { char tc[16] = "null", tg[16] = "null";   /* só com o medidor na tela ligado: é ele que lê os sensores */
+      if (s_osd_temp_cpu_max > 0) snprintf(tc, sizeof tc, "%ld", (long)s_osd_temp_cpu_max);
+      if (s_osd_temp_gpu_max > 0) snprintf(tg, sizeof tg, "%ld", (long)s_osd_temp_gpu_max);
+      fprintf(f, "  \"temp_max_c\": {\"cpu\": %s, \"gpu\": %s},\n", tc, tg); }
+    fprintf(f, "  \"opcoes\": {\"fixacao_threads\": %d, \"resolucao_interna\": %u, \"limitador_hz\": %s}\n}\n",
+            g_gowa_pin_on, (unsigned)g.res_scale, lim_txt);
+    fclose(f);
+    MoveFileExA(tmp, caminho, MOVEFILE_REPLACE_EXISTING);
+}
+static void ld_perf_amostra(double fps, double seg)
+{
+    /* as 2 primeiras amostras (~10 s) de cada entrada no jogo ainda pegam o fim do carregamento */
+    static int s_jogando_antes, s_pula;
+    if (!g_gowa_jogando) { s_jogando_antes = 0; return; }
+    if (!s_jogando_antes) { s_jogando_antes = 1; s_pula = 2; }
+    if (s_pula > 0) { s_pula--; return; }
+    if (seg <= 0 || fps <= 0) return;
+    if (s_perf_n < sizeof s_perf_fps / sizeof s_perf_fps[0]) s_perf_fps[s_perf_n++] = (float)fps;
+    s_perf_seg += seg;
+    if (s_perf_n % 6 == 0) ld_perf_json_grava();
+}
+
 void rsx_live_draw_present(u32 buffer_id)
 {
     if (ld_mtrace_on()) fprintf(stderr, "[mtrace] f=%u PRESENT buffer %u\n", g_ld_frames, buffer_id);
@@ -14075,6 +14475,7 @@ ld_present_done:;
                     (g_ld_frames - fps_f0) * 1000.0 / (double)(now - fps_t0),
                     fps_f0, g_ld_frames, (now - fps_t0) / 1000.0, sink_now - s_sink0,
                     (flip_now - s_flip0) * 1000.0 / (double)(now - fps_t0));
+            ld_perf_amostra((flip_now - s_flip0) * 1000.0 / (double)(now - fps_t0), (now - fps_t0) / 1000.0);
             s_sink0 = sink_now; s_flip0 = flip_now; }
           fps_t0 = now; fps_f0 = g_ld_frames;
       } }
