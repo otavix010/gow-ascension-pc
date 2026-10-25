@@ -26,12 +26,14 @@
   os dois arquivos são baixados do repositório do RPCS3 para dl\rpcs3_chaves.
 
 .EXAMPLE
+  gerar.cmd     (clique duas vezes: pede as pastas em janelas)
+.EXAMPLE
   .\gerar.ps1 -Disco D:\GOWA -Update C:\RPCS3\dev_hdd0\game\BCUS98232 -Firmware C:\RPCS3
 #>
 param(
-    [Parameter(Mandatory = $true)][string]$Disco,
-    [Parameter(Mandatory = $true)][string]$Update,
-    [Parameter(Mandatory = $true)][string]$Firmware,
+    [string]$Disco = '',
+    [string]$Update = '',
+    [string]$Firmware = '',
     [string]$ChavesRpcs3 = '',
     [ValidateSet('auto', 'avx512', 'portatil')][string]$Build = 'auto',
     [int]$Jobs = 0,
@@ -48,6 +50,42 @@ $OUT = Join-Path $R 'out\gerar'
 New-Item -ItemType Directory -Force $OUT | Out-Null
 
 function Msg($t) { Write-Host "[gerar] $t" -ForegroundColor Cyan }
+
+# ---------------------------------------------------------------------------- entradas (janelas se faltarem)
+function Escolher-Pasta([string]$texto) {
+    try {
+        Add-Type -AssemblyName System.Windows.Forms
+        $d = New-Object System.Windows.Forms.FolderBrowserDialog
+        $d.Description = $texto
+        $d.ShowNewFolderButton = $false
+        if ($d.ShowDialog() -eq 'OK') { return $d.SelectedPath }
+        return ''
+    } catch { return (Read-Host $texto) }
+}
+function Escolher-Pkg([string]$texto) {
+    try {
+        Add-Type -AssemblyName System.Windows.Forms
+        $d = New-Object System.Windows.Forms.OpenFileDialog
+        $d.Title = $texto
+        $d.Filter = 'Pacote do PS3 (*.pkg)|*.pkg'
+        if ($d.ShowDialog() -eq 'OK') { return $d.FileName }
+        return ''
+    } catch { return (Read-Host $texto) }
+}
+$marcaJogo = Join-Path $OUT '2_jogo.ok'; $marcaFw = Join-Path $OUT '3_firmware.ok'
+if (-not $Disco -and ($Refazer -or -not (Test-Path $marcaJogo))) {
+    $Disco = Escolher-Pasta 'Escolha a pasta com a cópia do DISCO do God of War: Ascension (BCUS98232) -- a que contém PS3_GAME'
+    if (-not $Disco) { throw 'sem a pasta do disco' }
+}
+if (-not $Update -and ($Refazer -or -not (Test-Path $marcaJogo))) {
+    $Update = Escolher-Pasta 'Escolha a pasta do UPDATE 1.04 instalado no RPCS3 (RPCS3\dev_hdd0\game\BCUS98232). Se você tem o arquivo .pkg, clique em Cancelar.'
+    if (-not $Update) { $Update = Escolher-Pkg 'Escolha o arquivo .pkg do update 1.04 (BCUS98232)' }
+    if (-not $Update) { throw 'sem o update 1.04' }
+}
+if (-not $Firmware -and ($Refazer -or -not (Test-Path $marcaFw))) {
+    $Firmware = Escolher-Pasta 'Escolha a pasta do RPCS3 com o firmware oficial do PS3 instalado (File > Install Firmware)'
+    if (-not $Firmware) { throw 'sem o firmware' }
+}
 # roda um comando nativo pelo cmd (stdout e stderr no log da etapa); falha = exceção com o log
 function Exec([string]$log, [string]$linha) {
     Add-Content -Path $log -Value "`r`n> $linha" -Encoding UTF8
@@ -80,12 +118,11 @@ function Achar-VS {
 }
 Etapa '1_ferramentas' {
     $falta = @()
-    $py = Get-Command python -ErrorAction SilentlyContinue
-    if (-not $py) { $falta += 'Python 3 (winget install Python.Python.3.12)' }
-    else {
-        $v = (& python -c "import sys; print(sys.version_info[0]*100+sys.version_info[1])")
-        if ([int]$v -lt 310) { $falta += 'Python 3.10 ou mais novo' }
-    }
+    # "python" pode ser o atalho da Microsoft Store (abre a loja, não roda nada)
+    $v = ''
+    try { $v = (cmd /c 'python -c "import sys; print(sys.version_info[0]*100+sys.version_info[1])" 2>nul') } catch { }
+    if (-not ($v -match '^\d+$')) { $falta += 'Python 3 (winget install Python.Python.3.12) -- e feche/abra o terminal depois' }
+    elseif ([int]$v -lt 310) { $falta += 'Python 3.10 ou mais novo' }
     if (-not (Achar-VS)) {
         $falta += 'Visual Studio 2022 Build Tools com C++, "C++ Clang tools" e "C++ CMake tools":' +
                   "`r`n    winget install Microsoft.VisualStudio.2022.BuildTools --override `"--quiet --wait --add Microsoft.VisualStudio.Workload.VCTools --add Microsoft.VisualStudio.Component.VC.Llvm.Clang --add Microsoft.VisualStudio.Component.VC.CMake.Project --includeRecommended`""
@@ -184,7 +221,11 @@ Etapa '4_ppu' {
 # ---------------------------------------------------------------------------- SPU
 Etapa '5_spu' {
     $s = Join-Path $R 'scripts'
-    Exec $LOG "python `"$R\ps3recomp\tools\build_spu_workloads.py`" --input `"$R\jogo\GOWA.elf`" --input `"$R\fw\libsre.prx`" --lifted `"$R\port\spu`" --out `"$R\port\spu\spu_workloads.c`" --constructor --allow-partial"
+    # a ferramenta é dona da pasta de saída inteira (substitui a cada execução): gera à parte e copia
+    $sw = Join-Path $R 'out\spu_workloads'
+    Exec $LOG "python `"$R\ps3recomp\tools\build_spu_workloads.py`" --input `"$R\jogo\GOWA.elf`" --input `"$R\fw\libsre.prx`" --lifted `"$sw`" --out `"$sw\spu_workloads.c`" --constructor --allow-partial"
+    cmd /c "robocopy `"$sw`" `"$R\port\spu`" /E /NFL /NDL /NJH /NJS /NP >> `"$LOG`" 2>&1"
+    if ($LASTEXITCODE -ge 8) { throw "falhou a cópia de $sw (robocopy $LASTEXITCODE)" }
     Exec $LOG "python `"$s\lift_gowa_jobmods.py`""
     Exec $LOG "python `"$s\lift_gowa_pm.py`""
     Exec $LOG "python `"$s\lift_gowa_tspm.py`""
@@ -192,12 +233,15 @@ Etapa '5_spu' {
     Exec $LOG "python `"$s\lift_gowa_plugins.py`" `"$R\dados\plugins_getcode_edge_cap16.txt`""
     Exec $LOG "python `"$s\lift_gowa_plugins.py`" `"$R\dados\plugins_getcode_w11.txt`" --wids 11 --naofolha --inc `"$R\port\gowa_plugins_w11.inc`" --tabela g_gowa_plugin_fns_w11"
     $hot = Join-Path $R 'port\gowa_jobmods_hot.inc'
-    Set-Content -Path $hot -Encoding UTF8 -Value @(
-        '/* GERADO por gerar.ps1 + scripts/folhas_spu.py: funções folha seguras dos módulos de job',
-        ' * que ficam interpretados (GOWA_JOBLIFT_HOT). va, LS, bytes da função. */',
-        'static const struct { uint32_t va, ls, len; } g_gowa_hot[] = {')
+    $utf8 = New-Object System.Text.UTF8Encoding($false)   # sem BOM: o .inc entra no meio de um .cpp
+    [IO.File]::WriteAllText($hot, ("/* GERADO por gerar.ps1 + scripts/folhas_spu.py: funções folha seguras dos módulos de job`n" +
+        " * que ficam interpretados (GOWA_JOBLIFT_HOT). va, LS, bytes da função. */`n" +
+        "static const struct { uint32_t va, ls, len; } g_gowa_hot[] = {`n"), $utf8)
     Exec $LOG "python `"$s\folhas_spu.py`" `"$R\port\spu\gowajm_006FC080\spu_recomp.c`" gowajm_006FC080_ --inc 6FC080 `"$hot`""
-    Add-Content -Path $hot -Value '};' -Encoding UTF8
+    [IO.File]::AppendAllText($hot, "};`n", $utf8)
+    # obrigatório: o boot liga GOWA_SPU_NUM_REMAP=3 (a 7ª SPU se vê como outra nas listas de
+    # job do WWS); sem este passe os números colidem e o jogo para esperando um job
+    Exec $LOG "python `"$s\spu_num_remap.py`" aplicar"
     Exec $LOG "python `"$s\guarda_avx512.py`" aplicar"
 }
 
@@ -232,6 +276,7 @@ Etapa '7_jogar' {
         'set "PS3_VFS_ROOT=%RAIZ%vfs"',
         'set "PS3_LIBSRE_IMAGE=%RAIZ%fw\lle\libsre_image.bin"',
         'if not defined PS3_SAVE_ROOT set "PS3_SAVE_ROOT=%RAIZ%saves"',
+        'if not exist "%PS3_SAVE_ROOT%" mkdir "%PS3_SAVE_ROOT%"',
         'if not exist "%RAIZ%out" mkdir "%RAIZ%out"',
         "cd /d `"%RAIZ%port\$bdir`"",
         'gowa.exe "%RAIZ%jogo\GOWA.elf" > "%RAIZ%out\jogo.log" 2>&1')

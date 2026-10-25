@@ -52,3 +52,6 @@ ref-rpcs3/
 # Python
 __pycache__/
 *.pyc
+
+# gerado pelo gerar.ps1
+/jogar.cmd
