@@ -342,7 +342,14 @@ s32 cellGameBootCheck(u32* type, u32* attributes, CellGameContentSize* size,
     uint32_t dir_ea  = (uint32_t)(uintptr_t)dirName;
 
     if (type_ea) vm_write32(type_ea, (uint32_t)s_game_type);
-    if (attr_ea) vm_write32(attr_ea, 0);
+    /* PS3_BOOT_PATCH=1: the title was booted from its installed UPDATE
+     * (/dev_hdd0/game/<title>, a disc game patched to e.g. 1.04 runs the
+     * update's EBOOT), so report CELL_GAME_ATTRIBUTE_PATCH (0x1) as the
+     * firmware/RPCS3 do. God of War Ascension only adds the update dir to its
+     * FIOS search path (PATCHES, TPPS.PSARC) when this bit is set; without it
+     * the 1.04 executable runs on unpatched data. */
+    { static int s_bp = -1; if (s_bp < 0) s_bp = getenv("PS3_BOOT_PATCH") ? 1 : 0;
+      if (attr_ea) vm_write32(attr_ea, s_bp ? 0x1u : 0u); }
 
     if (size_ea) {
         vm_write32(size_ea + 0, (u32)content_free_kb());

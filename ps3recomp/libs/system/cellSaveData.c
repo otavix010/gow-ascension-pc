@@ -52,6 +52,19 @@
  * -----------------------------------------------------------------------*/
 
 static char s_save_root[1024] = "./gamedata/dev_hdd0/home/00000001/savedata";
+/* GOWA: PS3_SAVE_ROOT=<dir> -- another save directory (a test profile, e.g.
+ * a save brought from RPCS3) without touching the default one. Read once. */
+static const char* save_root(void)
+{
+    static int s_init;
+    if (!s_init) {
+        s_init = 1;
+        const char* e = getenv("PS3_SAVE_ROOT");
+        if (e && *e) { strncpy(s_save_root, e, sizeof(s_save_root) - 1); s_save_root[sizeof(s_save_root) - 1] = 0; }
+    }
+    return s_save_root;
+}
+
 
 /* Ensure directory (and parents) exist */
 static void ensure_dirs(const char* path)
@@ -73,7 +86,7 @@ static void ensure_dirs(const char* path)
 
 static void build_save_path(char* buf, size_t buf_size, const char* dirName)
 {
-    snprintf(buf, buf_size, "%s/%s", s_save_root, dirName);
+    snprintf(buf, buf_size, "%s/%s", save_root(), dirName);
 #ifdef _WIN32
     for (char* p = buf; *p; p++) {
         if (*p == '/') *p = '\\';
@@ -437,12 +450,12 @@ static u32 enumerate_save_dirs(const char* prefix, CellSaveDataDirList* dirList,
 {
     u32 count = 0;
 
-    ensure_dirs(s_save_root);
+    ensure_dirs(save_root());
 
 #ifdef _WIN32
     {
         char search[1024];
-        snprintf(search, sizeof(search), "%s\\*", s_save_root);
+        snprintf(search, sizeof(search), "%s\\*", save_root());
         for (char* p = search; *p; p++) {
             if (*p == '/') *p = '\\';
         }
@@ -471,7 +484,7 @@ static u32 enumerate_save_dirs(const char* prefix, CellSaveDataDirList* dirList,
     }
 #else
     {
-        DIR* dp = opendir(s_save_root);
+        DIR* dp = opendir(save_root());
         if (!dp)
             return 0;
 
@@ -481,7 +494,7 @@ static u32 enumerate_save_dirs(const char* prefix, CellSaveDataDirList* dirList,
                 continue;
             /* Check it's a directory */
             char full[1024];
-            snprintf(full, sizeof(full), "%s/%s", s_save_root, de->d_name);
+            snprintf(full, sizeof(full), "%s/%s", save_root(), de->d_name);
             if (!dir_exists(full))
                 continue;
             if (prefix && prefix[0] && strncmp(de->d_name, prefix, strlen(prefix)) != 0)
@@ -1155,7 +1168,7 @@ static s32 savedata_fixed(int is_save, CellSaveDataSetList* setList,
         }
         printf("[cellSaveData] savedata_fixed: cbresult=%d listed=%u/%u prefix='%s' root='%s'\n",
                result, listed, count,
-               prefix ? (const char*)(vm_base + prefix) : "", s_save_root);
+               prefix ? (const char*)(vm_base + prefix) : "", save_root());
         SAVEDATA_REJECT(CELL_SAVEDATA_ERROR_CBRESULT, w);
     }
     if (!funcStat)

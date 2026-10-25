@@ -527,6 +527,7 @@ s32 cellFsRead(CellFsFd fd, void* buf, u64 nbytes, u64* nread)
          * to a raw guest address interpreted as a host one, so nothing the
          * title loaded ever landed in guest memory. */
         bytes_read = (u64)fread(gptr(buf), 1, (size_t)nbytes, s_files[fd].host_fp);
+        { extern void gowa_ww_marca(const void*, size_t); gowa_ww_marca(gptr(buf), (size_t)bytes_read); }   /* GOWA_TEX_WW */
     }
 
     { static int _n = 0;

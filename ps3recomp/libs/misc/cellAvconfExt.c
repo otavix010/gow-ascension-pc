@@ -19,6 +19,7 @@ extern u8* vm_base;
 #define GUEST_PTR(p, T) ((T)((p) ? (void*)(vm_base + (uint32_t)(uintptr_t)(p)) : (void*)0))
 #include <stdio.h>
 #include <string.h>
+#include <stdlib.h>
 
 /* ---------------------------------------------------------------------------
  * Internal state
@@ -119,7 +120,10 @@ s32 cellAudioOutGetConfiguration(u32 audioOut,
     config = GUEST_PTR(config, CellAudioOutConfiguration*);
 
     memset(config, 0, sizeof(CellAudioOutConfiguration));
-    config->channel = CELL_AUDIO_OUT_CHNUM_2;
+    /* GOWA_AUDIO_SURROUND=1: report 7.1 LPCM, so the game mixes real surround
+     * (cellAudio passes the 8 channels straight to an 8-channel device). */
+    config->channel = getenv("GOWA_AUDIO_SURROUND") && *getenv("GOWA_AUDIO_SURROUND") == '1'
+                    ? CELL_AUDIO_OUT_CHNUM_8 : CELL_AUDIO_OUT_CHNUM_2;
     config->encoder = CELL_AUDIO_OUT_CODING_TYPE_LPCM;
 
     return CELL_OK;
@@ -148,7 +152,8 @@ s32 cellAudioOutGetState(u32 audioOut, u32 deviceIndex, void* state)
     vm_write8(ea + 3, 0);
     vm_write32(ea + 4, 0);                                  /* no down-mixer  */
     vm_write8(ea + 8, CELL_AUDIO_OUT_CODING_TYPE_LPCM);     /* soundMode      */
-    vm_write8(ea + 9, CELL_AUDIO_OUT_CHNUM_2);
+    vm_write8(ea + 9, getenv("GOWA_AUDIO_SURROUND") && *getenv("GOWA_AUDIO_SURROUND") == '1'
+                      ? CELL_AUDIO_OUT_CHNUM_8 : CELL_AUDIO_OUT_CHNUM_2);   /* GOWA */
     vm_write8(ea + 10, CELL_AUDIO_OUT_FS_48KHZ);
     vm_write8(ea + 11, 0);
     vm_write32(ea + 12, 0);

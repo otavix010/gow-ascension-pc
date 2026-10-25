@@ -1762,6 +1762,10 @@ static s32 spurs_scheduler_start(struct SpursInst* si)
         slot->instance = si; slot->spu_num = sn;
         slot->thread = CreateThread(NULL, 1u << 20, spurs_pm_worker, slot, 0, NULL);
         if (!slot->thread) goto failed;
+#ifdef _WIN32
+        /* GOWA (21/10): named, for the [pin]/[hostprof] reports */
+        { wchar_t nm[16] = L"SPU0"; nm[3] = (wchar_t)(L'0' + (sn % 10)); SetThreadDescription(slot->thread, nm); }
+#endif
     }
     si->coordinator = CreateThread(NULL, 1u << 20, spurs_kernel_thread, si, 0, NULL);
     if (!si->coordinator) goto failed;

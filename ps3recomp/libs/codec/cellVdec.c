@@ -32,6 +32,7 @@ typedef struct {
     CellVdecPicItem item;
     int pictType;       /* 1 I, 2 P, 3 B, 0 unknown */
     int key;
+    u32 dur90k;         /* frame duration, 90 kHz ticks (0 = unknown) */
 } VdecPic;
 
 typedef struct {
@@ -52,6 +53,8 @@ typedef struct {
     u32 qHead, qCount;
     CellVdecAuInfo aus[VDEC_AU_RING];   /* by auCount % VDEC_AU_RING */
     u32 newPics;        /* pictures queued by the current decode call */
+    u64 nextPts;        /* synthesized timestamps for AUs that carry none */
+    u64 nextDts;
 } VdecSlot;
 
 static VdecSlot s_vdec[MAX_VDEC];
@@ -100,12 +103,25 @@ static void vdec_on_picture(void* ctx, const VdecFfPicture* pic)
     q->yuv = pic->yuv;
     q->pictType = pic->pict_type;
     q->key = pic->key;
+    q->dur90k = pic->dur90k;
     q->item.codecType = v->codecType;
     q->item.startAddr = au->startAddr;
     q->item.size      = au->size;
     q->item.auNum     = pic->token;
-    q->item.pts       = au->pts;
-    q->item.dts       = au->dts;
+    /* An AU without timestamps (0xFFFFFFFF/0xFFFFFFFF) gets the previous
+     * picture's plus one frame, as the real decoder does (and RPCS3: next_pts
+     * += 90000 / frame rate). God of War Ascension's menu movie (MPEG-2)
+     * feeds every AU with an invalid pts; handing that back made its player
+     * show the first picture and never ask for another. */
+    {
+        const u64 dur = pic->dur90k ? pic->dur90k : 3003;
+        const u64 pts = au->pts == ~0ull ? v->nextPts : au->pts;
+        const u64 dts = au->dts == ~0ull ? v->nextDts : au->dts;
+        v->nextPts = pts + dur;
+        v->nextDts = dts + dur;
+        q->item.pts = pts;
+        q->item.dts = dts;
+    }
     q->item.userData  = au->userData;
     q->item.status    = 0;
     q->item.picFmt    = CELL_VDEC_PIC_FMT_YUV420P;
@@ -207,6 +223,7 @@ s32 cellVdecStartSeq(CellVdecHandle handle)
         return (s32)CELL_VDEC_ERROR_ARG;
 
     s_vdec[handle].seqStarted = 1;
+    s_vdec[handle].nextPts = s_vdec[handle].nextDts = 0;
     if (s_vdec[handle].ff) {
         /* A new sequence: nothing from the last one is shown. */
         vdec_ff_reset(s_vdec[handle].ff);
@@ -343,6 +360,33 @@ static void vdec_write_item(CellVdecHandle handle, const CellVdecPicItem* p)
     vm_write32(it + 0x48, info);
     vm_write16(info + 0, p->width);
     vm_write16(info + 2, p->height);
+    if (v->codecType == CELL_VDEC_CODEC_TYPE_MPEG2) {
+        /* CellVdecMpeg2Info (RPCS3 layout): +4 aspect_ratio_information,
+         * +5 frame_rate_code, +6 progressive_sequence, +0x14 picture_structure[0]
+         * (3 = frame), +0x18 progressive_frame. A player paces itself from
+         * frame_rate_code -- God of War Ascension indexes a frame-rate table
+         * with it and fetched picture 0 forever while it read 0 here. The
+         * decoder path overwrites +5 with the stream's own rate. */
+        vm_write8(info + 0x04, (u8)((u32)p->width * 9u == (u32)p->height * 16u ? 3 : 2));
+        vm_write8(info + 0x05, 4);                     /* 29.97 */
+        vm_write8(info + 0x06, 1);
+        vm_write8(info + 0x14, 3);
+        vm_write8(info + 0x18, 1);
+    }
+}
+
+/* MPEG-2 frame_rate_code from a frame duration in 90 kHz ticks. */
+static u8 vdec_mpeg2_frc(u32 dur)
+{
+    if (dur >= 3752 && dur <= 3755) return 1;          /* 23.976 */
+    if (dur == 3750) return 2;                         /* 24 */
+    if (dur == 3600) return 3;                         /* 25 */
+    if (dur == 3003) return 4;                         /* 29.97 */
+    if (dur == 3000) return 5;                         /* 30 */
+    if (dur == 1800) return 6;                         /* 50 */
+    if (dur == 1501 || dur == 1502) return 7;          /* 59.94 */
+    if (dur == 1500) return 8;                         /* 60 */
+    return 4;
 }
 
 /* The decoder path also reports the picture type.
@@ -362,6 +406,7 @@ static void vdec_write_pic_type(CellVdecHandle handle, const VdecPic* q)
         vm_write8(info + 0x06, (u8)(q->key && t == 1));
     } else if (s_vdec[handle].codecType == CELL_VDEC_CODEC_TYPE_MPEG2) {
         vm_write8(info + 0x12, (u8)(t >= 1 && t <= 3 ? t : 0));
+        if (q->dur90k) vm_write8(info + 0x05, vdec_mpeg2_frc(q->dur90k));
     }
 }
 
@@ -417,6 +462,14 @@ s32 cellVdecGetPicture(CellVdecHandle handle, const void* format, void* outBuff)
     if (handle >= MAX_VDEC || !s_vdec[handle].in_use || !fmt_ea)
         return (s32)CELL_VDEC_ERROR_ARG;
     VdecSlot* v = &s_vdec[handle];
+    /* VDEC_LOG=1: the first GetPicture calls -- format, destination, result. */
+    { static int lg = -1; static int ln = 0;
+      if (lg < 0) lg = getenv("VDEC_LOG") ? 1 : 0;
+      if (lg && ln < 12) { ln++;
+          printf("[cellVdec] GetPicture(handle=%u fmt=%u matrix=%u alpha=%u dst=0x%08X) queued=%u w=%u h=%u\n",
+                 handle, vm_read32(fmt_ea + 0), vm_read32(fmt_ea + 4), vm_read8(fmt_ea + 8), dst,
+                 v->qCount, v->qCount ? v->queue[v->qHead].item.width : 0,
+                 v->qCount ? v->queue[v->qHead].item.height : 0); } }
     if (v->ff)
         return vdec_take_picture(v, dst, vm_read32(fmt_ea + 0),
                                  vm_read32(fmt_ea + 4), vm_read8(fmt_ea + 8));

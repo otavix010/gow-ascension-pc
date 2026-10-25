@@ -717,6 +717,38 @@ skip_inject: ;
       if (s_st && (double)(GetTickCount64() - s_t0) / 1000.0 >= s_from && (double)(GetTickCount64() - s_t0) / 1000.0 < s_until) { hs->analog_lx = s_v[0]; hs->analog_ly = s_v[1];
                   hs->analog_rx = s_v[2]; hs->analog_ry = s_v[3];
                   hs->connected = 1; }
+      /* PAD_STICKS="t:lx,ly,rx,ry:dur;t:...": timed stick holds (seconds since
+       * the first poll; up to 32). PAD_STICK holds one position for one window;
+       * a tutorial that asks for a flick, then another, needs a list. */
+      { static int ss = -1; static int n = 0;
+        static struct { double t, d; unsigned char v[4]; } evs[32];
+        static unsigned long long st0 = 0;
+        if (ss < 0) { const char* e = getenv("PAD_STICKS"); ss = (e && *e) ? 1 : 0;
+          st0 = GetTickCount64();
+          const char* p = e;
+          while (ss && p && *p && n < 32) {
+              double t = 0, d = 0.5; int a = 128, b = 128, c = 128, dd = 128, used = 0;
+              if (sscanf(p, "%lf:%d,%d,%d,%d:%lf%n", &t, &a, &b, &c, &dd, &d, &used) >= 5 && used > 0) {
+                  evs[n].t = t; evs[n].d = d;
+                  evs[n].v[0] = (unsigned char)a; evs[n].v[1] = (unsigned char)b;
+                  evs[n].v[2] = (unsigned char)c; evs[n].v[3] = (unsigned char)dd; n++;
+              }
+              p = strchr(p, ';'); if (p) p++;
+          }
+          if (ss) printf("[cellPad] PAD_STICKS: %d evento(s)\n", n); }
+        if (ss) {
+            const double now = (double)(GetTickCount64() - st0) / 1000.0;
+            for (int i = 0; i < n; i++)
+                if (now >= evs[i].t && now < evs[i].t + evs[i].d) {
+                    hs->analog_lx = evs[i].v[0]; hs->analog_ly = evs[i].v[1];
+                    hs->analog_rx = evs[i].v[2]; hs->analog_ry = evs[i].v[3];
+                    hs->connected = 1;
+                    static int said[32];
+                    if (!said[i]) { said[i] = 1;
+                        printf("[cellPad] PAD_STICKS t=%.1fs l=(%u,%u) r=(%u,%u)\n", evs[i].t,
+                               evs[i].v[0], evs[i].v[1], evs[i].v[2], evs[i].v[3]); }
+                }
+        } }
       /* PAD_SWEEP=<seconds per step>: walk the sticks through a fixed set of
        * deflections instead of holding one. Guessing a single stick position and
        * re-running costs ~5 minutes a try; a sweep answers "can input move the

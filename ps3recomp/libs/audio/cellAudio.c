@@ -52,6 +52,7 @@ extern uint32_t sys_event_queue_create_direct(uint64_t key, int32_t size);
   #include <windows.h>
   #include <mmdeviceapi.h>
   #include <audioclient.h>
+  #include <mmreg.h>
   #include <process.h>
 
   /* Define WASAPI COM GUIDs (avoids needing uuid.lib linkage for these) */
@@ -153,8 +154,11 @@ static int           s_mix_thread_live = 0;
 #endif
 static mutex_t       s_audio_mutex;
 
-/* Output mix buffer (stereo, one block worth) */
-static float s_mix_buffer[CELL_AUDIO_BLOCK_SAMPLES * 2];
+/* Output mix buffer (one block worth). GOWA: s_out_ch channels -- 2, or 8
+ * (the game's 7.1 passed straight through) when the device mixes 6 or more
+ * channels; see audio_backend_init. */
+static float s_mix_buffer[CELL_AUDIO_BLOCK_SAMPLES * 8];
+static u32   s_out_ch = 2;
 
 /* ---------------------------------------------------------------------------
  * Host audio output backend
@@ -203,7 +207,7 @@ static void audio_backend_submit(const float* stereo_samples, u32 num_samples)
 {
     if (s_sdl_audio_dev) {
         SDL_QueueAudio(s_sdl_audio_dev, stereo_samples,
-                       num_samples * 2 * sizeof(float));
+                       num_samples * s_out_ch * sizeof(float));
     }
 }
 
@@ -269,31 +273,72 @@ static int audio_backend_init(void)
         return -1;
     }
 
-    WAVEFORMATEX wfx;
-    wfx.wFormatTag      = WAVE_FORMAT_IEEE_FLOAT;
-    wfx.nChannels       = 2;
+    /* GOWA: 7.1 straight through when the device mixes 6+ channels (the
+     * matrixer downmixes if the speakers are fewer); our own downmix to
+     * stereo summed centre, LFE and surrounds onto L/R and hit the clip
+     * limit in loud scenes. GOWA_AUDIO_CH=2 forces stereo. */
+    {
+        WAVEFORMATEX* mix = NULL;
+        u32 dev_ch = 2;
+        if (SUCCEEDED(s_wasapi_client->lpVtbl->GetMixFormat(s_wasapi_client, &mix)) && mix) {
+            dev_ch = mix->nChannels;
+            CoTaskMemFree(mix);
+        }
+        const char* fc = getenv("GOWA_AUDIO_CH");
+        s_out_ch = (fc && atoi(fc) == 2) ? 2u : (dev_ch >= 6 ? 8u : 2u);
+    }
+    WAVEFORMATEXTENSIBLE wfxe;
+    memset(&wfxe, 0, sizeof wfxe);
+#define wfx (wfxe.Format)
+    wfx.wFormatTag      = s_out_ch == 8 ? WAVE_FORMAT_EXTENSIBLE : WAVE_FORMAT_IEEE_FLOAT;
+    wfx.nChannels       = (WORD)s_out_ch;
     wfx.nSamplesPerSec  = CELL_AUDIO_SAMPLE_RATE;
     wfx.wBitsPerSample  = 32;
     wfx.nBlockAlign     = wfx.nChannels * (wfx.wBitsPerSample / 8);
     wfx.nAvgBytesPerSec = wfx.nSamplesPerSec * wfx.nBlockAlign;
     wfx.cbSize          = 0;
+    if (s_out_ch == 8) {
+        /* KSDATAFORMAT_SUBTYPE_IEEE_FLOAT, 7.1 surround: FL FR FC LFE BL BR SL SR */
+        static const GUID ieee_float = { 0x00000003, 0x0000, 0x0010, { 0x80, 0x00, 0x00, 0xaa, 0x00, 0x38, 0x9b, 0x71 } };
+        wfx.cbSize = sizeof(WAVEFORMATEXTENSIBLE) - sizeof(WAVEFORMATEX);
+        wfxe.Samples.wValidBitsPerSample = 32;
+        wfxe.dwChannelMask = 0x63F;
+        wfxe.SubFormat = ieee_float;
+    }
+    printf("[cellAudio] output: %u channels\n", (unsigned)s_out_ch);
 
     /* Request event-driven mode with a ~20ms buffer */
     REFERENCE_TIME buf_duration = 200000; /* 20ms in 100ns units */
     s_wasapi_event = CreateEventW(NULL, FALSE, FALSE, NULL);
 
+    /* GOWA: in shared mode the stream format must equal the engine's mix
+     * format unless the engine is asked to convert. A device mixing at 44.1
+     * kHz, or with another channel count, refused our 48 kHz stereo float
+     * with AUDCLNT_E_UNSUPPORTED_FORMAT (0x88890008) and the game ran silent.
+     * AUTOCONVERTPCM inserts the channel matrixer and the resampler. */
+    const DWORD conv = AUDCLNT_STREAMFLAGS_AUTOCONVERTPCM | AUDCLNT_STREAMFLAGS_SRC_DEFAULT_QUALITY;
+    {
+        WAVEFORMATEX* mix = NULL;
+        if (SUCCEEDED(s_wasapi_client->lpVtbl->GetMixFormat(s_wasapi_client, &mix)) && mix) {
+            printf("[cellAudio] device mix format: %u Hz, %u ch, %u bits (tag 0x%04X)\n",
+                   (unsigned)mix->nSamplesPerSec, (unsigned)mix->nChannels,
+                   (unsigned)mix->wBitsPerSample, (unsigned)mix->wFormatTag);
+            CoTaskMemFree(mix);
+        }
+    }
     hr = s_wasapi_client->lpVtbl->Initialize(
         s_wasapi_client,
         AUDCLNT_SHAREMODE_SHARED,
-        AUDCLNT_STREAMFLAGS_EVENTCALLBACK,
+        AUDCLNT_STREAMFLAGS_EVENTCALLBACK | conv,
         buf_duration, 0, &wfx, NULL);
 
     if (FAILED(hr)) {
         /* Fallback: try without event callback */
+        printf("[cellAudio] WASAPI Initialize (event) failed: 0x%08lX, retrying without\n", hr);
         hr = s_wasapi_client->lpVtbl->Initialize(
             s_wasapi_client,
             AUDCLNT_SHAREMODE_SHARED,
-            0, buf_duration, 0, &wfx, NULL);
+            conv, buf_duration, 0, &wfx, NULL);
         if (FAILED(hr)) {
             printf("[cellAudio] WASAPI Initialize failed: 0x%08lX\n", hr);
             s_wasapi_client->lpVtbl->Release(s_wasapi_client);
@@ -308,6 +353,7 @@ static int audio_backend_init(void)
         s_wasapi_client->lpVtbl->SetEventHandle(s_wasapi_client, s_wasapi_event);
     }
 
+#undef wfx
     s_wasapi_client->lpVtbl->GetBufferSize(s_wasapi_client, &s_wasapi_buf_frames);
 
     hr = s_wasapi_client->lpVtbl->GetService(
@@ -359,7 +405,42 @@ static void audio_backend_submit(const float* stereo_samples, u32 num_samples)
     BYTE* buf = NULL;
     HRESULT hr = s_wasapi_render->lpVtbl->GetBuffer(s_wasapi_render, num_samples, &buf);
     if (SUCCEEDED(hr) && buf) {
-        memcpy(buf, stereo_samples, num_samples * 2 * sizeof(float));
+        /* GOWA_AUDIO_MUTE=1: the device runs (same pacing) but plays silence --
+         * for automated test runs on a machine someone is sitting at.
+         * GOWA_AUDIO_WAV=<file>: also append the stereo mix as a 48 kHz float
+         * WAV, to inspect the output (levels, clipping, gaps) without hearing it. */
+        static int s_mute = -1;
+        if (s_mute < 0) { const char* e = getenv("GOWA_AUDIO_MUTE"); s_mute = (e && *e == '1') ? 1 : 0; }
+        static FILE* s_wav = (FILE*)1; static uint32_t s_wav_frames = 0;
+        if (s_wav == (FILE*)1) {
+            const char* w = getenv("GOWA_AUDIO_WAV");
+            s_wav = w ? fopen(w, "wb") : NULL;
+            if (s_wav) { static const uint8_t hdr[58] = {0}; fwrite(hdr, 1, sizeof hdr, s_wav); }
+        }
+        if (s_wav) {
+            fwrite(stereo_samples, sizeof(float) * s_out_ch, num_samples, s_wav);
+            s_wav_frames += num_samples;
+            /* rewrite the header about once a second, so a killed process leaves a valid file */
+            static unsigned s_wav_calls = 0;
+            if ((++s_wav_calls % 200u) == 0) {
+                const long pos = ftell(s_wav);
+                uint8_t h[58]; uint32_t u; uint16_t s;
+                const uint32_t data = s_wav_frames * 4u * s_out_ch;
+                memcpy(h, "RIFF", 4); u = 50u + data; memcpy(h + 4, &u, 4);
+                memcpy(h + 8, "WAVEfmt ", 8); u = 18; memcpy(h + 16, &u, 4);
+                s = 3; memcpy(h + 20, &s, 2); s = (uint16_t)s_out_ch; memcpy(h + 22, &s, 2);
+                u = CELL_AUDIO_SAMPLE_RATE; memcpy(h + 24, &u, 4);
+                u = CELL_AUDIO_SAMPLE_RATE * 4u * s_out_ch; memcpy(h + 28, &u, 4);
+                s = (uint16_t)(4u * s_out_ch); memcpy(h + 32, &s, 2); s = 32; memcpy(h + 34, &s, 2);
+                s = 0; memcpy(h + 36, &s, 2);
+                memcpy(h + 38, "fact", 4); u = 4; memcpy(h + 42, &u, 4); memcpy(h + 46, &s_wav_frames, 4);
+                memcpy(h + 50, "data", 4); memcpy(h + 54, &data, 4);
+                fseek(s_wav, 0, SEEK_SET); fwrite(h, 1, sizeof h, s_wav); fseek(s_wav, pos, SEEK_SET);
+                fflush(s_wav);
+            }
+        }
+        if (s_mute) memset(buf, 0, num_samples * s_out_ch * sizeof(float));
+        else memcpy(buf, stereo_samples, num_samples * s_out_ch * sizeof(float));
         s_wasapi_render->lpVtbl->ReleaseBuffer(s_wasapi_render, num_samples, 0);
     }
 }
@@ -467,6 +548,20 @@ static void audio_mix_one_block(void)
                         p, (unsigned long long)port->read_index, block_idx, map);
             } } }
 
+        if (s_out_ch == 8) {
+            for (u32 s = 0; s < CELL_AUDIO_BLOCK_SAMPLES; s++) {
+                float* o = &s_mix_buffer[s * 8];
+                if (nch == 8) {
+                    for (u32 c = 0; c < 8; c++) o[c] += ld_be_f32(&src[s * 8 + c]) * level;
+                } else if (nch >= 2) {
+                    o[0] += ld_be_f32(&src[s * nch + 0]) * level;
+                    o[1] += ld_be_f32(&src[s * nch + 1]) * level;
+                } else {
+                    const float m = ld_be_f32(&src[s]) * level;
+                    o[0] += m; o[1] += m;
+                }
+            }
+        } else
         for (u32 s = 0; s < CELL_AUDIO_BLOCK_SAMPLES; s++) {
             float left, right;
             if (nch >= 2) {
@@ -509,7 +604,7 @@ static void audio_mix_one_block(void)
     mutex_unlock(&s_audio_mutex);
 
     /* Clip to [-1.0, 1.0] */
-    for (u32 i = 0; i < CELL_AUDIO_BLOCK_SAMPLES * 2; i++) {
+    for (u32 i = 0; i < CELL_AUDIO_BLOCK_SAMPLES * s_out_ch; i++) {
         if (s_mix_buffer[i] > 1.0f) s_mix_buffer[i] = 1.0f;
         if (s_mix_buffer[i] < -1.0f) s_mix_buffer[i] = -1.0f;
     }
@@ -569,7 +664,7 @@ static unsigned __stdcall audio_mix_thread_func(void* arg)
          * "is any port producing sound" is answerable (LBP Bink movie audio). */
         { static int _ap = -1; if (_ap < 0) _ap = getenv("AUDIO_PEAK") ? 1 : 0;
           if (_ap) { static unsigned _n = 0; float pk = 0.0f;
-            for (u32 i = 0; i < CELL_AUDIO_BLOCK_SAMPLES * 2; i++) {
+            for (u32 i = 0; i < CELL_AUDIO_BLOCK_SAMPLES * s_out_ch; i++) {
                 float a = s_mix_buffer[i]; if (a < 0) a = -a; if (a > pk) pk = a; }
             if ((++_n % 200) == 0 || (pk > 0.001f && _n < 40))
                 fprintf(stderr, "[audio-peak] block#%u peak=%.4f\n", _n, pk); } }
@@ -577,13 +672,13 @@ static unsigned __stdcall audio_mix_thread_func(void* arg)
          * (ffmpeg -f f32le -ar 48000 -ac 2 -i <file>). */
         { static FILE* _wf = (FILE*)-1;
           if (_wf == (FILE*)-1) { const char* e = getenv("AUDIO_WAV"); _wf = e ? fopen(e, "wb") : NULL; }
-          if (_wf) fwrite(s_mix_buffer, sizeof(float), CELL_AUDIO_BLOCK_SAMPLES * 2, _wf); }
+          if (_wf) fwrite(s_mix_buffer, sizeof(float), CELL_AUDIO_BLOCK_SAMPLES * s_out_ch, _wf); }
         audio_backend_submit(s_mix_buffer, CELL_AUDIO_BLOCK_SAMPLES);
         /* AUDIO_RATE=1: blocks mixed vs real time, and frames dropped. */
         { static int on = -1; if (on < 0) on = getenv("AUDIO_RATE") ? 1 : 0;
           if (on) { static ULONGLONG t0; static unsigned n, z; static unsigned long long d0;
             ULONGLONG now = GetTickCount64(); if (!t0) t0 = now; n++;
-            { int nz = 0; for (u32 i = 0; i < CELL_AUDIO_BLOCK_SAMPLES * 2; i++) if (s_mix_buffer[i] != 0.0f) { nz = 1; break; }
+            { int nz = 0; for (u32 i = 0; i < CELL_AUDIO_BLOCK_SAMPLES * s_out_ch; i++) if (s_mix_buffer[i] != 0.0f) { nz = 1; break; }
               if (!nz) z++; }
             if (now - t0 >= 5000) {
                 fprintf(stderr, "[audio-rate] %.1f blocks/s (real time 187.5), silent %.1f%%, dropped %.0f frames/s, device buf %u%c",
