@@ -364,14 +364,42 @@ function Ligar-Disco([string]$pg, [string]$real) {
     catch {
         $erro = $_.Exception.Message
         Tirar-Ligacao $pg
+        # o disco em outro drive (erro 17): o link físico não atravessa drives. Report 27: o disco em J: (pelo jeito
+        # um drive de rede ou virtual, onde a junção também não abre) e o port em C:. Copia o disco para o port.
+        if ($erro -match 'erro 17:') {
+            try {
+                Copiar-Disco $real $pg
+                if (Test-Path -LiteralPath (Join-Path $pg 'USRDIR') -PathType Container) { Msg "disco copiado de $real"; return }
+                throw 'a cópia ficou sem o USRDIR'
+            } catch {
+                $erro = "$erro; a cópia também falhou: $($_.Exception.Message)"
+                Tirar-Ligacao $pg
+            }
+        }
         throw ("não deu para ligar o disco em $pg ($real): a junção não abre neste PC ($(($saida | Out-String).Trim())) " +
-               "e o link físico falhou: $erro. O link físico só funciona com o disco no mesmo drive do port " +
-               "($(Split-Path -Qualifier $pg)): mova a pasta do jogo para esse drive e escolha o disco de novo no launcher.")
+               "e o link físico falhou: $erro. Mova a pasta do jogo para o mesmo drive do port " +
+               "($(Split-Path -Qualifier $pg)) e escolha o disco de novo no launcher.")
     }
     if (-not (Test-Path -LiteralPath (Join-Path $pg 'USRDIR') -PathType Container)) {
         throw "não deu para ligar o disco em $pg ($real): o espelho de links físicos ficou sem o USRDIR."
     }
     Msg "disco ligado por links físicos: $n arquivos de $real"
+}
+# Sem junção e em outro drive: uma cópia do PS3_GAME na pasta do port (~34 GB), conferido o espaço livre antes
+# (o tamanho do disco mais 2 GB). A marca é a mesma do espelho: ao escolher outro disco, a cópia é apagada e refeita
+# do disco escolhido, que existe (o Ligar-Disco o confere antes). robocopy: códigos de 0 a 7 são sucesso.
+function Copiar-Disco([string]$de, [string]$para) {
+    $tam = (Get-ChildItem -LiteralPath $de -Recurse -File -Force | Measure-Object -Property Length -Sum).Sum
+    $drive = Split-Path -Qualifier $para
+    $livre = (Get-PSDrive -Name $drive.TrimEnd(':')).Free
+    if ($livre -lt $tam + 2GB) {
+        throw ("faltam {0:N1} GB livres em {1} para copiar o disco ({2:N1} GB)" -f (($tam + 2GB - $livre) / 1GB), $drive, ($tam / 1GB))
+    }
+    Msg ("sem atalho possível para o drive {0}, copiando o disco ({1:N1} GB) para a pasta do port (leva alguns minutos)" -f (Split-Path -Qualifier $de), ($tam / 1GB))
+    New-Item -ItemType Directory -Force $para | Out-Null
+    [IO.File]::WriteAllText((Join-Path $para $MARCA_ESPELHO), "cópia de $de`r`n")
+    $saida = SemExcecao { robocopy $de $para /E /R:1 /W:1 /NP /NFL /NDL /NJH /NJS 2>&1 }
+    if ($LASTEXITCODE -ge 8) { throw "o robocopy falhou (código $LASTEXITCODE): $(($saida | Out-String).Trim())" }
 }
 if ($Disco -and (Test-Path (Join-Path $OUT '2_jogo.ok'))) {
     $pg = Join-Path (Join-Path $R 'vfs') 'PS3_GAME'
