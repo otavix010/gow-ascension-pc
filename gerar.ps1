@@ -197,6 +197,11 @@ if (-not $VS) { throw 'Visual Studio Build Tools com Clang não encontrado (rode
 # a pasta do jogo: a que contém PS3_GAME\USRDIR, ou uma até dois níveis abaixo da escolhida
 function Achar-PS3Game([string]$raiz) {
     if (Test-Path -LiteralPath (Join-Path $raiz 'PS3_GAME\USRDIR') -PathType Container) { return $raiz }
+    # a pasta escolhida já é o próprio PS3_GAME (com USRDIR dentro), ou o USRDIR dele: o disco é a pasta de cima
+    # (um jogador escolheu "J:\JOGOS RPCS3\BCUS98232\PS3_GAME" e o gerador recusava toda vez)
+    $nome = Split-Path -Leaf $raiz.TrimEnd('\')
+    if ($nome -ieq 'PS3_GAME' -and (Test-Path -LiteralPath (Join-Path $raiz 'USRDIR') -PathType Container)) { return (Split-Path $raiz.TrimEnd('\')) }
+    if ($nome -ieq 'USRDIR' -and (Split-Path -Leaf (Split-Path $raiz.TrimEnd('\'))) -ieq 'PS3_GAME') { return (Split-Path (Split-Path $raiz.TrimEnd('\'))) }
     $p = Get-ChildItem -LiteralPath $raiz -Directory -Recurse -Depth 2 -Filter PS3_GAME -ErrorAction SilentlyContinue |
          Where-Object { Test-Path -LiteralPath (Join-Path $_.FullName 'USRDIR') -PathType Container } | Select-Object -First 1
     if ($p) { return $p.Parent.FullName }
