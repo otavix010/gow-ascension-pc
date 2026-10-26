@@ -1115,6 +1115,40 @@ emit:
             else                        s_data_fresh[port_no] = 0;
         }
     }
+#ifdef _WIN32
+    /* GOWA (26/10): GOWA_PAD_STATS=1 -- how the game reads the pad, every 5 s: reads, those that got len = 0, reads
+     * in one frame (cellGcm_flip_request_count), the threads that read, and the reads that saw the right stick off
+     * the centre, with and without new data (the dodge that "works sometimes"). */
+    { static int on = -1;
+      if (on < 0) { const char* e = getenv("GOWA_PAD_STATS"); on = (e && *e == '1') ? 1 : 0; }
+      if (on && port_no == 0) {
+          static unsigned long long t0;
+          static unsigned leituras, len0, quadro_max, quadro_n, dir_len, dir_len0, nthr;
+          static u32 quadro;
+          static DWORD thr[8];
+          const unsigned long long agora = pad_now_ms();
+          const u32 fc = cellGcm_flip_request_count();
+          if (!t0) t0 = agora;
+          leituras++;
+          if (!data->len) len0++;
+          if (fc != quadro) { quadro = fc; quadro_n = 0; }
+          if (++quadro_n > quadro_max) quadro_max = quadro_n;
+          if (pad_desvio((u8)data->button[CELL_PAD_BTN_OFFSET_ANALOG_RIGHT_X], (u8)data->button[CELL_PAD_BTN_OFFSET_ANALOG_RIGHT_Y]) >= PAD_FLICK_MIN) {
+              if (data->len) dir_len++; else dir_len0++;
+          }
+          const DWORD tid = GetCurrentThreadId();
+          int visto = 0;
+          for (unsigned i = 0; i < nthr; i++) if (thr[i] == tid) visto = 1;
+          if (!visto && nthr < 8) thr[nthr++] = tid;
+          if (agora - t0 >= 5000) {
+              printf("[pad-stats] %.1f s: leituras=%u len0=%u (%.0f%%) por-quadro-max=%u threads=%u direito-fora: com-dados=%u sem-dados=%u quadro=%u\n",
+                     (agora - t0) / 1000.0, leituras, len0, leituras ? 100.0 * len0 / leituras : 0.0, quadro_max, nthr,
+                     dir_len, dir_len0, (unsigned)fc);
+              fflush(stdout);
+              t0 = agora; leituras = len0 = quadro_max = dir_len = dir_len0 = 0;
+          }
+      } }
+#endif
     {
         unsigned int ea = (unsigned int)(uintptr_t)data_guest;
         vm_write32((unsigned long long)ea + 0, (unsigned int)data->len);   /* len (s32) */

@@ -2512,7 +2512,11 @@ static void gcm_rsx_process_fifo_unlocked(void)
               if (_rd) fprintf(stderr, "[JMP] %08X -> %08X (put=%08X)\n",
                                s_fifo_getoff, w & 0x1FFFFFFCu, put); }
             { u32 tgt = w & 0x1FFFFFFCu;
-              if (!gcm_io2ea(tgt)) { gcm_fifo_bad_branch("JUMP", tgt, w); gcm_fifo_dump_around(s_fifo_getoff); gcm_fifo_resync_why("unmapped-JUMP", &s_fifo_getoff, put); break; }
+              if (!gcm_io2ea(tgt)) { gcm_fifo_bad_branch("JUMP", tgt, w); gcm_fifo_dump_around(s_fifo_getoff);
+                  /* GOWA (26/10): and how the walker got here (a run on the notebook hung after `get` went back to the
+                   * boot block at IO 0x10000 and hit its stale JUMP into the unmapped loading ring) */
+                  { static int jd = 0; if (jd++ < 3) gcm_jh_dump("unmapped-JUMP", s_fifo_getoff, put); }
+                  gcm_fifo_resync_why("unmapped-JUMP", &s_fifo_getoff, put); break; }
               /* A JUMP to its own address is the "park the RSX here" idiom:
                * the title leaves it at the write head so the GPU stops if it
                * catches up, and overwrites it when the next segment is
@@ -2582,13 +2586,18 @@ static void gcm_rsx_process_fifo_unlocked(void)
         }
         if ((w & 3) == 2) {                    /* CALL: offset | 2 */
             { u32 tgt = w & 0x1FFFFFFCu;
-              if (!gcm_io2ea(tgt)) { gcm_fifo_bad_branch("CALL", tgt, w); gcm_fifo_dump_around(s_fifo_getoff); gcm_fifo_resync_why("unmapped-CALL", &s_fifo_getoff, put); break; }
+              if (!gcm_io2ea(tgt)) { gcm_fifo_bad_branch("CALL", tgt, w); gcm_fifo_dump_around(s_fifo_getoff);
+                  { static int jd = 0; if (jd++ < 3) gcm_jh_dump("unmapped-CALL", s_fifo_getoff, put); }
+                  gcm_fifo_resync_why("unmapped-CALL", &s_fifo_getoff, put); break; }
               s_fifo_calloff = s_fifo_getoff + 4;
               gcm_jh_note(s_fifo_getoff | 2u, tgt);
               s_fifo_getoff  = tgt; s_settle_need = 1; s_settle_branch = 1; }
             continue;
         }
         if (w == 0x00020000u) {                /* RET */
+            /* GOWA (26/10): a RET with no CALL pending returns to IO 0 (or to a slot an old CALL left): say so */
+            if (!s_fifo_calloff) { static int nr = 0; if (nr++ < 8)
+                fprintf(stderr, "[cellGcmSys] FIFO RET sem CALL pendente em 0x%08X (put 0x%08X)\n", s_fifo_getoff, put); }
             gcm_jh_note(s_fifo_getoff, 0xFFFFFFFFu);
             s_fifo_getoff = s_fifo_calloff;
             s_fifo_calloff = 0;
