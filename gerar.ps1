@@ -254,6 +254,12 @@ function Achar-Disco([string]$d) {
         # a PS3_GAME there that is a link leading nowhere (moved, or a circle back to the port's vfs): said as it is
         $como = ''
         if (Test-Path -LiteralPath (Join-Path $d 'PS3_GAME')) { $como = " (o PS3_GAME de lá é um atalho que não leva ao jogo: $(Descrever-Atalhos (Join-Path $d 'PS3_GAME')))" }
+        # report 33: a pasta escolhida era a dos ports do launcher (a que tem gow-ascension\ dentro), não a do jogo
+        $cheio = [IO.Path]::GetFullPath($d).TrimEnd('\')
+        $raizPort = [IO.Path]::GetFullPath($R).TrimEnd('\')
+        if ($cheio -ieq $raizPort -or $cheio -ieq (Split-Path $raizPort)) {
+            $como = ' (essa é a pasta onde o launcher instala os ports, não a do jogo)'
+        }
         throw ("não achei o jogo (PS3_GAME com USRDIR) em $d$como. No launcher, clique em `"Escolher o disco de novo`" e " +
                'escolha o arquivo do jogo (.7z, .zip, .rar ou .iso) ou a pasta onde ele foi extraído.')
     }
@@ -372,7 +378,10 @@ function Ligar-Disco([string]$pg, [string]$real) {
         Tirar-Ligacao $pg
         # o disco em outro drive (erro 17): o link físico não atravessa drives. Report 27: o disco em J: (pelo jeito
         # um drive de rede ou virtual, onde a junção também não abre) e o port em C:. Copia o disco para o port.
-        if ($erro -match 'erro 17:') {
+        # Report 32: em H:, o link físico deu "erro 5: Acesso negado"; com o disco em outro drive, qualquer falha leva
+        # à cópia (lá o link físico nunca daria certo).
+        $outroDrive = [IO.Path]::GetPathRoot([IO.Path]::GetFullPath($real)) -ne [IO.Path]::GetPathRoot([IO.Path]::GetFullPath($pg))
+        if ($erro -match 'erro 17:' -or $outroDrive) {
             try {
                 Copiar-Disco $real $pg
                 if (Test-Path -LiteralPath (Join-Path $pg 'USRDIR') -PathType Container) { Msg "disco copiado de $real"; return }
