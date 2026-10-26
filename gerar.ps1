@@ -244,6 +244,18 @@ function Achar-Disco([string]$d) {
     }
     return $achou
 }
+# o jogo já preparado (etapa 2 feita) e o disco informado: só a junção para o PS3_GAME é refeita, sem refazer etapa
+# nenhuma. Quem moveu ou apagou a pasta do disco, ou o tinha num HD agora desligado, escolhe o disco de novo no
+# launcher e o jogo volta a achá-lo em segundos (sem ele, o jogo abria e fechava sem dizer nada). rmdir numa junção,
+# mesmo quebrada, apaga só a junção; numa pasta de verdade com arquivos, não apaga nada.
+if ($Disco -and (Test-Path (Join-Path $OUT '2_jogo.ok'))) {
+    $Disco = Achar-Disco $Disco
+    $pg = Join-Path (Join-Path $R 'vfs') 'PS3_GAME'
+    cmd /c "rmdir `"$pg`"" 2>$null
+    cmd /c "mklink /J `"$pg`" `"$(Join-Path $Disco 'PS3_GAME')`"" | Out-Null
+    if (-not (Test-Path -LiteralPath (Join-Path $pg 'PARAM.SFO'))) { throw "não deu para ligar o disco em $pg ($Disco)" }
+    Msg "disco: $Disco"
+}
 Etapa '2_jogo' {
     $Disco = Achar-Disco $Disco
     Msg "disco: $Disco"

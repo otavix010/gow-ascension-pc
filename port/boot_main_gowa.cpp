@@ -2737,6 +2737,28 @@ int main(int argc, char** argv)
         }
         if (!found)
             snprintf(sfo, sizeof sfo, "%s/PS3_GAME/PARAM.SFO", ppu_vfs_root);
+#ifdef _WIN32
+        /* GOWA (25/10): no disc. The port does not copy the 34 GB disc: vfs\PS3_GAME is a junction to the folder
+         * picked when the game was made, and when that folder is moved, deleted or on a drive that is off, the game
+         * ran on without its data, found nothing and quit with no word (a player's "it opens and crashes"). Said
+         * plainly now, with the way back: picking the disc again in the launcher remakes the junction. */
+        if (!found) {
+            fprintf(stderr, "[boot] disco do jogo nao encontrado (%s): a pasta do disco foi movida ou apagada\n", sfo);
+            fflush(stderr);
+            wchar_t msg[2400];
+            swprintf(msg, sizeof msg / sizeof msg[0],
+                     L"O jogo não achou o disco do God of War: Ascension.\n\n"
+                     L"O port não copia o disco: ele usa a pasta do disco escolhida ao gerar o jogo, e essa pasta foi "
+                     L"movida, apagada ou está num HD desligado.\n\n"
+                     L"No Otavix Launcher, abra o God of War: Ascension e clique em \"Escolher o disco de novo\" "
+                     L"(leva segundos; não precisa gerar o jogo de novo).\n\n"
+                     L"The game could not find the God of War: Ascension disc: the disc folder picked when the game "
+                     L"was made was moved, deleted or is on a drive that is off. In the Otavix Launcher, open the game "
+                     L"and click \"Pick the disc again\".\n\n(%hs)", sfo);
+            MessageBoxW(NULL, msg, L"God of War: Ascension", MB_ICONERROR | MB_OK | MB_SETFOREGROUND);
+            ExitProcess(3);
+        }
+#endif
         cellGame_init_from_paramsfo(sfo);
     }
 
