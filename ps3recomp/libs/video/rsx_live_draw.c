@@ -290,7 +290,7 @@ typedef struct {
     u64 content_hash;
     u32 last_hash_frame;
 } vtexcache_t;
-typedef struct { u64 key; ID3D12PipelineState* pso; } psocache_t;
+typedef struct { u64 key; ID3D12PipelineState* pso; u32 last_frame; } psocache_t;   /* GOWA: last_frame = LRU (26/10) */
 typedef struct {
     u64 hash;
     u32 source_length;
@@ -6128,6 +6128,42 @@ static void pso_idx_put(u64 key, u32 pos)
     for (u32 h = pso_idx_slot(key), probe = 0; probe < PSO_IDX_N; probe++, h = (h + 1u) & (PSO_IDX_N - 1u))
         if (!s_pso_idx[h]) { s_pso_idx[h] = pos + 1u; return; }
 }
+/* GOWA (26/10): the cache used to stop at MAX_PSOS -- every PSO after the 8192nd
+ * distinct one returned NULL and its draws were dropped (drop{pso=N} climbing from
+ * ~16 minutes of play on a 5600X: "shaders stop loading after a while", fixed by
+ * restarting). Now a full cache reuses the least recently used entry that no draw
+ * of this frame used; its PSO goes through the same retire queue as replaced
+ * textures (released after the fence), and a PSO that comes back is rebuilt from
+ * the pipeline library. Index slots of a reused position stay behind as stale
+ * entries (the lookup compares the key), so the index is rebuilt when they pile
+ * up. GOWA_PSO_MAX=<n> lowers the limit (tests the eviction in a short run). */
+static u32 s_pso_idx_stale;
+static u32 s_pso_cap;
+static u64 s_pso_evictions;
+static void retire_texture(ID3D12Resource* tex);
+static int pso_evict_lru(u64 key, ID3D12PipelineState* pso)
+{
+    u32 best = MAX_PSOS, best_frame = 0xFFFFFFFFu;
+    for (u32 i = 0; i < g.n_psos; i++)
+        if (g.psos[i].last_frame < best_frame) { best_frame = g.psos[i].last_frame; best = i; }
+    if (best == MAX_PSOS || best_frame >= g_ld_frames) return 0;   /* all used this frame */
+    /* ID3D12PipelineState is an IUnknown like ID3D12Resource: the retire queue only Releases */
+    retire_texture((ID3D12Resource*)(void*)g.psos[best].pso);
+    g.psos[best].key = key;
+    g.psos[best].pso = pso;
+    g.psos[best].last_frame = g_ld_frames;
+    s_pso_evictions++;
+    if (++s_pso_idx_stale > PSO_IDX_N / 4u) {
+        memset(s_pso_idx, 0, sizeof s_pso_idx);
+        for (u32 i = 0; i < g.n_psos; i++) pso_idx_put(g.psos[i].key, i);
+        s_pso_idx_stale = 0;
+    } else {
+        pso_idx_put(key, best);
+    }
+    if ((s_pso_evictions & (s_pso_evictions - 1u)) == 0)
+        fprintf(stderr, "[pso-cache] cheio (%u): %llu despejos LRU\n", s_pso_cap, (unsigned long long)s_pso_evictions);
+    return 1;
+}
 
 /* GOWA (24/10): the 16 texture units as get_pso decoded them for the draw being
  * recorded (sink_end_impl binds from the same table) */
@@ -6528,18 +6564,28 @@ static ID3D12PipelineState* get_pso(
 #if defined(YZ_PERF_PROFILE)
             g_ld_profile.total.pso_hits++;
 #endif
+            g.psos[e - 1u].last_frame = g_ld_frames;
             return g.psos[e - 1u].pso;
         }
     }
 #if defined(YZ_PERF_PROFILE)
     g_ld_profile.total.pso_misses++;
 #endif
-    if (g.n_psos >= MAX_PSOS) {
+    if (!s_pso_cap) {
+        const char* e = getenv("GOWA_PSO_MAX");
+        s_pso_cap = e && atoi(e) > 16 && (u32)atoi(e) < MAX_PSOS ? (u32)atoi(e) : MAX_PSOS;
+    }
+    /* full and nothing old enough to reuse: as before (the draw is dropped) */
+    if (g.n_psos >= s_pso_cap) {
+        u32 best_frame = 0xFFFFFFFFu;
+        for (u32 i = 0; i < g.n_psos; i++) if (g.psos[i].last_frame < best_frame) best_frame = g.psos[i].last_frame;
+        if (best_frame >= g_ld_frames) {
 #if defined(YZ_PERF_PROFILE)
-        g_ld_profile.total.pso_full++;
+            g_ld_profile.total.pso_full++;
 #endif
-        LD_PSO_BAIL("PSO cache full (MAX_PSOS)");
-        return NULL;
+            LD_PSO_BAIL("PSO cache full (MAX_PSOS)");
+            return NULL;
+        }
     }
 
     static char vs_hlsl[256 * 1024];
@@ -6816,8 +6862,13 @@ static ID3D12PipelineState* get_pso(
         pso = build_pso(
             vs_hlsl, ps_hlsl, &rs, masked_layout, packed_payload);
 
+    if (g.n_psos >= s_pso_cap) {   /* full: reuse the LRU position (checked above) */
+        if (!pso_evict_lru(key, pso)) { if (pso) pso->lpVtbl->Release(pso); return NULL; }
+        return pso;
+    }
     g.psos[g.n_psos].key = key;
     g.psos[g.n_psos].pso = pso;
+    g.psos[g.n_psos].last_frame = g_ld_frames;
     g.n_psos++;
     return pso;
 }
@@ -14392,10 +14443,22 @@ ld_present_done:;
           { static u32 s_sink0, s_flip0;
             extern u32 cellGcm_flip_request_count(void);
             const u32 sink_now = (u32)g_ld_flip_requested, flip_now = cellGcm_flip_request_count();
-            fprintf(stderr, "[fps] %.1f (frames %u..%u over %.1fs) sink=%u jogo=%.1f\n",
+            /* cpu=N: CPUs the process kept busy in the interval; cpuq=N: process CPU ms per
+             * game frame (26/10). On a saturated PC (the 4-core notebook) the FPS follows
+             * whatever CPU the background leaves; the CPU per frame is the work itself. */
+            static ULONGLONG s_cpu0;
+            ULONGLONG cpu_now = 0;
+            { FILETIME c_, x_, k_, u_;
+              if (GetProcessTimes(GetCurrentProcess(), &c_, &x_, &k_, &u_))
+                  cpu_now = (((ULONGLONG)k_.dwHighDateTime << 32) | k_.dwLowDateTime) +
+                            (((ULONGLONG)u_.dwHighDateTime << 32) | u_.dwLowDateTime); }
+            const double cpu_ms = s_cpu0 ? (double)(cpu_now - s_cpu0) / 1e4 : 0.0;
+            fprintf(stderr, "[fps] %.1f (frames %u..%u over %.1fs) sink=%u jogo=%.1f cpu=%.2f cpuq=%.1f\n",
                     (g_ld_frames - fps_f0) * 1000.0 / (double)(now - fps_t0),
                     fps_f0, g_ld_frames, (now - fps_t0) / 1000.0, sink_now - s_sink0,
-                    (flip_now - s_flip0) * 1000.0 / (double)(now - fps_t0));
+                    (flip_now - s_flip0) * 1000.0 / (double)(now - fps_t0),
+                    cpu_ms / (double)(now - fps_t0), flip_now != s_flip0 ? cpu_ms / (double)(flip_now - s_flip0) : 0.0);
+            s_cpu0 = cpu_now;
             ld_perf_amostra((flip_now - s_flip0) * 1000.0 / (double)(now - fps_t0), (now - fps_t0) / 1000.0);
             s_sink0 = sink_now; s_flip0 = flip_now; }
           fps_t0 = now; fps_f0 = g_ld_frames;
