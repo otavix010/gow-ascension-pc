@@ -61,6 +61,7 @@ extern const char* ppu_vfs_root;   /* host dir that PS3 mount points map into */
 extern int     g_sys_process_exit_called;
 extern int32_t g_sys_process_exit_code;
 void     cellGame_init_from_paramsfo(const char* sfo_path);  /* libs/system/cellGame.c */
+const char* cellGame_get_title_id(void);                     /* libs/system/cellGame.c */
 void     gowa_offline_register(void);                        /* GOWA: gowa_offline.cpp */
 /* Optional hook: load real system PRX modules (libsre = cellSpurs/cellSync) into
  * guest RAM and register their exports. Weak default is a no-op; a title that
@@ -2848,6 +2849,36 @@ int main(int argc, char** argv)
         }
 #endif
         cellGame_init_from_paramsfo(sfo);
+#ifdef _WIN32
+        /* GOWA (26/10): a disc of another region. The port is the US game (BCUS98232, with the 1.04 update the
+         * generator installs); a European disc (BCES01741, report 31) made the game too, since the update comes
+         * apart, and the game read its files, waited and quit with no word. Said plainly now. BLES00000 is
+         * cellGame's default: the SFO was not read, and that case goes on as before. */
+        {
+            const char* id = cellGame_get_title_id();
+            if (id && *id && strcmp(id, "BCUS98232") != 0 && strcmp(id, "BLES00000") != 0) {
+                const bool eu = !strncmp(id, "BCES", 4) || !strncmp(id, "BLES", 4);
+                const bool as = !strncmp(id, "BCAS", 4) || !strncmp(id, "BLAS", 4);
+                const bool jp = !strncmp(id, "BCJS", 4) || !strncmp(id, "BLJS", 4) || !strncmp(id, "BCJM", 4) || !strncmp(id, "BLJM", 4);
+                fprintf(stderr, "[boot] disco de outra regiao (%s): o port so funciona com o BCUS98232\n", id);
+                fflush(stderr);
+                wchar_t msg[2400];
+                swprintf(msg, sizeof msg / sizeof msg[0],
+                         L"Este disco é a versão %ls do God of War: Ascension (%hs).\n\n"
+                         L"O port só funciona com a versão americana, BCUS98232: é dela o update 1.04 que o gerador usa, "
+                         L"e os arquivos das outras versões são diferentes (o jogo abriria e fecharia logo).\n\n"
+                         L"No Otavix Launcher, abra o God of War: Ascension, clique em \"Escolher o disco de novo\" e "
+                         L"escolha uma cópia do disco americano (BCUS98232). Não precisa gerar o jogo de novo.\n\n"
+                         L"This God of War: Ascension disc is %ls version (%hs). The port only works with the US "
+                         L"version, BCUS98232, whose 1.04 update the generator uses. In the Otavix Launcher, open the "
+                         L"game, click \"Pick the disc again\" and pick a copy of the US disc.",
+                         eu ? L"europeia" : as ? L"asiática" : jp ? L"japonesa" : L"de outra região", id,
+                         eu ? L"the European" : as ? L"the Asian" : jp ? L"the Japanese" : L"another region's", id);
+                MessageBoxW(NULL, msg, L"God of War: Ascension", MB_ICONERROR | MB_OK | MB_SETFOREGROUND);
+                ExitProcess(4);
+            }
+        }
+#endif
     }
 
     fprintf(stderr,"[boot-dbg] before ppu_recomp_register\n"); fflush(stderr);

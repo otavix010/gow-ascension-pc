@@ -214,6 +214,12 @@ function Achar-Disco([string]$d) {
         $dx = Join-Path $R 'disco'
         $achou = $null
         if (Test-Path -LiteralPath $dx) { $achou = Achar-PS3Game $dx }
+        # uma extração de outra região (ver Conferir-Regiao) não é reaproveitada: o arquivo escolhido agora é outro
+        if ($achou -and (Id-Disco (Join-Path $achou 'PS3_GAME')) -notin @('', 'BCUS98232')) {
+            Msg "a extração anterior em $dx é de outra versão do jogo; apagando para extrair o arquivo escolhido"
+            SemExcecao { cmd /c "rmdir /s /q `"$dx`" 2>&1" } | Out-Null
+            $achou = $null
+        }
         if (-not $achou) {
             $precisa = [math]::Max(36GB, (Get-Item -LiteralPath $d).Length * 1.1)
             $livre = (Get-PSDrive -Name $R.Substring(0, 1)).Free
@@ -458,6 +464,23 @@ function Achar-Update([string]$p) {
     if ($pkg) { return @{ caminho = $pkg.FullName } }
     @{ motivo = $motivo }
 }
+# O TITLE_ID do PARAM.SFO de um PS3_GAME ('' sem PARAM.SFO legível).
+function Id-Disco([string]$ps3game) {
+    $sfo = Join-Path $ps3game 'PARAM.SFO'
+    if (-not (Test-Path -LiteralPath $sfo -PathType Leaf)) { return '' }
+    [string](Ler-Sfo $sfo)['TITLE_ID']
+}
+# O disco tem que ser o americano (26/10, report 31: o europeu, BCES01741, gerou o jogo, porque o update 1.04 vem à
+# parte, e o jogo lia os arquivos dele, esperava e fechava sem dizer nada). Sem PARAM.SFO legível, segue: uma cópia
+# incompleta ainda serve (o jogo tira o título do update).
+function Conferir-Regiao([string]$ps3game) {
+    $id = Id-Disco $ps3game
+    if (-not $id -or $id -eq 'BCUS98232') { return }
+    $reg = switch -regex ($id) { '^B[CL]ES' { 'europeia' } '^B[CL]AS' { 'asiática' } '^B[CL]J[SM]' { 'japonesa' } default { 'de outra região' } }
+    throw ("este disco é a versão $reg do God of War: Ascension ($id). O port só funciona com a versão americana, " +
+           'BCUS98232, a do update 1.04: os arquivos das outras versões são diferentes e o jogo fecha ao abrir. ' +
+           'No launcher, clique em "Escolher o disco de novo" e escolha uma cópia do disco americano.')
+}
 function Extrair-Pkg([string]$pkg) {
     $tmp = Join-Path $R 'out\update_pkg'
     Exec $LOG "python `"$R\ps3recomp\tools\pkg_extract.py`" `"$pkg`" `"$tmp`""
@@ -467,7 +490,11 @@ function Extrair-Pkg([string]$pkg) {
 }
 if ($Disco -and (Test-Path (Join-Path $OUT '2_jogo.ok'))) {
     $pg = Join-Path (Join-Path $R 'vfs') 'PS3_GAME'
-    if (-not (Test-Path -LiteralPath (Join-Path $pg 'USRDIR') -PathType Container)) {
+    # refeita também quando o disco ligado é de outra região (ver Conferir-Regiao): o jogador escolhe o americano
+    # depois, e a ligação que abria levava ainda ao outro
+    $quebrado = -not (Test-Path -LiteralPath (Join-Path $pg 'USRDIR') -PathType Container)
+    $idLigado = if ($quebrado) { '' } else { Id-Disco $pg }
+    if ($quebrado -or ($idLigado -and $idLigado -ne 'BCUS98232')) {
         $Disco = Achar-Disco $Disco
         $alvo = Join-Path $Disco 'PS3_GAME'
         $real = Destino-Real $alvo
@@ -478,6 +505,7 @@ if ($Disco -and (Test-Path (Join-Path $OUT '2_jogo.ok'))) {
                    'No launcher, clique em "Escolher o disco de novo" e escolha o arquivo do jogo (.7z, .zip, .rar ou .iso) ' +
                    'ou a pasta onde ele foi extraído (a que tem PS3_GAME com USRDIR dentro).')
         }
+        Conferir-Regiao $real
         Ligar-Disco $pg $real
         Msg "disco ligado de novo: $real"
     }
@@ -495,6 +523,7 @@ Etapa '2_jogo' {
     if (-not $real -or -not (Test-Path -LiteralPath (Join-Path $real 'USRDIR') -PathType Container)) {
         throw "o PS3_GAME da pasta escolhida não leva ao jogo: $(Descrever-Atalhos (Join-Path $Disco 'PS3_GAME')). Escolha o arquivo do jogo (.7z, .zip, .rar ou .iso) ou a pasta onde ele foi extraído."
     }
+    Conferir-Regiao $real
     Ligar-Disco $pg $real
 
     # o update escolhido (ver Achar-Update); se não for o 1.04, o gerador baixa o oficial, como no Automático
