@@ -240,7 +240,11 @@ function Achar-Disco([string]$d) {
         # uma pasta com só o arquivo do disco dentro
         $arq = @(Get-ChildItem -LiteralPath $d -File -ErrorAction SilentlyContinue | Where-Object { $_.Name -match '\.(7z|zip|rar|iso)$' })
         if ($arq.Count -eq 1) { return (Achar-Disco $arq[0].FullName) }
-        throw "não achei PS3_GAME\USRDIR em $d"
+        # a PS3_GAME there that is a link leading nowhere (moved, or a circle back to the port's vfs): said as it is
+        $como = ''
+        if (Test-Path -LiteralPath (Join-Path $d 'PS3_GAME')) { $como = " (o PS3_GAME de lá é um atalho que não leva ao jogo: $(Descrever-Atalhos (Join-Path $d 'PS3_GAME')))" }
+        throw ("não achei o jogo (PS3_GAME com USRDIR) em $d$como. No launcher, clique em `"Escolher o disco de novo`" e " +
+               'escolha o arquivo do jogo (.7z, .zip, .rar ou .iso) ou a pasta onde ele foi extraído.')
     }
     return $achou
 }
@@ -250,16 +254,68 @@ function Achar-Disco([string]$d) {
 # nada). Uma junção que ainda leva a um disco fica como está, e o teste é o mesmo do Achar-PS3Game (PS3_GAME\USRDIR):
 # a 1ª versão exigia o PARAM.SFO e parou o "gerar de novo" de um jogador. rmdir numa junção, mesmo quebrada, apaga só
 # a junção; numa pasta de verdade com arquivos, não apaga nada.
+#
+# A junção aponta sempre para a pasta REAL (Destino-Real segue atalhos e junções até ela) e a atual só é desfeita
+# depois de o destino novo estar conferido: no PC de um jogador, o PS3_GAME da pasta do disco era ele mesmo um atalho
+# para vfs\PS3_GAME, e refazer a junção para lá fechou um círculo (vfs -> disco -> vfs) e perdeu o caminho do jogo.
+function Destino-Real([string]$p) {
+    $vistos = @{}
+    for ($i = 0; $i -lt 16; $i++) {
+        $chave = [IO.Path]::GetFullPath($p).TrimEnd('\').ToLowerInvariant()
+        if ($vistos[$chave]) { return $null }   # um círculo de atalhos
+        $vistos[$chave] = 1
+        $it = Get-Item -LiteralPath $p -Force -ErrorAction SilentlyContinue
+        if (-not $it) { return $null }
+        if (-not $it.LinkType) { return $it.FullName }
+        $t = @($it.Target)[0]
+        if (-not $t) { return $null }
+        if (-not [IO.Path]::IsPathRooted($t)) { $t = Join-Path (Split-Path $p) $t }
+        $p = $t
+    }
+    return $null
+}
+function Descrever-Atalhos([string]$p) {
+    $partes = @()
+    for ($i = 0; $i -lt 6; $i++) {
+        $it = Get-Item -LiteralPath $p -Force -ErrorAction SilentlyContinue
+        if (-not $it) { $partes += "$p (não existe)"; break }
+        if (-not $it.LinkType) { $partes += "$p (pasta)"; break }
+        $t = @($it.Target)[0]
+        $partes += "$p ($($it.LinkType) para $t)"
+        $p = $t
+    }
+    return ($partes -join ' -> ')
+}
+# a junção de $pg para $real, conferida pelo USRDIR. Às vezes o Windows deixa uma junção recém-criada que não se
+# atravessa (o destino certo no fsutil, mas nada aparece por ela: visto no notebook e no PC de um jogador, com o
+# "Junção criada" na tela), e criá-la de novo resolve; a espera também cobre um antivírus que segure a junção nova.
+function Ligar-Disco([string]$pg, [string]$real) {
+    $saida = @()
+    for ($tentativa = 1; $tentativa -le 3; $tentativa++) {
+        $saida += SemExcecao { cmd /c "rmdir `"$pg`" 2>&1 & mklink /J `"$pg`" `"$real`" 2>&1" }
+        for ($i = 0; $i -lt 10; $i++) {
+            if (Test-Path -LiteralPath (Join-Path $pg 'USRDIR') -PathType Container) { return }
+            Start-Sleep -Milliseconds 300
+        }
+        Msg "a junção do disco não abriu (tentativa $tentativa de 3); refazendo"
+    }
+    throw "não deu para ligar o disco em $pg ($real) em 3 tentativas: $(($saida | Out-String).Trim()). Atalhos: $(Descrever-Atalhos $pg)"
+}
 if ($Disco -and (Test-Path (Join-Path $OUT '2_jogo.ok'))) {
     $pg = Join-Path (Join-Path $R 'vfs') 'PS3_GAME'
     if (-not (Test-Path -LiteralPath (Join-Path $pg 'USRDIR') -PathType Container)) {
         $Disco = Achar-Disco $Disco
         $alvo = Join-Path $Disco 'PS3_GAME'
-        $saida = SemExcecao { cmd /c "rmdir `"$pg`" 2>&1 & mklink /J `"$pg`" `"$alvo`" 2>&1" }
-        if (-not (Test-Path -LiteralPath (Join-Path $pg 'USRDIR') -PathType Container)) {
-            throw "não deu para ligar o disco em $pg ($alvo): $(($saida | Out-String).Trim())"
+        $real = Destino-Real $alvo
+        $pgCheio = [IO.Path]::GetFullPath($pg).TrimEnd('\').ToLowerInvariant()
+        if (-not $real -or [IO.Path]::GetFullPath($real).TrimEnd('\').ToLowerInvariant() -eq $pgCheio -or
+            -not (Test-Path -LiteralPath (Join-Path $real 'USRDIR') -PathType Container)) {
+            throw ("o PS3_GAME da pasta escolhida não leva ao jogo: $(Descrever-Atalhos $alvo). " +
+                   'No launcher, clique em "Escolher o disco de novo" e escolha o arquivo do jogo (.7z, .zip, .rar ou .iso) ' +
+                   'ou a pasta onde ele foi extraído (a que tem PS3_GAME com USRDIR dentro).')
         }
-        Msg "disco ligado de novo: $Disco"
+        Ligar-Disco $pg $real
+        Msg "disco ligado de novo: $real"
     }
 }
 Etapa '2_jogo' {
@@ -269,9 +325,13 @@ Etapa '2_jogo' {
     New-Item -ItemType Directory -Force $vfs | Out-Null
     $pg = Join-Path $vfs 'PS3_GAME'
     # junção para o PS3_GAME do disco, sem copiar 34 GB; refeita a cada geração (o disco pode ter mudado
-    # de lugar). rmdir numa junção apaga só a junção.
-    if (Test-Path -LiteralPath $pg) { cmd /c "rmdir `"$pg`"" 2>$null }
-    if (-not (Test-Path -LiteralPath $pg)) { Exec $LOG "mklink /J `"$pg`" `"$(Join-Path $Disco 'PS3_GAME')`"" }
+    # de lugar), sempre para a pasta real e conferida antes de desfazer a atual (ver Destino-Real acima).
+    # rmdir numa junção apaga só a junção.
+    $real = Destino-Real (Join-Path $Disco 'PS3_GAME')
+    if (-not $real -or -not (Test-Path -LiteralPath (Join-Path $real 'USRDIR') -PathType Container)) {
+        throw "o PS3_GAME da pasta escolhida não leva ao jogo: $(Descrever-Atalhos (Join-Path $Disco 'PS3_GAME')). Escolha o arquivo do jogo (.7z, .zip, .rar ou .iso) ou a pasta onde ele foi extraído."
+    }
+    Ligar-Disco $pg $real
 
     if ($Update -eq 'auto') {
         $Update = Join-Path $R 'dl\BCUS98232_update_1.04.pkg'
