@@ -1240,6 +1240,96 @@ SPU__SX_SLOW u128 spu__sx_fma_fix(u128 r, int m, u128 x, u128 y, u128 z, uint32_
     return spu__sx_st(_mm_mask_mov_epi32(spu__sx_ld(r), (__mmask8)(~m & 0xF), e));
 }
 #endif
+#elif defined(SPU_SX_RZ) && defined(__AVX2__) && defined(__FMA__) && !defined(SPU_SX_FIX_LANE)
+/* GOWA (25/10): sem AVX-512, o mesmo conserto exato em double da build AVX-512 (acima),
+ * em AVX2: 4 palavras SPU -> 4 doubles exatos num __m256d, a conta em double e o corte a
+ * 24 bits. O arredondamento para zero vem do MXCSR da thread SPU, que no modo SPU_SX_RZ
+ * já está em para-zero (o caminho rápido depende disso). Truncar a 53 e depois a 24 =
+ * truncar a 24, como lá. Era o laço por palavra com __int128 (spu__*_any): 0,9% do
+ * notebook no cap. 16. Conferido contra spu__*_any com out/spudiff/teste_sx_fix.c
+ * compilado com -march=x86-64-v3 -DSPU_SX_RZ e o MXCSR em para-zero. */
+#if defined(_WIN64) && defined(__clang__) && !defined(SPU_SX_FIX_NO_VC)
+#define SPU__SX_SLOW_VC static __attribute__((noinline, cold)) __m128i __vectorcall
+#else
+#define SPU__SX_SLOW_VC static __attribute__((noinline, cold)) __m128i
+#endif
+SPU__SX_INLINE __m256d spu__xf_d4(__m128i w) {     /* 4 palavras SPU -> 4 doubles exatos */
+    const __m256i u = _mm256_cvtepu32_epi64(w);
+    const __m256i e = _mm256_and_si256(_mm256_srli_epi64(u, 23), _mm256_set1_epi64x(0xFF));
+    const __m256i s = _mm256_slli_epi64(_mm256_srli_epi64(u, 31), 63);
+    const __m256i f = _mm256_slli_epi64(_mm256_and_si256(u, _mm256_set1_epi64x(0x7FFFFF)), 29);
+    const __m256i de = _mm256_slli_epi64(_mm256_add_epi64(e, _mm256_set1_epi64x(1023 - 127)), 52);
+    const __m256i v = _mm256_or_si256(_mm256_or_si256(s, de), f);
+    return _mm256_castsi256_pd(_mm256_and_si256(v, _mm256_cmpgt_epi64(e, _mm256_setzero_si256())));
+}
+SPU__SX_INLINE __m128i spu__xf_s4(__m256d x) {     /* 4 doubles -> 4 palavras SPU */
+    const __m256i u = _mm256_castpd_si256(x);
+    const __m256i be = _mm256_sub_epi64(_mm256_and_si256(_mm256_srli_epi64(u, 52), _mm256_set1_epi64x(0x7FF)),
+                                        _mm256_set1_epi64x(1023 - 127));
+    const __m256i s = _mm256_and_si256(_mm256_srli_epi64(u, 32), _mm256_set1_epi64x(0x80000000));
+    const __m256i f = _mm256_and_si256(_mm256_srli_epi64(u, 29), _mm256_set1_epi64x(0x7FFFFF));
+    __m256i r = _mm256_or_si256(_mm256_or_si256(s, _mm256_slli_epi64(be, 23)), f);
+    r = _mm256_blendv_epi8(r, _mm256_or_si256(s, _mm256_set1_epi64x(0x7FFFFFFF)),
+                           _mm256_cmpgt_epi64(be, _mm256_set1_epi64x(255)));          /* satura acima de Smax */
+    r = _mm256_and_si256(r, _mm256_cmpgt_epi64(be, _mm256_setzero_si256()));        /* +0 abaixo de Smin */
+    return _mm256_castsi256_si128(_mm256_permutevar8x32_epi32(r, _mm256_setr_epi32(0, 2, 4, 6, 0, 0, 0, 0)));
+}
+SPU__SX_INLINE __m128i spu__xf_troca(__m128i r, __m128i e, int m) {   /* as palavras fora de m vêm de e */
+    const __m128i bits = _mm_setr_epi32(1, 2, 4, 8);
+    return _mm_blendv_epi8(r, e, _mm_cmpeq_epi32(_mm_and_si128(_mm_set1_epi32(~m & 0xF), bits), bits));
+}
+SPU__SX_SLOW_VC spu__sx_fa_fix_v(__m128i r, __m128i x, __m128i y, int m, uint32_t negb) {
+    return spu__xf_troca(r, spu__xf_s4(_mm256_add_pd(spu__xf_d4(x), spu__xf_d4(_mm_xor_si128(y, _mm_set1_epi32((int)negb))))), m);
+}
+SPU__SX_SLOW_VC spu__sx_fm_fix_v(__m128i r, __m128i x, __m128i y, int m) {
+    return spu__xf_troca(r, spu__xf_s4(_mm256_mul_pd(spu__xf_d4(x), spu__xf_d4(y))), m);
+}
+SPU__SX_SLOW_VC spu__sx_fma_fix_v(__m128i r, __m128i x, __m128i y, __m128i z, int m, uint32_t negp, uint32_t negc) {
+    return spu__xf_troca(r, spu__xf_s4(_mm256_fmadd_pd(spu__xf_d4(_mm_xor_si128(x, _mm_set1_epi32((int)negp))), spu__xf_d4(y),
+                                                       spu__xf_d4(_mm_xor_si128(z, _mm_set1_epi32((int)negc))))), m);
+}
+SPU__SX_INLINE u128 spu__sx_fa_fix(u128 r, int m, u128 x, u128 y, uint32_t negb) {
+    return spu__sx_st(spu__sx_fa_fix_v(spu__sx_ld(r), spu__sx_ld(x), spu__sx_ld(y), m, negb));
+}
+SPU__SX_INLINE u128 spu__sx_fm_fix(u128 r, int m, u128 x, u128 y) {
+    return spu__sx_st(spu__sx_fm_fix_v(spu__sx_ld(r), spu__sx_ld(x), spu__sx_ld(y), m));
+}
+SPU__SX_INLINE u128 spu__sx_fma_fix(u128 r, int m, u128 x, u128 y, u128 z, uint32_t negp, uint32_t negc) {
+    return spu__sx_st(spu__sx_fma_fix_v(spu__sx_ld(r), spu__sx_ld(x), spu__sx_ld(y), spu__sx_ld(z), m, negp, negc));
+}
+#elif defined(_WIN64) && defined(__clang__) && !defined(SPU_SX_FIX_NO_VC)
+/* GOWA (25/10): o __vectorcall de 23/10 (acima) também na build sem AVX-512, com o
+ * mesmo conserto por palavra. Sem ele, cada u128 ia por referência a uma cópia na pilha
+ * e o retorno por ponteiro oculto, e o clang não mantinha os registradores SPU em
+ * registradores do x86 nos laços quentes que têm um conserto frio. */
+#define SPU__SX_SLOW_VC static __attribute__((noinline, cold)) __m128i __vectorcall
+SPU__SX_SLOW_VC spu__sx_fa_fix_v(__m128i rv, __m128i xv, __m128i yv, int m, uint32_t negb) {
+    u128 r = spu__sx_st(rv);
+    const u128 x = spu__sx_st(xv), y = spu__sx_st(yv);
+    for (int i = 0; i < 4; i++) if (!(m & (1 << i))) r._u32[i] = spu__fa_any(x._u32[i], y._u32[i] ^ negb);
+    return spu__sx_ld(r);
+}
+SPU__SX_SLOW_VC spu__sx_fm_fix_v(__m128i rv, __m128i xv, __m128i yv, int m) {
+    u128 r = spu__sx_st(rv);
+    const u128 x = spu__sx_st(xv), y = spu__sx_st(yv);
+    for (int i = 0; i < 4; i++) if (!(m & (1 << i))) r._u32[i] = spu__fm_any(x._u32[i], y._u32[i]);
+    return spu__sx_ld(r);
+}
+SPU__SX_SLOW_VC spu__sx_fma_fix_v(__m128i rv, __m128i xv, __m128i yv, __m128i zv, int m, uint32_t negp, uint32_t negc) {
+    u128 r = spu__sx_st(rv);
+    const u128 x = spu__sx_st(xv), y = spu__sx_st(yv), z = spu__sx_st(zv);
+    for (int i = 0; i < 4; i++) if (!(m & (1 << i))) r._u32[i] = spu__fma_any(x._u32[i], y._u32[i], z._u32[i], negp, negc);
+    return spu__sx_ld(r);
+}
+SPU__SX_INLINE u128 spu__sx_fa_fix(u128 r, int m, u128 x, u128 y, uint32_t negb) {
+    return spu__sx_st(spu__sx_fa_fix_v(spu__sx_ld(r), spu__sx_ld(x), spu__sx_ld(y), m, negb));
+}
+SPU__SX_INLINE u128 spu__sx_fm_fix(u128 r, int m, u128 x, u128 y) {
+    return spu__sx_st(spu__sx_fm_fix_v(spu__sx_ld(r), spu__sx_ld(x), spu__sx_ld(y), m));
+}
+SPU__SX_INLINE u128 spu__sx_fma_fix(u128 r, int m, u128 x, u128 y, u128 z, uint32_t negp, uint32_t negc) {
+    return spu__sx_st(spu__sx_fma_fix_v(spu__sx_ld(r), spu__sx_ld(x), spu__sx_ld(y), spu__sx_ld(z), m, negp, negc));
+}
 #else
 SPU__SX_SLOW u128 spu__sx_fa_fix(u128 r, int m, u128 x, u128 y, uint32_t negb) {
     for (int i = 0; i < 4; i++) if (!(m & (1 << i))) r._u32[i] = spu__fa_any(x._u32[i], y._u32[i] ^ negb);
