@@ -4,12 +4,6 @@ O Otavix Launcher mostra este arquivo na página "Novidades" do jogo. Cada atual
 "## <data> · <versão>" e o texto em português (### pt), inglês (### en) e, quando houver, espanhol (### es).
 As mais novas ficam em cima.
 
-## 26/10/2026 · 023877b
-### pt
-- **Desempenho em PCs de até 12 threads:** enquanto espera o trabalho das SPUs, a parte principal do jogo agora descansa em vez de girar sem parar e deixa o processador livre para elas. Num i5-11400F (6 núcleos/12 threads) o fps subiu cerca de 1 a 2,5% e o uso de processador caiu 7%. PCs com 16 threads ou mais não mudam.
-### en
-- **Performance on PCs with up to 12 threads:** while it waits for the SPUs' work, the game's main part now rests instead of spinning nonstop, leaving the processor to them. On an i5-11400F (6 cores/12 threads) the frame rate rose about 1 to 2.5% and CPU use fell 7%. PCs with 16 threads or more are unchanged.
-
 ## 26/10/2026 · dbe1a90
 ### pt
 - **Disco em outro drive:** quando o Windows não deixa ligar o disco por atalho e ele está em outro drive (como uma unidade de rede), o gerador copia o jogo para a pasta do port. Antes, ele confere se há espaço.
