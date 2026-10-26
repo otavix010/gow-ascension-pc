@@ -2929,7 +2929,7 @@ static int ld_tex_paginas_sujas(const u8* src, u32 span, u32 desde)
     return 0;
 }
 
-static u64 texture_content_hash(const rsx_dsp_texture* t, int* readable)
+static u64 texture_content_hash_guest(const rsx_dsp_texture* t, int* readable)
 {
     const u32 span = texture_source_span(t);
     const u8* src = span ? guest_ptr(t->location, t->offset, span) : NULL;
@@ -3065,6 +3065,39 @@ static u64 texture_content_hash(const rsx_dsp_texture* t, int* readable)
     return hash;
 }
 
+/* Report 37: the HUD's PS3 button glyphs (64x64 DXT5 with mips) drawn again with the keys and the mouse of
+ * cellPad.c (rsx_teclas.h, from scripts/teclas.py) while keyboard and mouse are the last input used. A glyph is
+ * known by the FNV-1a hash of its base level; its content hash changes with the device, so the cached texture is
+ * decoded again when the player switches. */
+#include "rsx_teclas.h"
+int cellPad_teclado_ultimo(void);
+static int ld_tecla(const rsx_dsp_texture* t)
+{
+    if ((t->format & TEX_FMT_BASE_MASK & ~(u32)TEX_FMT_UNNORM) != TEX_FMT_DXT45 ||
+        (t->format & TEX_FMT_LINEAR) || t->cubemap || t->width != 64 || t->height != 64)
+        return -1;
+    const u8* src = guest_ptr(t->location, t->offset, 4096);
+    if (!src) return -1;
+    u64 h = 0xcbf29ce484222325ull;
+    for (u32 i = 0; i < 4096; i++) h = (h ^ src[i]) * 0x100000001b3ull;
+    for (int i = 0; i < (int)(sizeof k_teclas / sizeof k_teclas[0]); i++)
+        if (k_teclas[i].hash_ps3 == h) return i;
+    return -1;
+}
+/* the keyboard glyph to decode in place of the guest bytes, or NULL */
+static const u8* ld_tecla_dados(const rsx_dsp_texture* t, u32 total)
+{
+    if (!cellPad_teclado_ultimo()) return NULL;
+    const int i = ld_tecla(t);
+    return i >= 0 && total <= k_teclas[i].tam ? k_teclas[i].dados : NULL;
+}
+static u64 texture_content_hash(const rsx_dsp_texture* t, int* readable)
+{
+    u64 h = texture_content_hash_guest(t, readable);
+    if (*readable && cellPad_teclado_ultimo() && ld_tecla(t) >= 0) h ^= 0x9E3779B97F4A7C15ull;
+    return h;
+}
+
 /* GOWA_TEXFAIL_WHY=1: why a texture does not decode (first 32) */
 static void ld_texfail_why(const rsx_dsp_texture* t, const char* why)
 {
@@ -3109,6 +3142,7 @@ static ID3D12Resource* decode_guest_texture(const rsx_dsp_texture* t, u32 remap)
         const u32 total = texture_source_span(t);
         const u8* src = guest_ptr(t->location, t->offset, total);
         if (!src) return NULL;
+        { const u8* kb = ld_tecla_dados(t, total); if (kb) src = kb; }   /* report 37 */
         if (t->cubemap) {
             n_mips = 1;
             for (u32 d = (w < h ? w : h) / 4; d > 1; d >>= 1)
@@ -3655,10 +3689,25 @@ static void ld_tex_dump(const rsx_dsp_texture* t)
     FILE* f = fopen(fn, "wb");
     if (!f) return;
     fwrite(src, 1, span, f); fclose(f); n++;
+    /* GOWA_TEX_DUMP_AROUND=<bytes>: for a texture of 64x64 or less (a button
+     * glyph), also the memory around it, to find the glyphs loaded beside it
+     * (report 37: scripts/teclas.py got the glyph hashes from these) */
+    static long around = -2;
+    if (around == -2) { const char* a = getenv("GOWA_TEX_DUMP_AROUND"); around = a ? atol(a) : -1; }
+    if (around > 0 && t->width <= 64 && t->height <= 64 && t->offset >= (u32)around) {
+        const u8* wide = guest_ptr(t->location, t->offset - (u32)around, 2u * (u32)around);
+        if (wide && (f = fopen(strcat(fn, ".viz"), "wb"))) { fwrite(wide, 1, 2u * (u32)around, f); fclose(f); }
+    }
 }
 
 static u32 texture_srv_slot(const rsx_dsp_texture* t)
 {
+    /* report 37: keyboard and mouse came in or went away; the 64x64 textures (the button glyphs among them) are
+     * hashed again, which skips the untouched-pages shortcut below and decodes the glyphs for the new device */
+    { static int modo = -1; const int m = cellPad_teclado_ultimo();
+      if (m != modo) { modo = m;
+          for (u32 k = 0; k < g.n_textures; k++)
+              if (g.textures[k].width == 64 && g.textures[k].height == 64) g.textures[k].content_hash = 0; } }
     const u32 remap = t->remap & 0xFFFF;
     ld_tex_dump(t);
     static int refresh_enabled = -1;

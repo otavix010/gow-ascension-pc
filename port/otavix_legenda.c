@@ -26,7 +26,7 @@ static const wchar_t TEXTO[] =
     L"WASD: andar        Shift + WASD: esquivar\n"
     L"Cruz (X): Espaço        Quadrado: mouse esquerdo\n"
     L"Triângulo: mouse direito        Círculo: E\n"
-    L"L1: Q    R1: F    L2: C    R2: R\n"
+    L"L1: Q    R1: F    L2: C    R2: R    L3: Z    R3: V\n"
     L"Direcional: setas    Start: Esc ou Enter    Select: Tab";
 
 static volatile LONG s_mostrar;

@@ -79,6 +79,21 @@ static int           s_pad_initialized = 0;
 static u32           s_max_connect = 0;
 static u32           s_port_setting[CELL_PAD_MAX_PORT_NUM];
 static PadHostState  s_host_state[PAD_MAX_HOST_PORTS];
+
+/* GOWA (26/10, report 37): what the player used last, the keyboard and mouse (1) or a controller (0), for the HUD's
+ * button pictures (rsx_live_draw.c swaps the PS3 buttons for the keys). Before any input: the keyboard when no
+ * controller is plugged in. */
+static volatile int s_ultimo_teclado = -1;
+static volatile int s_xinput_ligado;
+int cellPad_teclado_ultimo(void)
+{
+    /* tests: GOWA_TESTE_TECLADO=1 (or 0) fixes the answer, for a run with no real key pressed */
+    static int teste = -2;
+    if (teste == -2) { const char* e = getenv("GOWA_TESTE_TECLADO"); teste = e ? atoi(e) != 0 : -1; }
+    if (teste >= 0) return teste;
+    const int u = s_ultimo_teclado;
+    return u >= 0 ? u : !s_xinput_ligado;
+}
 /* Per-port "a report has arrived since your last read" flag; see cellPadGetData. */
 static int s_data_fresh[PAD_MAX_HOST_PORTS];
 
@@ -330,7 +345,7 @@ static void pad_poll_keyboard(void)
  *   WASD = analógico esquerdo        Shift + WASD = analógico direito (esquiva)
  *   Espaço = X (pular)                mouse esquerdo = quadrado (ataque leve)
  *   mouse direito = triângulo (forte) E, Backspace ou botão do meio = círculo
- *   Q = L1   F = R1   C = L2   R = R2   setas = direcional
+ *   Q = L1   F = R1   C = L2   R = R2   Z = L3   V = R3   setas = direcional
  *   Esc ou Enter = Start (pausa)      Tab = Select */
 /* port/otavix_legenda.c, compilado no executável: a legenda das teclas por cima do jogo */
 void otx_legenda_iniciar(void);
@@ -366,6 +381,8 @@ static void pad_poll_teclado_mouse(void)
     if (PAD_K('F'))                                             b |= CELL_PAD_CTRL_R1;
     if (PAD_K('C'))                                             b |= CELL_PAD_CTRL_L2;
     if (PAD_K('R'))                                             b |= CELL_PAD_CTRL_R2;
+    if (PAD_K('Z'))                                             b |= CELL_PAD_CTRL_L3;
+    if (PAD_K('V'))                                             b |= CELL_PAD_CTRL_R3;
     if (PAD_K(VK_UP))                                           b |= CELL_PAD_CTRL_UP;
     if (PAD_K(VK_DOWN))                                         b |= CELL_PAD_CTRL_DOWN;
     if (PAD_K(VK_LEFT))                                         b |= CELL_PAD_CTRL_LEFT;
@@ -377,6 +394,7 @@ static void pad_poll_teclado_mouse(void)
     const int shift = PAD_K(VK_SHIFT);
 #undef PAD_K
     hs->buttons |= b;
+    if (b || dx || dy) s_ultimo_teclado = 1;   /* the HUD shows the keys (see cellPad_teclado_ultimo) */
     /* GOWA (25/10): a legenda das teclas (pedido de jogador: o jogo só desenha os botões do controle do PS3). F1
      * mostra e esconde; a primeira tecla de jogo a mostra por 12 s. */
     { static int dito, f1_antes, ligada;
@@ -478,6 +496,16 @@ static void pad_poll_xinput(void)
         /* Triggers */
         s_host_state[i].trigger_l2 = gp->bLeftTrigger;
         s_host_state[i].trigger_r2 = gp->bRightTrigger;
+
+        /* the controller used (a button, a trigger or a stick well off the centre): the HUD shows its buttons */
+        if (i == 0) {
+            s_xinput_ligado = 1;
+            const PadHostState* h = &s_host_state[0];
+            if (btns || gp->bLeftTrigger > 40 || gp->bRightTrigger > 40 ||
+                h->analog_lx < 64 || h->analog_lx > 192 || h->analog_ly < 64 || h->analog_ly > 192 ||
+                h->analog_rx < 64 || h->analog_rx > 192 || h->analog_ry < 64 || h->analog_ry > 192)
+                s_ultimo_teclado = 0;
+        }
 
         /* Pressure-sensitive buttons: XInput has digital only, so 0 or 255 */
         s_host_state[i].press_up       = (btns & CELL_PAD_CTRL_UP)       ? 255 : 0;
