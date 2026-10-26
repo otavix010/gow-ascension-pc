@@ -1615,7 +1615,7 @@ static DWORD WINAPI gowa_vblank_thread(LPVOID)
  * "mr"): m = principal do jogo ABOVE_NORMAL, r = RSX-present ABOVE_NORMAL, e = SPU0-3 (EDGE)
  * ABOVE_NORMAL, s = todas as SPUs BELOW_NORMAL, u = usleep curto (< 200 us) dorme num timer em vez
  * de girar (GOWA_USLEEP_SPIN_MAX=0), y = esperas ativas da principal dormem 1 ms a cada 256 voltas
- * (GOWA_PPU_PAUSE=3) em vez de SwitchToThread. Marca "[prio-ab] fase=N" no log; as amostras
+ * (GOWA_PPU_PAUSE=3) em vez de SwitchToThread (Y: em vez do giro puro, o padrão com 12+ CPUs). Marca "[prio-ab] fase=N" no log; as amostras
  * [fps] de cada fase saem pareadas no tempo (deriva térmica e carga de fundo dos dois lados).
  * No notebook (4 núcleos/8 lógicas) a variação ENTRE rodadas (±5%) esconde ganhos pequenos. */
 static DWORD g_gowa_main_tid, g_gowa_rsx_tid;
@@ -1625,6 +1625,7 @@ static void gowa_prio_aplica(int fase, const char* modo)
 {
     if (strchr(modo, 'u')) g_gowa_usleep_spin_max = fase ? 0 : 200;
     if (strchr(modo, 'y')) g_gowa_ppu_pause = fase ? 3 : 2;
+    if (strchr(modo, 'Y')) g_gowa_ppu_pause = fase ? 3 : 1;   /* 12+ CPUs: o padrão é o giro puro (1) */
     HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0);
     if (snap == INVALID_HANDLE_VALUE) return;
     const DWORD pid = GetCurrentProcessId();

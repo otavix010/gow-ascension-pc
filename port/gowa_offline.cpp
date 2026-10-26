@@ -1172,14 +1172,19 @@ extern "C" void gowa_early_register(void)
  * thread principal. GOWA_PPU_PAUSE=0 desliga.
  * GOWA (24/10): modo 2 = PAUSE e, a cada 256 voltas seguidas na mesma espera
  * (~20-40 us), SwitchToThread -- cede a fatia a uma thread pronta na mesma CPU.
- * Padrão com menos de 12 CPUs lógicas: no notebook (4 núcleos/8 threads, ~9
- * threads ocupadas) a principal passa ~30% do quadro nessas voltas, disputando
- * a CPU com as SPUs, que são o gargalo. GOWA_PPU_PAUSE=1|2 força o modo. */
+ * No notebook (4 núcleos/8 threads, ~9 threads ocupadas) a principal passa ~30%
+ * do quadro nessas voltas, disputando a CPU com as SPUs, que são o gargalo.
+ * GOWA_PPU_PAUSE=1|2|3 força o modo. */
 extern "C" { int g_gowa_ppu_pause = 1; }
 static const int s_gowa_ppu_pause_init = [] {
     const char* e = getenv("GOWA_PPU_PAUSE");
     if (e && *e) g_gowa_ppu_pause = atoi(e);
-    else { SYSTEM_INFO si; GetSystemInfo(&si); if (si.dwNumberOfProcessors < 12) g_gowa_ppu_pause = 2; }
+    /* GOWA (26/10): com menos de 16 CPUs lógicas, o modo 3 (dorme 1 ms a cada 256 voltas).
+     * A/B dentro da rodada (GOWA_PRIO_AB) no cap. 16: i5-11400F (12 lógicas) contra o giro
+     * puro (1): +2,6% e +0,3% (13 de 18 pares a favor; contra o modo 2: +2,0%), CPU por
+     * quadro -7%; i5-10300H (8 lógicas) contra o modo 2: FPS igual, CPU -2%. Com 16 ou mais
+     * fica o giro puro (não medido lá). */
+    else { SYSTEM_INFO si; GetSystemInfo(&si); if (si.dwNumberOfProcessors < 16) g_gowa_ppu_pause = 3; }
     return 0;
 }();
 extern "C" void gowa_ppu_espera(void)
