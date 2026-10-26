@@ -1774,7 +1774,7 @@ static int gcm_park_block_ok(u32 off, u32 put)
         const u32 w = gcm_fifo_rd32(ea);
         const u32 type = w >> 29;
         if ((w & 0xFFFF0000u) == 0xFEAD0000u) { o += 4; continue; }
-        if (type == 1) { if (gcm_cmd_target_ok(w & 0x1FFFFFFCu, put)) return 1; s_settle_bad_off = o; s_settle_bad_w = w; return 0; }
+        if (type == 1) { if (!(w & 3u) && gcm_cmd_target_ok(w & 0x1FFFFFFCu, put)) return 1; s_settle_bad_off = o; s_settle_bad_w = w; return 0; }
         if ((w & 3u) == 2u) { if (!gcm_cmd_target_ok(w & 0x1FFFFFFCu, put)) { s_settle_bad_off = o; s_settle_bad_w = w; return 0; } o += 4; continue; }
         if (w == 0x00020000u) return 1;
         if (type == 0 || type == 2) {
@@ -2213,6 +2213,33 @@ static void gcm_jh_dump(const char* why, u32 get, u32 put)
                 s_jh_dst[i] == 0xFFFFFFFFu ? " (RET)" : "");
     }
 }
+/* GOWA (26/10): a bad branch met in the middle of a straight run -- not where the settle check looks (a pass start,
+ * a park that opened, the word after a JUMP/CALL/RET) -- is the same thing as there: a block the title is still
+ * writing. The walker followed a JUMP into it while the writer was behind (notebook, generated 327e069: 0x3CAA1F41
+ * at 0x00505078, 0x874 bytes into the run from 0x00504804, read as a JUMP to unmapped 0x1CAA1F40; the dump taken
+ * right after already held 0x00040A20). Resyncing to put there skipped the frame's fences and labels, and the game
+ * waited forever (2 hangs in ~35 runs that night). So hold: get stays, and the next pass runs the settle check
+ * (rewind when the run no longer lands on get, wait while the block still has a bad branch). Only a word that stays
+ * bad for GOWA_PARK_SETTLE_MS (default 2000; 0 = off) still gets the resync. 1 = hold. */
+static int gcm_bad_branch_hold(u32 off)
+{
+    static u32 s_off = 0xFFFFFFFFu;
+    static unsigned long long s_since, s_n;
+    static long long lim_ms = -1;
+    if (lim_ms < 0) { const char* e = getenv("GOWA_PARK_SETTLE_MS"); lim_ms = e ? atoll(e) : 2000; }
+    if (lim_ms <= 0) return 0;
+    const unsigned long long now = gcm_us_now();
+    if (off != s_off) {
+        s_off = off; s_since = now; s_n++;
+        if (s_n <= 16 || (s_n & (s_n - 1)) == 0)
+            fprintf(stderr, "[park-settle] desvio ruim no meio do trecho em 0x%08X: retém e confere o bloco (#%llu)\n", off, s_n);
+        return 1;
+    }
+    if (now - s_since < (unsigned long long)lim_ms * 1000ull) return 1;
+    s_off = 0xFFFFFFFFu;   /* stayed bad: the resync, as before */
+    return 0;
+}
+
 static void gcm_rsx_process_fifo_unlocked(void)
 {
     { static unsigned _n = 0; static unsigned long long _t0 = 0;
@@ -2512,7 +2539,10 @@ static void gcm_rsx_process_fifo_unlocked(void)
               if (_rd) fprintf(stderr, "[JMP] %08X -> %08X (put=%08X)\n",
                                s_fifo_getoff, w & 0x1FFFFFFCu, put); }
             { u32 tgt = w & 0x1FFFFFFCu;
-              if (!gcm_io2ea(tgt)) { gcm_fifo_bad_branch("JUMP", tgt, w); gcm_fifo_dump_around(s_fifo_getoff);
+              /* an old-style JUMP has bits 1:0 clear: 0x3CAA1F41 is a word of the previous lap, not a JUMP */
+              if (!gcm_io2ea(tgt) || (w & 3u)) {
+                  if (gcm_bad_branch_hold(s_fifo_getoff)) { s_settle_need = 1; why = "bad-branch-hold"; break; }
+                  gcm_fifo_bad_branch("JUMP", tgt, w); gcm_fifo_dump_around(s_fifo_getoff);
                   /* GOWA (26/10): and how the walker got here (a run on the notebook hung after `get` went back to the
                    * boot block at IO 0x10000 and hit its stale JUMP into the unmapped loading ring) */
                   { static int jd = 0; if (jd++ < 3) gcm_jh_dump("unmapped-JUMP", s_fifo_getoff, put); }
@@ -2586,7 +2616,9 @@ static void gcm_rsx_process_fifo_unlocked(void)
         }
         if ((w & 3) == 2) {                    /* CALL: offset | 2 */
             { u32 tgt = w & 0x1FFFFFFCu;
-              if (!gcm_io2ea(tgt)) { gcm_fifo_bad_branch("CALL", tgt, w); gcm_fifo_dump_around(s_fifo_getoff);
+              if (!gcm_io2ea(tgt)) {
+                  if (gcm_bad_branch_hold(s_fifo_getoff)) { s_settle_need = 1; why = "bad-branch-hold"; break; }
+                  gcm_fifo_bad_branch("CALL", tgt, w); gcm_fifo_dump_around(s_fifo_getoff);
                   { static int jd = 0; if (jd++ < 3) gcm_jh_dump("unmapped-CALL", s_fifo_getoff, put); }
                   gcm_fifo_resync_why("unmapped-CALL", &s_fifo_getoff, put); break; }
               s_fifo_calloff = s_fifo_getoff + 4;
