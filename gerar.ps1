@@ -291,20 +291,87 @@ function Descrever-Atalhos([string]$p) {
     }
     return ($partes -join ' -> ')
 }
-# a junção de $pg para $real, conferida pelo USRDIR. Às vezes o Windows deixa uma junção recém-criada que não se
-# atravessa (o destino certo no fsutil, mas nada aparece por ela: visto no notebook e no PC de um jogador, com o
-# "Junção criada" na tela), e criá-la de novo resolve; a espera também cobre um antivírus que segure a junção nova.
+# Sem junção: o vfs\PS3_GAME vira um espelho do disco, com as pastas de verdade e cada arquivo ligado ao do disco por
+# link físico (o mesmo arquivo com dois nomes: nada é copiado nem ocupa espaço a mais, mas só no mesmo drive). A marca
+# diz que a pasta é um espelho do gerador: só uma pasta com ela é apagada (rmdir /s apaga os nomes do espelho; os
+# arquivos do disco ficam). Uma pasta de verdade sem a marca pode ser a única cópia do jogador e nunca é apagada.
+$MARCA_ESPELHO = '.otavix-espelho'
+if (-not ('LinkFisico' -as [type])) { Add-Type @"
+using System; using System.Runtime.InteropServices;
+public static class LinkFisico {
+  [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+  public static extern bool CreateHardLink(string novo, string existente, IntPtr reservado);
+}
+"@ }
+function Tirar-Ligacao([string]$pg) {
+    $it = Get-Item -LiteralPath $pg -Force -ErrorAction SilentlyContinue
+    if (-not $it) { return }
+    if ($it.LinkType) { SemExcecao { cmd /c "rmdir `"$pg`" 2>&1" } | Out-Null; return }   # só a junção
+    if (Test-Path -LiteralPath (Join-Path $pg $MARCA_ESPELHO)) { SemExcecao { cmd /c "rmdir /s /q `"$pg`" 2>&1" } | Out-Null }
+}
+function Espelhar-Disco([string]$de, [string]$para) {
+    New-Item -ItemType Directory -Force $para | Out-Null
+    [IO.File]::WriteAllText((Join-Path $para $MARCA_ESPELHO), "links físicos para $de`r`n")
+    $n = 0
+    $pastas = New-Object System.Collections.Generic.Stack[string]
+    $pastas.Push($de)
+    while ($pastas.Count) {
+        $d = $pastas.Pop()
+        $alvo = $para + $d.Substring($de.Length)
+        [IO.Directory]::CreateDirectory($alvo) | Out-Null
+        foreach ($f in [IO.Directory]::GetFiles($d)) {
+            if (-not [LinkFisico]::CreateHardLink((Join-Path $alvo ([IO.Path]::GetFileName($f))), $f, [IntPtr]::Zero)) {
+                $cod = [Runtime.InteropServices.Marshal]::GetLastWin32Error()
+                throw ("$f (erro {0}: {1})" -f $cod, (New-Object ComponentModel.Win32Exception $cod).Message)
+            }
+            $n++
+        }
+        foreach ($s in [IO.Directory]::GetDirectories($d)) {
+            # uma junção dentro do disco não se atravessa num PC destes: sem ela faltariam arquivos ao jogo
+            if ([IO.File]::GetAttributes($s) -band [IO.FileAttributes]::ReparsePoint) { throw "$s é um atalho dentro do disco" }
+            $pastas.Push($s)
+        }
+    }
+    return $n
+}
+# a ligação de $pg ao PS3_GAME do disco ($real), conferida pelo USRDIR. Primeiro a junção: às vezes o Windows deixa
+# uma recém-criada que não se atravessa (o destino certo no fsutil, mas nada aparece por ela), e criá-la de novo
+# resolve; a espera também cobre um antivírus que segure a junção nova. Num PC onde nenhuma junção abre (um jogador
+# com o Windows 11 25H2, 26200: "Junção criada" três vezes e nada dentro dela, para uma pasta de verdade em Downloads),
+# o espelho de links físicos. GOWA_TESTE_SEM_JUNCAO=1 (testes) pula a junção, como num PC desses.
 function Ligar-Disco([string]$pg, [string]$real) {
+    if ([IO.Path]::GetFullPath($real).TrimEnd('\') -ieq [IO.Path]::GetFullPath($pg).TrimEnd('\')) {
+        if (Test-Path -LiteralPath (Join-Path $pg 'USRDIR') -PathType Container) { return }
+        throw "o disco escolhido é a própria pasta do jogo ($pg). Escolha o arquivo do jogo (.7z, .zip, .rar ou .iso) ou a pasta onde ele foi extraído."
+    }
     $saida = @()
-    for ($tentativa = 1; $tentativa -le 3; $tentativa++) {
-        $saida += SemExcecao { cmd /c "rmdir `"$pg`" 2>&1 & mklink /J `"$pg`" `"$real`" 2>&1" }
+    $semJuncao = $env:GOWA_TESTE_SEM_JUNCAO -eq '1'
+    for ($tentativa = 1; $tentativa -le 3 -and -not $semJuncao; $tentativa++) {
+        Tirar-Ligacao $pg
+        $saida += SemExcecao { cmd /c "mklink /J `"$pg`" `"$real`" 2>&1" }
         for ($i = 0; $i -lt 10; $i++) {
             if (Test-Path -LiteralPath (Join-Path $pg 'USRDIR') -PathType Container) { return }
             Start-Sleep -Milliseconds 300
         }
-        Msg "a junção do disco não abriu (tentativa $tentativa de 3); refazendo"
+        Msg "a junção do disco não abriu (tentativa $tentativa de 3)"
     }
-    throw "não deu para ligar o disco em $pg ($real) em 3 tentativas: $(($saida | Out-String).Trim()). Atalhos: $(Descrever-Atalhos $pg)"
+    Msg 'a junção não abre neste PC: ligando os arquivos do disco um a um, por link físico (nada é copiado)'
+    Tirar-Ligacao $pg
+    if (Test-Path -LiteralPath $pg) {
+        throw "não deu para ligar o disco: $pg já existe e não é uma junção nem um espelho do gerador ($(Descrever-Atalhos $pg)). Apague essa pasta e gere de novo."
+    }
+    try { $n = Espelhar-Disco $real $pg }
+    catch {
+        $erro = $_.Exception.Message
+        Tirar-Ligacao $pg
+        throw ("não deu para ligar o disco em $pg ($real): a junção não abre neste PC ($(($saida | Out-String).Trim())) " +
+               "e o link físico falhou: $erro. O link físico só funciona com o disco no mesmo drive do port " +
+               "($(Split-Path -Qualifier $pg)): mova a pasta do jogo para esse drive e escolha o disco de novo no launcher.")
+    }
+    if (-not (Test-Path -LiteralPath (Join-Path $pg 'USRDIR') -PathType Container)) {
+        throw "não deu para ligar o disco em $pg ($real): o espelho de links físicos ficou sem o USRDIR."
+    }
+    Msg "disco ligado por links físicos: $n arquivos de $real"
 }
 if ($Disco -and (Test-Path (Join-Path $OUT '2_jogo.ok'))) {
     $pg = Join-Path (Join-Path $R 'vfs') 'PS3_GAME'
@@ -329,9 +396,9 @@ Etapa '2_jogo' {
     $vfs = Join-Path $R 'vfs'
     New-Item -ItemType Directory -Force $vfs | Out-Null
     $pg = Join-Path $vfs 'PS3_GAME'
-    # junção para o PS3_GAME do disco, sem copiar 34 GB; refeita a cada geração (o disco pode ter mudado
-    # de lugar), sempre para a pasta real e conferida antes de desfazer a atual (ver Destino-Real acima).
-    # rmdir numa junção apaga só a junção.
+    # junção para o PS3_GAME do disco, sem copiar 34 GB (ou o espelho de links físicos, num PC onde a junção não
+    # abre: ver Ligar-Disco); refeita a cada geração (o disco pode ter mudado de lugar), sempre para a pasta real e
+    # conferida antes de desfazer a atual (ver Destino-Real acima). rmdir numa junção apaga só a junção.
     $real = Destino-Real (Join-Path $Disco 'PS3_GAME')
     if (-not $real -or -not (Test-Path -LiteralPath (Join-Path $real 'USRDIR') -PathType Container)) {
         throw "o PS3_GAME da pasta escolhida não leva ao jogo: $(Descrever-Atalhos (Join-Path $Disco 'PS3_GAME')). Escolha o arquivo do jogo (.7z, .zip, .rar ou .iso) ou a pasta onde ele foi extraído."
