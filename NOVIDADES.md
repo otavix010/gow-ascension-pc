@@ -4,6 +4,14 @@ O Otavix Launcher mostra este arquivo na página "Novidades" do jogo. Cada atual
 "## <data> · <versão>" e o texto em português (### pt), inglês (### en) e, quando houver, espanhol (### es).
 As mais novas ficam em cima.
 
+## 26/10/2026 · dc1616d
+### pt
+- **Disco em outro drive:** quando o Windows nega o atalho e os links para o disco, o gerador agora copia o jogo para a pasta do port em qualquer caso. Antes, um "acesso negado" parava a geração.
+- **Pasta errada:** se a pasta escolhida como disco for a pasta onde o launcher instala os ports, o aviso agora diz isso.
+### en
+- **Disc on another drive:** when Windows refuses both the link and the file links to the disc, the generator now copies the game into the port's folder in every case. Before, an "access denied" stopped the generation.
+- **Wrong folder:** if the folder picked as the disc is the one where the launcher installs the ports, the message now says so.
+
 ## 26/10/2026 · ab9c15b
 ### pt
 - **Disco de outra região:** o port só funciona com o disco americano (BCUS98232). Com o europeu (BCES01741) ou de outra região, o jogo abria e fechava sem dizer nada. Agora o gerador e o jogo avisam qual é a versão do disco e como trocar. Escolher o disco americano em "Escolher o disco de novo" já basta, sem gerar de novo.
