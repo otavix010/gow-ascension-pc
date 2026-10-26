@@ -2738,6 +2738,35 @@ int main(int argc, char** argv)
         if (!found)
             snprintf(sfo, sizeof sfo, "%s/PS3_GAME/PARAM.SFO", ppu_vfs_root);
 #ifdef _WIN32
+        /* GOWA (25/10): a disc copy with its USRDIR but without PS3_GAME/PARAM.SFO (an incomplete copy) is still the
+         * game's data; the title id and name then come from an installed update's PARAM.SFO (<root>/game/<id>/,
+         * the 1.04 the generator puts there), so the game does not fall back to BLES00000 and quit. */
+        if (!found) {
+            char usr[1100];
+            snprintf(usr, sizeof usr, "%s/PS3_GAME/USRDIR", ppu_vfs_root);
+            const DWORD a = GetFileAttributesA(usr);
+            if (a != INVALID_FILE_ATTRIBUTES && (a & FILE_ATTRIBUTE_DIRECTORY)) {
+                char pat[1100];
+                snprintf(pat, sizeof pat, "%s/game/*", ppu_vfs_root);
+                WIN32_FIND_DATAA fd;
+                HANDLE h = FindFirstFileA(pat, &fd);
+                if (h != INVALID_HANDLE_VALUE) {
+                    do {
+                        if (!(fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) || fd.cFileName[0] == '.') continue;
+                        char cand[1100];
+                        snprintf(cand, sizeof cand, "%s/game/%s/PARAM.SFO", ppu_vfs_root, fd.cFileName);
+                        FILE* f = fopen(cand, "rb");
+                        if (!f) continue;
+                        fclose(f);
+                        snprintf(sfo, sizeof sfo, "%s", cand);
+                        found = 1;
+                        fprintf(stderr, "[boot] o disco nao tem PS3_GAME/PARAM.SFO; o titulo vem do update (%s)\n", cand);
+                        break;
+                    } while (FindNextFileA(h, &fd));
+                    FindClose(h);
+                }
+            }
+        }
         /* GOWA (25/10): no disc. The port does not copy the 34 GB disc: vfs\PS3_GAME is a junction to the folder
          * picked when the game was made, and when that folder is moved, deleted or on a drive that is off, the game
          * ran on without its data, found nothing and quit with no word (a player's "it opens and crashes"). Said
