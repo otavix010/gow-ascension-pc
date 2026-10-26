@@ -2119,7 +2119,8 @@ static void spu_report_cross_image(uint32_t addr, int want, int got)
  * thread in God of War Ascension, where ~30 job modules share LS 0x4000+).
  * Registration happens at startup; the cache is flushed if the registry grows
  * anyway. GOWA_LOOKUP_CACHE=0 disables it. */
-#define SPU_LC_SIZE 1024u
+#define SPU_LC_SIZE 2048u
+#define SPU_LC_NEG ((spu_fn)(uintptr_t)1)   /* cached miss */
 typedef struct { uint32_t addr; int32_t img; spu_fn fn; } spu_lc_ent;
 static SPU_THREAD_LOCAL spu_lc_ent t_lc[SPU_LC_SIZE];
 static SPU_THREAD_LOCAL uint32_t t_lc_gen;
@@ -2131,9 +2132,13 @@ spu_fn spu_lookup(uint32_t addr, int image_id)   /* exported: clang-built fast-p
     if (!s_lc_on) return spu_lookup_chain(addr, image_id);
     if (__builtin_expect(t_lc_gen != s_registry_count, 0)) { memset(t_lc, 0, sizeof t_lc); t_lc_gen = s_registry_count; }
     spu_lc_ent* c = &t_lc[(((addr >> 2) ^ ((uint32_t)image_id * 0x9E3779B1u >> 20)) * 2654435761u >> 22) & (SPU_LC_SIZE - 1)];
-    if (c->fn && c->addr == addr && c->img == image_id) return c->fn;
+    /* GOWA (26/10): misses are cached too (SPU_LC_NEG). The dispatchers ask the resident
+     * task / overlay first and the main image after, so every branch into the main image
+     * with a task resident walked a chain for nothing (spu_lookup_chain ~0.7% of the
+     * 4-core notebook). The registry only grows, and growing flushes this cache. */
+    if (c->fn && c->addr == addr && c->img == image_id) return c->fn == SPU_LC_NEG ? NULL : c->fn;
     spu_fn fn = spu_lookup_chain(addr, image_id);
-    if (fn) { c->addr = addr; c->img = image_id; c->fn = fn; }
+    c->addr = addr; c->img = image_id; c->fn = fn ? fn : SPU_LC_NEG;
     return fn;
 }
 static spu_fn spu_lookup_chain(uint32_t addr, int image_id)
