@@ -103,6 +103,10 @@ static void write_be64(uint32_t addr, uint64_t val)
     *p = val;
 }
 
+#ifdef _WIN32
+long g_gowa_usleep_spin_max = -1;   /* GOWA_USLEEP_SPIN_MAX (-1 = ainda não lido) */
+#endif
+
 /* ---------------------------------------------------------------------------
  * sys_timer_usleep
  *
@@ -224,9 +228,17 @@ int64_t sys_timer_usleep(ppu_context* ctx)
      * War Ascension's SPURS priority balancer, a thread of its own -- burned a
      * whole core while "sleeping", next to six SPU threads that are the
      * bottleneck. 1000 restores the old split. */
-    { static long s_max = -1;
+    { long s_max = g_gowa_usleep_spin_max;   /* GOWA (26/10): global, GOWA_PRIO_AB 'u' alterna */
       if (s_max < 0) { const char* e = getenv("GOWA_USLEEP_SPIN_MAX");
-                       s_max = e ? strtol(e, 0, 10) : 200; if (s_max < 0) s_max = 0; }
+                       /* GOWA (26/10): with fewer than 12 logical CPUs every usleep sleeps on
+                        * the timer. The main thread polls the job lists with usleep(30); on a
+                        * 4-core/8-thread notebook that spin held a CPU the 7 SPU threads were
+                        * waiting for. A/B inside one run (GOWA_PRIO_AB 'u', 9 pairs of 25 s):
+                        * +1.6% FPS, all 9 pairs up, process CPU per frame 732 -> 702 ms. */
+                       SYSTEM_INFO si; GetSystemInfo(&si);
+                       s_max = e ? strtol(e, 0, 10) : si.dwNumberOfProcessors < 12 ? 0 : 200;
+                       if (s_max < 0) s_max = 0;
+                       g_gowa_usleep_spin_max = s_max; }
       if (usec >= (uint64_t)s_max && usec > 0 && usec < 1000) {
 #ifndef CREATE_WAITABLE_TIMER_HIGH_RESOLUTION
 #define CREATE_WAITABLE_TIMER_HIGH_RESOLUTION 0x00000002
