@@ -111,6 +111,9 @@ function Baixar([string]$url, [string]$destino) {
     $curl = Get-Command curl.exe -ErrorAction SilentlyContinue
     if ($curl) {
         SemExcecao { & $curl.Source -L --fail --retry 3 --silent --show-error -o $part $url }
+        # curl 35 (CRYPT_E_NO_REVOCATION_CHECK): a rede ou o antivírus do jogador não deixa o schannel consultar a
+        # revogação do certificado (report 47 do launcher, no Dante); de novo sem essa consulta, o certificado ainda conferido
+        if ($LASTEXITCODE -eq 35) { SemExcecao { & $curl.Source -L --fail --retry 3 --silent --show-error --ssl-no-revoke -o $part $url } }
         if ($LASTEXITCODE -ne 0) { throw "falhou o download de $url (curl $LASTEXITCODE)" }
     } else {
         $ProgressPreference = 'SilentlyContinue'
@@ -381,6 +384,18 @@ function Ligar-Disco([string]$pg, [string]$real) {
             Start-Sleep -Milliseconds 300
         }
         Msg "a junção do disco não abriu (tentativa $tentativa de 3)"
+    }
+    if (-not $semJuncao) {
+        # report 44 (Windows 11 26200 de novo, disco em D: e 18 GB a menos do que a cópia pede): o drive do disco vai
+        # para o log, e um link simbólico, que o Windows resolve por outro caminho que a junção, é tentado antes dos
+        # links físicos. Ele só se cria com o modo de desenvolvedor ligado ou como administrador; senão segue adiante.
+        try { $di = [IO.DriveInfo]([IO.Path]::GetPathRoot([IO.Path]::GetFullPath($real))); Msg "drive do disco: $($di.Name) $($di.DriveType) $($di.DriveFormat)" } catch {}
+        Tirar-Ligacao $pg
+        $saida += SemExcecao { cmd /c "mklink /D `"$pg`" `"$real`" 2>&1" }
+        for ($i = 0; $i -lt 10; $i++) {
+            if (Test-Path -LiteralPath (Join-Path $pg 'USRDIR') -PathType Container) { Msg 'disco ligado por link simbólico'; return }
+            Start-Sleep -Milliseconds 300
+        }
     }
     Msg 'a junção não abre neste PC: ligando os arquivos do disco um a um, por link físico (nada é copiado)'
     Tirar-Ligacao $pg
