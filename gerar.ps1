@@ -193,6 +193,21 @@ Etapa '1_ferramentas' {
 $VS = Achar-VS
 if (-not $VS) { throw 'Visual Studio Build Tools com Clang não encontrado (rode de novo a etapa 1: -Refazer)' }
 
+# O processador: o jogo é compilado no mínimo para x86-64-v3 (AVX2, FMA, BMI2). Report 40: um Xeon E3-1230 V2 (Ivy
+# Bridge, só AVX) gerou o jogo inteiro, e ele fechou ao abrir com 0xC000001D (instrução ilegal). Sem essas instruções,
+# o gerador para aqui, antes de minutos de geração, e diz por quê. O clang diz o que o processador tem, como na escolha
+# da build (-march=native); GOWA_TESTE_MARCH troca o native nos testes. Sem resposta do clang, segue.
+function Conferir-Processador {
+    $march = if ($env:GOWA_TESTE_MARCH) { $env:GOWA_TESTE_MARCH } else { 'native' }
+    $def = (cmd /c "echo.| `"$(Join-Path $VS 'VC\Tools\Llvm\x64\bin\clang.exe')`" -march=$march -dM -E -x c - 2>nul") -join "`n"
+    if (-not $def -or ($def -match '__AVX2__' -and $def -match '__FMA__' -and $def -match '__BMI2__')) { return }
+    $nome = (Get-CimInstance Win32_Processor -ErrorAction SilentlyContinue | Select-Object -First 1).Name.Trim()
+    throw ("o seu processador ($nome) não tem AVX2, e o port precisa dele: Intel Core de 4ª geração (Haswell, 2013) " +
+           'em diante, ou AMD Ryzen ou FX da série Excavator (2015) em diante. O jogo também pede um processador forte: ' +
+           'mesmo com AVX2, os de 4 núcleos ficam abaixo de 15 fps.')
+}
+Conferir-Processador
+
 # ---------------------------------------------------------------------------- jogo
 # a pasta do jogo: a que contém PS3_GAME\USRDIR, ou uma até dois níveis abaixo da escolhida
 function Achar-PS3Game([string]$raiz) {
