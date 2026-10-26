@@ -97,21 +97,156 @@ static int s_sdl_inited = 0;
 #define PAD_STICK_DEADZONE  7849
 #define PAD_TRIGGER_THRESHOLD 30
 
-static u8 pad_xinput_stick_to_u8(short raw, short deadzone)
+/* GOWA (26/10): one stick, both axes together (XInput orientation, Y up; the caller flips Y), 1..255 around 128.
+ * The deadzone was applied to each axis on its own: with XInput's round gate a stick pushed fully to a diagonal
+ * read only 61% on each axis, and the dodge (a flick of the right stick) failed on diagonals -- a player's "the
+ * roll does not respond every time". Now a radial deadzone, rescaled to the full range, and RPCS3's squircle
+ * (PadHandlerBase::ConvertToSquircle, its default factor 8000) toward the DualShock 3's squarer range: a full
+ * diagonal reads 80% per axis. GOWA_SQUIRCLE=<factor> changes it (smaller = squarer), 0 turns it off. */
+static void pad_xinput_stick(short raw_x, short raw_y, short deadzone, u8* out_x, u8* out_y)
 {
-    float normalized;
-    if (raw > deadzone)
-        normalized = (float)(raw - deadzone) / (float)(32767 - deadzone);
-    else if (raw < -deadzone)
-        normalized = (float)(raw + deadzone) / (float)(32767 - deadzone);
-    else
-        normalized = 0.0f;
+    static int fator = -1;
+    if (fator < 0) { const char* e = getenv("GOWA_SQUIRCLE"); fator = (e && *e) ? atoi(e) : 8000; if (fator < 0) fator = 0; }
+    float x = (float)raw_x / 32767.0f, y = (float)raw_y / 32767.0f;
+    const float m = sqrtf(x * x + y * y), dz = (float)deadzone / 32767.0f;
+    if (m <= dz) { *out_x = *out_y = 128; return; }
+    float len = ((m > 1.0f ? 1.0f : m) - dz) / (1.0f - dz);
+    const float ang = atan2f(y, x);
+    if (fator > 0) { const float s = sinf(2.0f * ang); len *= 1.0f + s * s / ((float)fator / 1000.0f); }
+    int vx = 128 + (int)lroundf(len * cosf(ang) * 127.0f), vy = 128 + (int)lroundf(len * sinf(ang) * 127.0f);
+    /* 1..255, symmetric around 128: the caller's 256 - y must not wrap a 0 into 0 */
+    *out_x = (u8)(vx < 1 ? 1 : vx > 255 ? 255 : vx);
+    *out_y = (u8)(vy < 1 ? 1 : vy > 255 ? 255 : vy);
+}
 
-    /* Map -1.0..1.0 to 0..255 with center at 128 */
-    int val = (int)(normalized * 127.0f) + 128;
-    if (val < 0) val = 0;
-    if (val > 255) val = 255;
-    return (u8)val;
+/* GOWA (26/10): a tap or a flick the game would miss. The pad was read only when the game asked, once a frame:
+ * at 15-25 fps a quick press, or a flick of the right stick (the dodge) that is back at the centre before the next
+ * read, never reached the game. Two parts, both stamped with the game's frame count (cellGcm_flip_request_count):
+ *  - the game's reads (controller and keyboard together): a press, or the right stick off the centre, that the last
+ *    read saw and this one does not is still reported until two frames have begun since it began (or 250 ms), so
+ *    the game's logic sees it at least once; a long hold is released as soon as it ends;
+ *  - a sampler thread reads the controller every ~4 ms and keeps what began AND ended between two game reads; the
+ *    next read reports it, and from there the rule above holds it.
+ * Only port 0, the player. GOWA_PAD_AMOSTRA=0 turns both off. */
+extern u32 cellGcm_flip_request_count(void);
+#define PAD_FLICK_MIN 64          /* right stick off the centre by half its range, either axis */
+typedef struct { int on; u8 x, y; u32 flip; ULONGLONG ms; } PadFlick;
+static SRWLOCK   s_tap_lock = SRWLOCK_INIT;
+/* the game's reads */
+static u16       s_tap_last;        /* buttons at the last read */
+static u32       s_tap_flip[16];    /* the frame each button's press began in */
+static ULONGLONG s_tap_ms[16];
+static PadFlick  s_flick;           /* the right stick at the last read */
+/* the sampler's (controller only) */
+static u16       s_amo_last, s_amo_pend;   /* presses begun since the last game read */
+static u32       s_amo_flip[16];
+static ULONGLONG s_amo_ms[16];
+static PadFlick  s_amo_flick;       /* the right stick at the last sample */
+static int       s_amo_flick_pend;  /* a flick begun since the last game read */
+static PadFlick  s_amo_flick_ini;
+static volatile LONG s_amostra_viva;
+static HANDLE    s_amostra_thread;
+
+static int pad_desvio(u8 x, u8 y)
+{
+    const int dx = x > 128 ? x - 128 : 128 - x, dy = y > 128 ? y - 128 : 128 - y;
+    return dx > dy ? dx : dy;
+}
+
+static int pad_amostra_ligada(void)
+{
+    static int on = -1;
+    if (on < 0) { const char* e = getenv("GOWA_PAD_AMOSTRA"); on = (e && *e == '0') ? 0 : 1; }
+    return on;
+}
+
+/* a read of the right stick: a flick that begins now is stamped; the latest direction kept while it is out */
+static void pad_flick_ver(PadFlick* f, u8 x, u8 y, u32 flip, ULONGLONG ms)
+{
+    if (pad_desvio(x, y) >= PAD_FLICK_MIN) {
+        if (!f->on) { f->flip = flip; f->ms = ms; }
+        f->on = 1; f->x = x; f->y = y;
+    } else f->on = 0;
+}
+
+/* the game's read of port 0, after the controller and the keyboard */
+static void pad_tap_segurar(PadHostState* hs)
+{
+    if (!pad_amostra_ligada() || !hs->connected) return;
+    const u32 flip = cellGcm_flip_request_count();
+    const ULONGLONG ms = GetTickCount64();
+    u16 extra = 0;
+    AcquireSRWLockExclusive(&s_tap_lock);
+    /* what the sampler saw begin and end since the last read, as if this read had seen it */
+    const u16 perdidos = (u16)(s_amo_pend & ~hs->buttons & ~s_tap_last);
+    for (int b = 0; b < 16; b++)
+        if (perdidos & (1u << b)) { s_tap_flip[b] = s_amo_flip[b]; s_tap_ms[b] = s_amo_ms[b]; }
+    u16 antes = (u16)(s_tap_last | perdidos);
+    s_amo_pend = 0;
+    if (s_amo_flick_pend && !s_flick.on && pad_desvio(hs->analog_rx, hs->analog_ry) < PAD_FLICK_MIN)
+        s_flick = s_amo_flick_ini;
+    s_amo_flick_pend = 0;
+    /* presses that begin now */
+    const u16 novos = (u16)(hs->buttons & ~antes);
+    for (int b = 0; b < 16; b++)
+        if (novos & (1u << b)) { s_tap_flip[b] = flip; s_tap_ms[b] = ms; }
+    /* short presses that ended: still down */
+    for (int b = 0; b < 16; b++) {
+        const u16 bit = (u16)(1u << b);
+        if ((antes & bit) && !(hs->buttons & bit) && flip - s_tap_flip[b] < 2 && ms - s_tap_ms[b] < 250) extra |= bit;
+    }
+    s_tap_last = (u16)(hs->buttons | extra);
+    /* the right stick: a short flick that ended stays out */
+    const PadFlick f = s_flick;
+    pad_flick_ver(&s_flick, hs->analog_rx, hs->analog_ry, flip, ms);
+    if (f.on && !s_flick.on && flip - f.flip < 2 && ms - f.ms < 250) {
+        hs->analog_rx = f.x; hs->analog_ry = f.y;
+        s_flick = f;
+    }
+    ReleaseSRWLockExclusive(&s_tap_lock);
+    if (!extra) return;
+    hs->buttons |= extra;
+    if (extra & CELL_PAD_CTRL_TRIANGLE) hs->press_triangle = 255;
+    if (extra & CELL_PAD_CTRL_CIRCLE)   hs->press_circle = 255;
+    if (extra & CELL_PAD_CTRL_CROSS)    hs->press_cross = 255;
+    if (extra & CELL_PAD_CTRL_SQUARE)   hs->press_square = 255;
+    if (extra & CELL_PAD_CTRL_L1)       hs->press_l1 = 255;
+    if (extra & CELL_PAD_CTRL_R1)       hs->press_r1 = 255;
+    if (extra & CELL_PAD_CTRL_L2)       hs->trigger_l2 = 255;
+    if (extra & CELL_PAD_CTRL_R2)       hs->trigger_r2 = 255;
+}
+
+static u16 pad_xinput_botoes(const XINPUT_GAMEPAD* gp);
+
+static DWORD WINAPI pad_amostra_func(LPVOID arg)
+{
+    (void)arg;
+    while (InterlockedCompareExchange(&s_amostra_viva, 1, 1)) {
+        XINPUT_STATE st;
+        memset(&st, 0, sizeof st);
+        if (XInputGetState(0, &st) != ERROR_SUCCESS) { Sleep(250); continue; }   /* no controller: look now and then */
+        u8 rx, ry;
+        pad_xinput_stick(st.Gamepad.sThumbRX, st.Gamepad.sThumbRY, PAD_STICK_DEADZONE, &rx, &ry);
+        ry = (u8)(256 - ry);
+        const u16 btns = pad_xinput_botoes(&st.Gamepad);
+        const u32 flip = cellGcm_flip_request_count();
+        const ULONGLONG ms = GetTickCount64();
+        AcquireSRWLockExclusive(&s_tap_lock);
+        const u16 novos = (u16)(btns & ~s_amo_last);
+        for (int b = 0; b < 16; b++)
+            if (novos & (1u << b)) { s_amo_flip[b] = flip; s_amo_ms[b] = ms; }
+        s_amo_pend |= novos;
+        s_amo_last = btns;
+        const int estava = s_amo_flick.on;
+        pad_flick_ver(&s_amo_flick, rx, ry, flip, ms);
+        if (s_amo_flick.on) {
+            if (!estava) s_amo_flick_pend = 1;
+            if (s_amo_flick_pend) s_amo_flick_ini = s_amo_flick;   /* the latest direction of the flick */
+        }
+        ReleaseSRWLockExclusive(&s_tap_lock);
+        Sleep(4);
+    }
+    return 0;
 }
 
 /* Keyboard fallback for port 0.
@@ -290,6 +425,29 @@ static void pad_poll_teclado_mouse(void)
 }
 #endif
 
+/* Map XInput buttons to PS3 CELL_PAD_CTRL_* (also read by the sampler thread above) */
+static u16 pad_xinput_botoes(const XINPUT_GAMEPAD* gp)
+{
+    u16 btns = 0;
+    if (gp->wButtons & XINPUT_GAMEPAD_BACK)           btns |= CELL_PAD_CTRL_SELECT;
+    if (gp->wButtons & XINPUT_GAMEPAD_LEFT_THUMB)     btns |= CELL_PAD_CTRL_L3;
+    if (gp->wButtons & XINPUT_GAMEPAD_RIGHT_THUMB)    btns |= CELL_PAD_CTRL_R3;
+    if (gp->wButtons & XINPUT_GAMEPAD_START)          btns |= CELL_PAD_CTRL_START;
+    if (gp->wButtons & XINPUT_GAMEPAD_DPAD_UP)        btns |= CELL_PAD_CTRL_UP;
+    if (gp->wButtons & XINPUT_GAMEPAD_DPAD_RIGHT)     btns |= CELL_PAD_CTRL_RIGHT;
+    if (gp->wButtons & XINPUT_GAMEPAD_DPAD_DOWN)      btns |= CELL_PAD_CTRL_DOWN;
+    if (gp->wButtons & XINPUT_GAMEPAD_DPAD_LEFT)      btns |= CELL_PAD_CTRL_LEFT;
+    if (gp->bLeftTrigger > PAD_TRIGGER_THRESHOLD)     btns |= CELL_PAD_CTRL_L2;
+    if (gp->bRightTrigger > PAD_TRIGGER_THRESHOLD)    btns |= CELL_PAD_CTRL_R2;
+    if (gp->wButtons & XINPUT_GAMEPAD_LEFT_SHOULDER)  btns |= CELL_PAD_CTRL_L1;
+    if (gp->wButtons & XINPUT_GAMEPAD_RIGHT_SHOULDER) btns |= CELL_PAD_CTRL_R1;
+    if (gp->wButtons & XINPUT_GAMEPAD_Y)              btns |= CELL_PAD_CTRL_TRIANGLE;
+    if (gp->wButtons & XINPUT_GAMEPAD_B)              btns |= CELL_PAD_CTRL_CIRCLE;
+    if (gp->wButtons & XINPUT_GAMEPAD_A)              btns |= CELL_PAD_CTRL_CROSS;
+    if (gp->wButtons & XINPUT_GAMEPAD_X)              btns |= CELL_PAD_CTRL_SQUARE;
+    return btns;
+}
+
 static void pad_poll_xinput(void)
 {
     for (int i = 0; i < PAD_MAX_HOST_PORTS; i++) {
@@ -305,35 +463,17 @@ static void pad_poll_xinput(void)
         s_host_state[i].connected = 1;
         XINPUT_GAMEPAD* gp = &state.Gamepad;
 
-        /* Map XInput buttons to PS3 CELL_PAD_CTRL_* */
-        u16 btns = 0;
-        if (gp->wButtons & XINPUT_GAMEPAD_BACK)           btns |= CELL_PAD_CTRL_SELECT;
-        if (gp->wButtons & XINPUT_GAMEPAD_LEFT_THUMB)     btns |= CELL_PAD_CTRL_L3;
-        if (gp->wButtons & XINPUT_GAMEPAD_RIGHT_THUMB)    btns |= CELL_PAD_CTRL_R3;
-        if (gp->wButtons & XINPUT_GAMEPAD_START)          btns |= CELL_PAD_CTRL_START;
-        if (gp->wButtons & XINPUT_GAMEPAD_DPAD_UP)        btns |= CELL_PAD_CTRL_UP;
-        if (gp->wButtons & XINPUT_GAMEPAD_DPAD_RIGHT)     btns |= CELL_PAD_CTRL_RIGHT;
-        if (gp->wButtons & XINPUT_GAMEPAD_DPAD_DOWN)      btns |= CELL_PAD_CTRL_DOWN;
-        if (gp->wButtons & XINPUT_GAMEPAD_DPAD_LEFT)      btns |= CELL_PAD_CTRL_LEFT;
-        if (gp->bLeftTrigger > PAD_TRIGGER_THRESHOLD)     btns |= CELL_PAD_CTRL_L2;
-        if (gp->bRightTrigger > PAD_TRIGGER_THRESHOLD)    btns |= CELL_PAD_CTRL_R2;
-        if (gp->wButtons & XINPUT_GAMEPAD_LEFT_SHOULDER)  btns |= CELL_PAD_CTRL_L1;
-        if (gp->wButtons & XINPUT_GAMEPAD_RIGHT_SHOULDER) btns |= CELL_PAD_CTRL_R1;
-        if (gp->wButtons & XINPUT_GAMEPAD_Y)              btns |= CELL_PAD_CTRL_TRIANGLE;
-        if (gp->wButtons & XINPUT_GAMEPAD_B)              btns |= CELL_PAD_CTRL_CIRCLE;
-        if (gp->wButtons & XINPUT_GAMEPAD_A)              btns |= CELL_PAD_CTRL_CROSS;
-        if (gp->wButtons & XINPUT_GAMEPAD_X)              btns |= CELL_PAD_CTRL_SQUARE;
-
+        const u16 btns = pad_xinput_botoes(gp);
         s_host_state[i].buttons = btns;
 
         /* Analog sticks. PS3 Y axis is inverted vs XInput (up = 0). Reflect about
          * 128 (256 - x), NOT 255 - x: the latter turns a centered stick into 127,
          * whose bits (0x7F) alias SELECT+START and can make the guest self-exit.
          * (via sagemono, PR #42) */
-        s_host_state[i].analog_lx = pad_xinput_stick_to_u8(gp->sThumbLX, PAD_STICK_DEADZONE);
-        s_host_state[i].analog_ly = (u8)(256 - pad_xinput_stick_to_u8(gp->sThumbLY, PAD_STICK_DEADZONE));
-        s_host_state[i].analog_rx = pad_xinput_stick_to_u8(gp->sThumbRX, PAD_STICK_DEADZONE);
-        s_host_state[i].analog_ry = (u8)(256 - pad_xinput_stick_to_u8(gp->sThumbRY, PAD_STICK_DEADZONE));
+        pad_xinput_stick(gp->sThumbLX, gp->sThumbLY, PAD_STICK_DEADZONE, &s_host_state[i].analog_lx, &s_host_state[i].analog_ly);
+        s_host_state[i].analog_ly = (u8)(256 - s_host_state[i].analog_ly);
+        pad_xinput_stick(gp->sThumbRX, gp->sThumbRY, PAD_STICK_DEADZONE, &s_host_state[i].analog_rx, &s_host_state[i].analog_ry);
+        s_host_state[i].analog_ry = (u8)(256 - s_host_state[i].analog_ry);
 
         /* Triggers */
         s_host_state[i].trigger_l2 = gp->bLeftTrigger;
@@ -355,12 +495,20 @@ static void pad_poll_xinput(void)
 
 static void pad_init_backend(void)
 {
-    /* XInput needs no explicit init */
+    /* XInput needs no explicit init; the sampler thread (pad_tap_segurar) starts here */
+    if (pad_amostra_ligada() && !InterlockedExchange(&s_amostra_viva, 1)) {
+        s_amostra_thread = CreateThread(NULL, 0, pad_amostra_func, NULL, 0, NULL);
+        printf("[cellPad] amostragem do controle a cada ~4 ms: %s\n", s_amostra_thread ? "ligada" : "falhou");
+    }
 }
 
 static void pad_shutdown_backend(void)
 {
-    /* XInput needs no explicit shutdown */
+    if (InterlockedExchange(&s_amostra_viva, 0) && s_amostra_thread) {
+        WaitForSingleObject(s_amostra_thread, 1000);
+        CloseHandle(s_amostra_thread);
+        s_amostra_thread = NULL;
+    }
 }
 
 #endif /* PAD_BACKEND_XINPUT */
@@ -544,6 +692,9 @@ static void pad_poll_backend(void)
 #ifdef _WIN32
     if (pad_teclado_modo()) pad_poll_teclado_mouse();
     else if (!s_host_state[0].connected) pad_poll_keyboard();
+#endif
+#if PAD_BACKEND_XINPUT
+    pad_tap_segurar(&s_host_state[0]);
 #endif
 }
 
