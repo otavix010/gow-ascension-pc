@@ -2033,6 +2033,12 @@ static D3D12_SAMPLER_DESC decode_sampler(const rsx_dsp_texture* t)
     sd.MinLOD = (float)min_lod_fx / 256.0f;
     sd.MaxLOD = mip_present ? (float)max_lod_fx / 256.0f : 0.0f;
     if (sd.MaxLOD < sd.MinLOD) sd.MaxLOD = sd.MinLOD;
+    /* GOWA_TEX_MIP0=1 (26/10, diagnosis of the mottled skin of reports 22/24/26): only the base level is sampled.
+     * If a lower level were decoded wrong, which level a draw picks by distance (and by GPU) would decide where
+     * the wrong colours show; with this on they go away. Sharper and with shimmer far away: a test, not a fix. */
+    { static int mip0 = -1;
+      if (mip0 < 0) { const char* e = getenv("GOWA_TEX_MIP0"); mip0 = e && *e == '1'; }
+      if (mip0) sd.MinLOD = sd.MaxLOD = 0.0f; }
     sd.MaxAnisotropy = 1;
     /* GOWA: TEXTURE_BORDER_COLOR (ARGB8) for BORDER addressing -- the
      * descriptor was left at transparent black, which a depth-compare unit
