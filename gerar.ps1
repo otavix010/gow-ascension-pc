@@ -401,6 +401,70 @@ function Copiar-Disco([string]$de, [string]$para) {
     $saida = SemExcecao { robocopy $de $para /E /R:1 /W:1 /NP /NFL /NDL /NJH /NJS 2>&1 }
     if ($LASTEXITCODE -ge 8) { throw "o robocopy falhou (código $LASTEXITCODE): $(($saida | Out-String).Trim())" }
 }
+# Os campos de texto (fmt 0x204) de um PARAM.SFO; vazio se o arquivo não for um SFO.
+function Ler-Sfo([string]$arq) {
+    $r = @{}
+    try {
+        $b = [IO.File]::ReadAllBytes($arq)
+        if ($b.Length -lt 20 -or [Text.Encoding]::ASCII.GetString($b, 1, 3) -ne 'PSF') { return $r }
+        $kt = [BitConverter]::ToUInt32($b, 8); $dt = [BitConverter]::ToUInt32($b, 12); $n = [BitConverter]::ToUInt32($b, 16)
+        for ($e = 0; $e -lt $n; $e++) {
+            $p = 20 + 16 * $e
+            $ko = $kt + [BitConverter]::ToUInt16($b, $p); $fmt = [BitConverter]::ToUInt16($b, $p + 2)
+            $ln = [BitConverter]::ToUInt32($b, $p + 4); $do = $dt + [BitConverter]::ToUInt32($b, $p + 12)
+            $fim = [Array]::IndexOf($b, [byte]0, [int]$ko)
+            if ($fmt -eq 0x204 -and $fim -gt $ko) {
+                $r[[Text.Encoding]::ASCII.GetString($b, $ko, $fim - $ko)] = [Text.Encoding]::UTF8.GetString($b, $do, $ln).TrimEnd([char]0)
+            }
+        }
+    } catch { }
+    $r
+}
+# Por que a pasta não é o update 1.04 do BCUS98232 (vazio se for): o PARAM.SFO dela diz o jogo (TITLE_ID), se é update
+# (CATEGORY GD; o disco é DG) e a versão (APP_VER).
+function Motivo-Update([string]$pasta) {
+    $sfo = Join-Path $pasta 'PARAM.SFO'
+    if (-not (Test-Path -LiteralPath $sfo -PathType Leaf)) {
+        if (Test-Path -LiteralPath (Join-Path $pasta 'PS3_GAME') -PathType Container) { return 'é a pasta do disco, não a do update' }
+        return 'a pasta não tem o update (PARAM.SFO e USRDIR\GOWA.SELF)'
+    }
+    $s = Ler-Sfo $sfo
+    if ($s['TITLE_ID'] -ne 'BCUS98232') { return "é de outro jogo ($($s['TITLE_ID']))" }
+    if ($s['CATEGORY'] -ne 'GD') { return 'é o disco, não o update' }
+    if ($s['APP_VER'] -ne '01.04') { return "é a versão $($s['APP_VER']); o port precisa da 01.04" }
+    if (-not (Test-Path -LiteralPath (Join-Path $pasta 'USRDIR\GOWA.SELF') -PathType Leaf)) { return 'falta o USRDIR\GOWA.SELF' }
+    ''
+}
+# O update escolhido no launcher (26/10, report 30: um jogador escolheu ali a mesma pasta do disco e a geração parou).
+# Serve o .pkg, a pasta do update instalado e as pastas em volta onde o RPCS3 o guarda (dev_hdd0\game\BCUS98232), ou
+# um arquivo de dentro dela. Devolve @{ caminho } com o .pkg ou a pasta, ou @{ motivo } quando nenhuma serve.
+function Achar-Update([string]$p) {
+    if (Test-Path -LiteralPath $p -PathType Leaf) {
+        if ($p -match '\.pkg$') { return @{ caminho = $p } }
+        $p = Split-Path -Parent $p
+    }
+    if (-not (Test-Path -LiteralPath $p -PathType Container)) { return @{ motivo = 'não existe mais' } }
+    $motivo = ''
+    foreach ($c in @($p, (Join-Path $p 'BCUS98232'), (Join-Path $p 'game\BCUS98232'), (Join-Path $p 'dev_hdd0\game\BCUS98232'),
+                     (Split-Path -Parent $p))) {
+        if (-not $c -or -not (Test-Path -LiteralPath $c -PathType Container)) { continue }
+        $m = Motivo-Update $c
+        if (-not $m) { return @{ caminho = $c } }
+        if (-not $motivo) { $motivo = $m }
+    }
+    # um .pkg do jogo solto na pasta, o do 1.04 antes (a versão é conferida depois de extraído)
+    $pkg = Get-ChildItem -LiteralPath $p -Filter '*.pkg' -File -ErrorAction SilentlyContinue |
+           Where-Object { $_.Name -match 'BCUS98232' } | Sort-Object { $_.Name -notmatch '0104|1\.04' } | Select-Object -First 1
+    if ($pkg) { return @{ caminho = $pkg.FullName } }
+    @{ motivo = $motivo }
+}
+function Extrair-Pkg([string]$pkg) {
+    $tmp = Join-Path $R 'out\update_pkg'
+    Exec $LOG "python `"$R\ps3recomp\tools\pkg_extract.py`" `"$pkg`" `"$tmp`""
+    $sfo = Get-ChildItem $tmp -Recurse -Filter PARAM.SFO | Select-Object -First 1
+    if (-not $sfo) { throw "o PKG não trouxe PARAM.SFO ($tmp)" }
+    $sfo.DirectoryName
+}
 if ($Disco -and (Test-Path (Join-Path $OUT '2_jogo.ok'))) {
     $pg = Join-Path (Join-Path $R 'vfs') 'PS3_GAME'
     if (-not (Test-Path -LiteralPath (Join-Path $pg 'USRDIR') -PathType Container)) {
@@ -433,6 +497,23 @@ Etapa '2_jogo' {
     }
     Ligar-Disco $pg $real
 
+    # o update escolhido (ver Achar-Update); se não for o 1.04, o gerador baixa o oficial, como no Automático
+    $upd = ''
+    if ($Update -ne 'auto') {
+        $u = Achar-Update $Update
+        if ($u.caminho -and $u.caminho -match '\.pkg$') {
+            $tmp = Extrair-Pkg $u.caminho
+            $m = Motivo-Update $tmp
+            $u = if ($m) { @{ motivo = "o .pkg $m" } } else { @{ caminho = $tmp } }
+        }
+        if ($u.caminho) {
+            $upd = $u.caminho
+            Msg "update: $upd"
+        } else {
+            Msg "o update escolhido ($Update) não serve: $($u.motivo). Baixando o update 1.04 oficial no lugar dele (no launcher, deixe o update em Automático para não ver este aviso)"
+            $Update = 'auto'
+        }
+    }
     if ($Update -eq 'auto') {
         $Update = Join-Path $R 'dl\BCUS98232_update_1.04.pkg'
         if (-not (Test-Path -LiteralPath $Update) -or (Get-FileHash -LiteralPath $Update -Algorithm SHA1).Hash.ToLower() -ne $UPDATE_SHA1) {
@@ -443,14 +524,7 @@ Etapa '2_jogo' {
             Remove-Item -LiteralPath $Update -Force
             throw 'o update baixado não confere (SHA-1); rode de novo'
         }
-    }
-    $upd = $Update
-    if ((Test-Path -LiteralPath $Update -PathType Leaf) -and $Update -match '\.pkg$') {
-        $tmp = Join-Path $R 'out\update_pkg'
-        Exec $LOG "python `"$R\ps3recomp\tools\pkg_extract.py`" `"$Update`" `"$tmp`""
-        $sfo = Get-ChildItem $tmp -Recurse -Filter PARAM.SFO | Select-Object -First 1
-        if (-not $sfo) { throw "o PKG não trouxe PARAM.SFO ($tmp)" }
-        $upd = $sfo.DirectoryName
+        $upd = Extrair-Pkg $Update
     }
     if (-not (Test-Path (Join-Path $upd 'USRDIR\GOWA.SELF'))) { throw "não achei USRDIR\GOWA.SELF no update ($upd)" }
     $dst = Join-Path $vfs 'game\BCUS98232'
