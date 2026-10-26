@@ -1189,7 +1189,15 @@ extern "C" void gowa_ppu_espera(void)
     const unsigned long long agora = __rdtsc();
     if (agora - t_ult > 200000ull) t_n = 0;   /* mais de ~50 us sem voltar aqui: outra espera */
     t_ult = agora;
-    if (++t_n >= 256) { t_n = 0; SwitchToThread(); return; }
+    if (++t_n >= 256) {
+        t_n = 0;
+        /* GOWA (26/10): modo 3 = dorme 1 ms em vez de ceder a fatia. Com mais threads
+         * ocupadas que CPUs (notebook 4/8), o SwitchToThread só cede a uma thread pronta na
+         * MESMA CPU, e a principal segue girando (~80% de uma CPU) enquanto as SPUs esperam
+         * CPU. Os jobs que ela espera levam milissegundos lá. GOWA_PRIO_AB 'y' alterna. */
+        if (g_gowa_ppu_pause == 3) Sleep(1); else SwitchToThread();
+        return;
+    }
     _mm_pause();
 }
 extern "C" void gowa_texstream_wait(void)

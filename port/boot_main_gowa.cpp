@@ -1610,9 +1610,67 @@ static DWORD WINAPI gowa_vblank_thread(LPVOID)
     return 0;
 }
 
+/* GOWA_PRIO_AB=<s>[:<modo>] (26/10): A/B de prioridade de threads DENTRO de uma rodada. A cada
+ * <s> segundos (padrão 25) alterna entre a fase 0 (todas normais) e a fase 1 (<modo>, padrão
+ * "mr"): m = principal do jogo ABOVE_NORMAL, r = RSX-present ABOVE_NORMAL, e = SPU0-3 (EDGE)
+ * ABOVE_NORMAL, s = todas as SPUs BELOW_NORMAL, u = usleep curto (< 200 us) dorme num timer em vez
+ * de girar (GOWA_USLEEP_SPIN_MAX=0), y = esperas ativas da principal dormem 1 ms a cada 256 voltas
+ * (GOWA_PPU_PAUSE=3) em vez de SwitchToThread. Marca "[prio-ab] fase=N" no log; as amostras
+ * [fps] de cada fase saem pareadas no tempo (deriva térmica e carga de fundo dos dois lados).
+ * No notebook (4 núcleos/8 lógicas) a variação ENTRE rodadas (±5%) esconde ganhos pequenos. */
+static DWORD g_gowa_main_tid, g_gowa_rsx_tid;
+extern "C" long g_gowa_usleep_spin_max;   /* sys_timer.c */
+extern "C" int g_gowa_ppu_pause;          /* gowa_offline.cpp */
+static void gowa_prio_aplica(int fase, const char* modo)
+{
+    if (strchr(modo, 'u')) g_gowa_usleep_spin_max = fase ? 0 : 200;
+    if (strchr(modo, 'y')) g_gowa_ppu_pause = fase ? 3 : 2;
+    HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0);
+    if (snap == INVALID_HANDLE_VALUE) return;
+    const DWORD pid = GetCurrentProcessId();
+    THREADENTRY32 te; te.dwSize = sizeof te;
+    for (BOOL ok = Thread32First(snap, &te); ok; ok = Thread32Next(snap, &te)) {
+        if (te.th32OwnerProcessID != pid) continue;
+        HANDLE h = OpenThread(THREAD_SET_INFORMATION | THREAD_QUERY_LIMITED_INFORMATION, FALSE, te.th32ThreadID);
+        if (!h) continue;
+        WCHAR nm[16] = L"";
+        { PWSTR w = NULL; if (SUCCEEDED(GetThreadDescription(h, &w)) && w) { wcsncpy(nm, w, 15); LocalFree(w); } }
+        const int spu = nm[0] == L'S' && nm[1] == L'P' && nm[2] == L'U' && nm[3] >= L'0' && nm[3] <= L'9' && !nm[4];
+        const int papel = te.th32ThreadID == g_gowa_main_tid ? 'm' : te.th32ThreadID == g_gowa_rsx_tid ? 'r' : spu ? 's' : 0;
+        if (papel) {
+            int pr = THREAD_PRIORITY_NORMAL;
+            if (fase) {
+                if (papel == 'm' && strchr(modo, 'm')) pr = THREAD_PRIORITY_ABOVE_NORMAL;
+                if (papel == 'r' && strchr(modo, 'r')) pr = THREAD_PRIORITY_ABOVE_NORMAL;
+                if (papel == 's' && strchr(modo, 's')) pr = THREAD_PRIORITY_BELOW_NORMAL;
+                if (papel == 's' && strchr(modo, 'e') && nm[3] <= L'3') pr = THREAD_PRIORITY_ABOVE_NORMAL;
+            }
+            SetThreadPriority(h, pr);
+        }
+        CloseHandle(h);
+    }
+    CloseHandle(snap);
+}
+static DWORD WINAPI gowa_prio_ab_thread(LPVOID)
+{
+    const char* e = getenv("GOWA_PRIO_AB");
+    const int seg = atoi(e) > 0 ? atoi(e) : 25;
+    const char* c = strchr(e, ':');
+    char modo[16] = "mr";
+    if (c && c[1]) { strncpy(modo, c + 1, sizeof modo - 1); modo[sizeof modo - 1] = 0; }
+    Sleep(20000);
+    for (int fase = 0; ; fase ^= 1) {
+        gowa_prio_aplica(fase, modo);
+        fprintf(stderr, "[prio-ab] fase=%d modo=%s t=%llu ms\n", fase, modo, (unsigned long long)GetTickCount64());
+        Sleep((DWORD)seg * 1000u);
+    }
+    return 0;
+}
+
 static DWORD WINAPI vblank_ticker(LPVOID)
 {
     SetThreadDescription(GetCurrentThread(), L"RSX-present");   /* GOWA: named for [pin]/[hostprof] */
+    g_gowa_rsx_tid = GetCurrentThreadId();
     /* GOWA_RSX_PRIO=<n> (21/10, experiment): SetThreadPriority for this thread (1 = ABOVE_NORMAL,
      * 2 = HIGHEST) -- the RSX thread is ~98% busy and the frame waits on it in the slow runs. */
     { const char* e = getenv("GOWA_RSX_PRIO"); if (e && atoi(e)) SetThreadPriority(GetCurrentThread(), atoi(e)); }
@@ -2882,6 +2940,8 @@ int main(int argc, char** argv)
     printf("\n[boot] dispatching entry OPD 0x%08X (stack top 0x%08X)\n\n", entry, stack_top);
 #ifdef _WIN32
     fprintf(stderr, "[boot] MAIN guest thread tid=%lu\n", (unsigned long)GetCurrentThreadId());
+    g_gowa_main_tid = GetCurrentThreadId();
+    if (getenv("GOWA_PRIO_AB")) CreateThread(NULL, 0, gowa_prio_ab_thread, NULL, 0, NULL);
 #endif
     int rc = ppu_run(entry, stack_top);
     printf("\n[boot] ppu_run returned %d (entry function unwound)\n", rc);

@@ -436,9 +436,16 @@ if(MSVC AND CMAKE_CXX_COMPILER_ID MATCHES "Clang" AND GOWA_HOST_FMA)
     # code, plus /GS-. x86-64-v3 brings MOVBE, so a big-endian guest load is
     # one instruction. Changing it rebuilds every lifted TU (~2 min).
     set(GOWA_PPU_MARCH "" CACHE STRING "-march for the lifted PPU code (empty: none)")
+    # GOWA_PGO_PPU (26/10, experiment): GOWA_PGO also on the lifted PPU / LLE code (the game's
+    # main thread). Off by default: a profile made without it has no PPU data.
+    option(GOWA_PGO_PPU "Apply GOWA_PGO to the lifted PPU code too" OFF)
+    set(GOWA_PPU_PGO_OPTS "")
+    if(GOWA_PGO_PPU AND GOWA_PGO_FLAGS)
+        set(GOWA_PPU_PGO_OPTS ";${GOWA_PGO_FLAGS}")
+    endif()
     if(GOWA_PPU_MARCH)
         set_source_files_properties(${RECOMP_SOURCES} ${LLE_SOURCES} PROPERTIES
-            COMPILE_OPTIONS "/w;/bigobj;-mfma;/clang:-ffp-contract=off;/GS-;/clang:-march=${GOWA_PPU_MARCH}")
+            COMPILE_OPTIONS "/w;/bigobj;-mfma;/clang:-ffp-contract=off;/GS-;/clang:-march=${GOWA_PPU_MARCH}${GOWA_PPU_PGO_OPTS}")
     else()
     set_source_files_properties(${RECOMP_SOURCES} ${LLE_SOURCES} PROPERTIES
         COMPILE_OPTIONS "/w;/bigobj;-mfma;/clang:-ffp-contract=off")
