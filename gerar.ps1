@@ -726,29 +726,44 @@ Etapa '3_firmware' {
     $fw = Join-Path $R 'fw'; $lle = Join-Path $fw 'lle'
     New-Item -ItemType Directory -Force $lle | Out-Null
     $ch = $ChavesRpcs3; if (-not $ch) { $ch = Join-Path $R 'dl\rpcs3_chaves' }
-    if ($Firmware -eq 'auto') {
-        $Firmware = Join-Path $R 'dl\PS3UPDAT.PUP'
-        if (-not (Test-Path -LiteralPath $Firmware)) {
+    function Pup-Oficial {
+        $pup = Join-Path $R 'dl\PS3UPDAT.PUP'
+        if (-not (Test-Path -LiteralPath $pup)) {
             $lista = Join-Path $R 'dl\ps3-updatelist.txt'
-            Baixar $PUP_LISTA $lista
+            Baixar $PUP_LISTA $lista | Out-Null
             $url = [regex]::Match((Get-Content $lista -Raw), 'CDN=([^;\s]+/PS3UPDAT\.PUP)').Groups[1].Value
             if (-not $url) { throw "a lista de atualização do PS3 não trouxe o PS3UPDAT.PUP ($PUP_LISTA)" }
             Msg "baixando o firmware oficial do PS3 (PS3UPDAT.PUP, ~200 MB) de $url"
-            Baixar $url $Firmware
+            Baixar $url $pup | Out-Null
         }
+        $pup
     }
-    $sprx = $Firmware
-    if (Test-Path -LiteralPath $Firmware -PathType Container) {
-        $sprx = Get-ChildItem -LiteralPath $Firmware -Recurse -Filter libsre.sprx -ErrorAction SilentlyContinue | Select-Object -First 1 -ExpandProperty FullName
-        if (-not $sprx) { throw "não achei libsre.sprx em $Firmware (instale o firmware no RPCS3: File > Install Firmware)" }
-    } elseif ($Firmware -match '\.pup$') {
-        # o arquivo do site da PlayStation: o libsre.sprx sai dos pacotes do dev_flash de dentro dele
-        $sprx = Join-Path $fw 'libsre.sprx'
-        Exec $LOG "python `"$R\scripts\gpl\pup_libsre.py`" `"$Firmware`" `"$sprx`" --vault `"$ch`" --baixar"
+    # o libsre.prx a partir de uma pasta com o firmware instalado (RPCS3), do PS3UPDAT.PUP ou de um libsre.sprx
+    function Libsre-De($origem) {
+        $sprx = $origem
+        if (Test-Path -LiteralPath $origem -PathType Container) {
+            $sprx = Get-ChildItem -LiteralPath $origem -Recurse -Filter libsre.sprx -ErrorAction SilentlyContinue | Select-Object -First 1 -ExpandProperty FullName
+            if (-not $sprx) { throw "não achei libsre.sprx em $origem" }
+        } elseif ($origem -match '\.pup$') {
+            # o arquivo do site da PlayStation: o libsre.sprx sai dos pacotes do dev_flash de dentro dele
+            $sprx = Join-Path $fw 'libsre.sprx'
+            Exec $LOG "python `"$R\scripts\gpl\pup_libsre.py`" `"$origem`" `"$sprx`" --vault `"$ch`" --baixar"
+        } elseif (-not (Test-Path -LiteralPath $origem -PathType Leaf)) {
+            throw "$origem não existe"
+        }
+        Exec $LOG "python `"$R\scripts\gpl\unself.py`" `"$sprx`" `"$fw\libsre.prx`" --vault `"$ch`" --baixar"
+        $h = (Get-FileHash "$fw\libsre.prx" -Algorithm SHA256).Hash.ToLower()
+        if ($h -ne $SHA_LIBSRE) { throw "libsre.prx diferente do esperado (sha256 $h)" }
     }
-    Exec $LOG "python `"$R\scripts\gpl\unself.py`" `"$sprx`" `"$fw\libsre.prx`" --vault `"$ch`" --baixar"
-    $h = (Get-FileHash "$fw\libsre.prx" -Algorithm SHA256).Hash.ToLower()
-    if ($h -ne $SHA_LIBSRE) { throw "libsre.prx diferente do esperado (sha256 $h). Rode sem -Firmware para o gerador baixar o firmware oficial." }
+    # reports 111, 113, 124 e 127 (27/10): no campo "Firmware" do launcher escolheram a pasta do jogo, a PKGDIR, um
+    # PS3GAME que não existe ou um libsre de outra versão. O que foi escolhido e não serve vira só um aviso, e o
+    # gerador usa o firmware oficial, que é o padrão.
+    $feito = $false
+    if ($Firmware -ne 'auto') {
+        try { Libsre-De $Firmware; $feito = $true }
+        catch { Msg "o firmware escolhido não serviu ($(($_.Exception.Message -split "`n")[0])); usando o firmware oficial do PS3" }
+    }
+    if (-not $feito) { Libsre-De (Pup-Oficial) }
     Push-Location (Join-Path $R 'ps3recomp')
     try {
         Exec $LOG "python tools\lift_prx.py `"$fw\libsre.prx`" --base 0x30000000 --output `"$lle`""
