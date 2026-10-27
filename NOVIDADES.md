@@ -4,6 +4,12 @@ O Otavix Launcher mostra este arquivo na página "Novidades" do jogo. Cada atual
 "## <data> · <versão>" e o texto em português (### pt), inglês (### en) e, quando houver, espanhol (### es).
 As mais novas ficam em cima.
 
+## 27/10/2026 · f4d25ff
+### pt
+- **O jogo abre e fecha:** quando falta um arquivo do jogo na sua cópia (extração ou cópia interrompida, falta de espaço, antivírus, ou um pendrive/HD em FAT32, que corta arquivos acima de 4 GB), o jogo abria e fechava sem dizer nada. Agora o gerador confere a cópia inteira e diz quais arquivos faltam ou vieram cortados. Se o seu jogo abre e fecha, gere de novo para ver o aviso.
+### en
+- **The game opens and closes:** when a file of the game is missing from your copy (an interrupted unpack or copy, no free space, the antivirus, or a FAT32 drive, which cuts files over 4 GB), the game opened and closed without a word. Now the generator checks the whole copy and says which files are missing or cut short. If your game opens and closes, make it again to see the message.
+
 ## 26/10/2026 · 2f0ff9b
 ### pt
 - **Download do FFmpeg:** quando o FFmpeg chegava incompleto, a geração parava com "End of Central Directory record could not be found". Agora o gerador baixa de novo sozinho e, se falhar outra vez, avisa para conferir a internet e o antivírus.
