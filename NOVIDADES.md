@@ -4,6 +4,12 @@ O Otavix Launcher mostra este arquivo na página "Novidades" do jogo. Cada atual
 "## <data> · <versão>" e o texto em português (### pt), inglês (### en) e, quando houver, espanhol (### es).
 As mais novas ficam em cima.
 
+## 26/10/2026 · 2f0ff9b
+### pt
+- **Download do FFmpeg:** quando o FFmpeg chegava incompleto, a geração parava com "End of Central Directory record could not be found". Agora o gerador baixa de novo sozinho e, se falhar outra vez, avisa para conferir a internet e o antivírus.
+### en
+- **FFmpeg download:** when FFmpeg arrived incomplete, the generation stopped with "End of Central Directory record could not be found". Now the generator downloads it again by itself and, if it fails once more, says to check the internet and the antivirus.
+
 ## 26/10/2026 · 9d6936c
 ### pt
 - **Ícones do teclado:** jogando no teclado e mouse, o jogo agora mostra as teclas na tela (Espaço, E, Q, F, setas, botões do mouse…) no lugar dos botões do controle do PS3. Ao voltar para o controle, os ícones do PS3 voltam sozinhos.
