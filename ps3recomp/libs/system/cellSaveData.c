@@ -659,6 +659,33 @@ static u32 enumerate_save_files(const char* save_path,
 }
 
 /* Execute file callback: read/write/delete files in the save directory */
+/* GOWA (27/10): God of War: Ascension writes the system language into SYSDATA/SAVEDATA
+ * (byte 0x1C text, 0x1D speech) the first time and never asks the system again, so the
+ * launcher's language option would only reach new saves. As the file is read, the language
+ * the system reports now replaces the saved one, when both are languages of the Americas
+ * disc (1 en, 2 fr, 17 pt-br, 21 es-la); the game writes it back on its next save. */
+s32 ps3_idioma_sistema(void);   /* cellSysutil.c */
+static void gowa_idioma_no_save(const char* save_path, const char* name, u8* buf, size_t got)
+{
+    static const char* const dirs[] = { "BCUS98232-SYSDATA", "NPUA70216-SYSDATA" };
+    const size_t n = strlen(save_path);
+    int dir = 0;
+    for (size_t i = 0; i < sizeof dirs / sizeof dirs[0]; i++) {
+        const size_t k = strlen(dirs[i]);
+        if (n >= k && !strcmp(save_path + n - k, dirs[i])) dir = 1;
+    }
+    if (!dir || strcmp(name, "SAVEDATA") != 0 || got < 0x1E) return;
+    const s32 l = ps3_idioma_sistema();
+    const u8 v = l == 2 ? 2 : l == 3 ? 21 : l == 17 ? 17 : 1;   /* fr, es -> es-la, pt-br, else en */
+    for (int i = 0x1C; i <= 0x1D; i++) {
+        const u8 o = buf[i];
+        if (o != v && (o == 1 || o == 2 || o == 17 || o == 21)) {
+            printf("[cellSaveData] idioma do save: %u -> %u (byte 0x%X)\n", o, v, i);
+            buf[i] = v;
+        }
+    }
+}
+
 static s32 process_file_op(const char* save_path, CellSaveDataFileSet* set)
 {
     if (!set) return CELL_SAVEDATA_ERROR_PARAM;
@@ -703,6 +730,7 @@ static s32 process_file_op(const char* save_path, CellSaveDataFileSet* set)
         size_t got = fread(set->fileBuf, 1, read_size, fp);
         int failed = ferror(fp);
         if (fclose(fp) != 0) failed = 1;
+        if (!failed && set->fileOffset == 0) gowa_idioma_no_save(save_path, name, (u8*)set->fileBuf, got);
         return failed ? CELL_SAVEDATA_ERROR_ACCESS_ERROR : (s32)got;
     }
 

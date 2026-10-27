@@ -261,6 +261,58 @@ s32 cellSysutilCheckCallback(void)
  * near the guest's variable, and nothing on the way says a word.
  *
  * A u32 cannot be passed a host pointer by accident. */
+/* GOWA (27/10): the system language the game sees. PS3_IDIOMA (the launcher's language option)
+ * picks it: en, en-gb, fr, es, pt-br, pt-pt, de, it, nl, ru, ja, ko, pl, fi, sv, da, no, tr,
+ * zh-t, zh-s, or the PS3 number. Unset, the Windows display language decides, kept to the
+ * four of the Americas disc (English, French, Latin American Spanish, Brazilian Portuguese)
+ * -- a language the disc does not carry is never asked for; the rest stays English (US),
+ * which was the only answer before. */
+#ifdef _WIN32
+__declspec(dllimport) unsigned short __stdcall GetUserDefaultUILanguage(void);
+#endif
+s32 ps3_idioma_sistema(void)    /* also cellSaveData.c */
+{
+    static s32 lang = -1;
+    if (lang >= 0) return lang;
+    static const struct { const char* nome; s32 v; } tab[] = {
+        {"en", CELL_SYSUTIL_LANG_ENGLISH_US}, {"en-us", CELL_SYSUTIL_LANG_ENGLISH_US},
+        {"en-gb", CELL_SYSUTIL_LANG_ENGLISH_GB}, {"fr", CELL_SYSUTIL_LANG_FRENCH},
+        {"es", CELL_SYSUTIL_LANG_SPANISH}, {"pt-br", CELL_SYSUTIL_LANG_PORTUGUESE_BR},
+        {"pt", CELL_SYSUTIL_LANG_PORTUGUESE_BR}, {"pt-pt", CELL_SYSUTIL_LANG_PORTUGUESE_PT},
+        {"de", CELL_SYSUTIL_LANG_GERMAN}, {"it", CELL_SYSUTIL_LANG_ITALIAN},
+        {"nl", CELL_SYSUTIL_LANG_DUTCH}, {"ru", CELL_SYSUTIL_LANG_RUSSIAN},
+        {"ja", CELL_SYSUTIL_LANG_JAPANESE}, {"ko", CELL_SYSUTIL_LANG_KOREAN},
+        {"pl", CELL_SYSUTIL_LANG_POLISH}, {"fi", CELL_SYSUTIL_LANG_FINNISH},
+        {"sv", CELL_SYSUTIL_LANG_SWEDISH}, {"da", CELL_SYSUTIL_LANG_DANISH},
+        {"no", CELL_SYSUTIL_LANG_NORWEGIAN}, {"tr", CELL_SYSUTIL_LANG_TURKISH},
+        {"zh-t", CELL_SYSUTIL_LANG_CHINESE_T}, {"zh-s", CELL_SYSUTIL_LANG_CHINESE_S},
+    };
+    const char* e = getenv("PS3_IDIOMA");
+    const char* como = "padrão";
+    lang = CELL_SYSUTIL_LANG_ENGLISH_US;
+    if (e && *e && strcmp(e, "auto") != 0) {
+        char* q; long n = strtol(e, &q, 10);
+        if (q != e && !*q && n >= 0 && n <= 19) { lang = (s32)n; como = "PS3_IDIOMA"; }
+        else
+            for (size_t i = 0; i < sizeof tab / sizeof tab[0]; i++)
+                if (!_stricmp(e, tab[i].nome)) { lang = tab[i].v; como = "PS3_IDIOMA"; break; }
+    }
+#ifdef _WIN32
+    else {
+        const unsigned short id = GetUserDefaultUILanguage();
+        switch (id & 0x3FFu) {          /* PRIMARYLANGID */
+        case 0x16: lang = CELL_SYSUTIL_LANG_PORTUGUESE_BR; break;   /* Portuguese (both: the disc has pt-BR) */
+        case 0x0A: lang = CELL_SYSUTIL_LANG_SPANISH; break;
+        case 0x0C: lang = CELL_SYSUTIL_LANG_FRENCH; break;
+        default:   lang = CELL_SYSUTIL_LANG_ENGLISH_US; break;
+        }
+        como = "Windows";
+    }
+#endif
+    fprintf(stderr, "[cellSysutil] idioma do sistema: %d (%s)\n", (int)lang, como);
+    return lang;
+}
+
 s32 cellSysutilGetSystemParamInt(s32 id, u32 value_ea)
 {
     if (!value_ea)
@@ -269,7 +321,7 @@ s32 cellSysutilGetSystemParamInt(s32 id, u32 value_ea)
     s32 v = 0;
     switch (id) {
     case CELL_SYSUTIL_SYSTEMPARAM_ID_LANG:
-        v = CELL_SYSUTIL_LANG_ENGLISH_US;
+        v = ps3_idioma_sistema();
         break;
     case CELL_SYSUTIL_SYSTEMPARAM_ID_ENTER_BUTTON_ASSIGN:
         v = CELL_SYSUTIL_ENTER_BUTTON_ASSIGN_CROSS;
