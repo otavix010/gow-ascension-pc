@@ -4,6 +4,14 @@ O Otavix Launcher mostra este arquivo na página "Novidades" do jogo. Cada atual
 "## <data> · <versão>" e o texto em português (### pt), inglês (### en) e, quando houver, espanhol (### es).
 As mais novas ficam em cima.
 
+## 27/10/2026 · a75ee9a
+### pt
+- **Firmware escolhido errado:** quem escolhia no campo "Firmware" a pasta do jogo, a PKGDIR ou um arquivo de outra versão via a geração parar. Agora o gerador avisa que aquilo não serve e baixa sozinho o firmware oficial do PS3, como já fazia com o campo vazio.
+### en
+- **Wrong firmware picked:** picking the game folder, PKGDIR or a file from another version in the "Firmware" field stopped the generation. The generator now says it does not fit and downloads the official PS3 firmware by itself, as it already did with the field empty.
+### es
+- **Firmware equivocado:** elegir en el campo "Firmware" la carpeta del juego, PKGDIR o un archivo de otra versión detenía la generación. Ahora el generador avisa que eso no sirve y descarga solo el firmware oficial de PS3, como ya hacía con el campo vacío.
+
 ## 27/10/2026 · ef9c8db
 ### pt
 - **Idioma do jogo:** o port dizia ao jogo que o console estava sempre em inglês. Agora ele segue a opção "Idioma" do launcher (página Jogo): Automático usa o idioma do Windows quando o disco tem (inglês, francês, espanhol ou português do Brasil); as outras opções fixam um deles. O jogo guardava o idioma no save na primeira vez e não olhava mais; agora a escolha vale também para quem já tem save.
