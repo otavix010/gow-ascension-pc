@@ -358,6 +358,18 @@ function Achar-Disco([string]$d) {
                      'já baixa o port sozinho. Escolha aqui a sua cópia do God of War: Ascension do PS3, a pasta com ' +
                      'PS3_GAME ou o arquivo baixado dela)')
         }
+        # reports 129 e 130: a pasta escolhida é a do update (o .pkg do 1.12), não a do disco; o disco costuma estar
+        # ao lado, na pasta de cima
+        elseif (@(Get-ChildItem -LiteralPath $d -Filter *.pkg -File -ErrorAction SilentlyContinue).Count -gt 0) {
+            $pai = Split-Path $cheio
+            $vizinho = if ($pai) { Achar-PS3Game $pai } else { $null }
+            if ($vizinho) {
+                Msg "a pasta escolhida tem o update do jogo (.pkg), não o disco; usando o disco em $vizinho"
+                return $vizinho
+            }
+            $como = (' (essa pasta tem um update do jogo, o .pkg, não o disco: o update 1.04 o gerador baixa sozinho. ' +
+                     'Escolha a pasta do disco, a que tem PS3_GAME, ou o arquivo .iso/.7z/.zip/.rar dele)')
+        }
         # o que há lá dentro, para quem escolheu uma pasta com nome de .iso ou a pasta errada
         if (-not $como) {
             $dentro = @(Get-ChildItem -LiteralPath $d -Force -ErrorAction SilentlyContinue | Select-Object -First 6 | ForEach-Object Name)
@@ -495,16 +507,15 @@ function Ligar-Disco([string]$pg, [string]$real) {
         # um drive de rede ou virtual, onde a junção também não abre) e o port em C:. Copia o disco para o port.
         # Report 32: em H:, o link físico deu "erro 5: Acesso negado"; com o disco em outro drive, qualquer falha leva
         # à cópia (lá o link físico nunca daria certo).
-        $outroDrive = [IO.Path]::GetPathRoot([IO.Path]::GetFullPath($real)) -ne [IO.Path]::GetPathRoot([IO.Path]::GetFullPath($pg))
-        if ($erro -match 'erro 17:' -or $outroDrive) {
-            try {
-                Copiar-Disco $real $pg
-                if (Test-Path -LiteralPath (Join-Path $pg 'USRDIR') -PathType Container) { Msg "disco copiado de $real"; return }
-                throw 'a cópia ficou sem o USRDIR'
-            } catch {
-                $erro = "$erro; a cópia também falhou: $($_.Exception.Message)"
-                Tirar-Ligacao $pg
-            }
+        # Report 123: no mesmo drive, mas dentro do OneDrive (arquivos que podem estar só na nuvem), o link físico deu
+        # "privilégios insuficientes": qualquer falha do link leva à cópia.
+        try {
+            Copiar-Disco $real $pg
+            if (Test-Path -LiteralPath (Join-Path $pg 'USRDIR') -PathType Container) { Msg "disco copiado de $real"; return }
+            throw 'a cópia ficou sem o USRDIR'
+        } catch {
+            $erro = "$erro; a cópia também falhou: $($_.Exception.Message)"
+            Tirar-Ligacao $pg
         }
         throw ("não deu para ligar o disco em $pg ($real): a junção não abre neste PC ($(($saida | Out-String).Trim())) " +
                "e o link físico falhou: $erro. Mova a pasta do jogo para o mesmo drive do port " +
