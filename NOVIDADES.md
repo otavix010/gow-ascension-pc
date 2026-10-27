@@ -4,6 +4,12 @@ O Otavix Launcher mostra este arquivo na página "Novidades" do jogo. Cada atual
 "## <data> · <versão>" e o texto em português (### pt), inglês (### en) e, quando houver, espanhol (### es).
 As mais novas ficam em cima.
 
+## 27/10/2026 · 12574d5
+### pt
+- **"Não achei o jogo" com uma .iso:** quando o arquivo escolhido não abria (movido, renomeado, download por terminar), o gerador só dizia que não achou o jogo. Agora, se houver um único arquivo do jogo na mesma pasta, ele é usado; se não houver, o aviso diz por que o arquivo não abriu. Numa pasta sem o jogo, o aviso mostra o que há dentro dela.
+### en
+- **"Game not found" with an .iso:** when the picked file did not open (moved, renamed, an unfinished download), the generator only said it did not find the game. Now, if there is a single game file in the same folder, it is used; if not, the message says why the file did not open. For a folder without the game, the message shows what is inside it.
+
 ## 27/10/2026 · 11e8205
 ### pt
 - **Pele amarela ou personagens cinza:** em algumas placas (principalmente RTX 30xx), um valor inválido nas contas de cor pintava mãos, rostos e corpos de amarelo ou cinza. Agora esses valores são barrados antes de chegar na tela. Se acontecia com você, conte pelo "Reportar problema" se melhorou.
