@@ -4,6 +4,14 @@ O Otavix Launcher mostra este arquivo na página "Novidades" do jogo. Cada atual
 "## <data> · <versão>" e o texto em português (### pt), inglês (### en) e, quando houver, espanhol (### es).
 As mais novas ficam em cima.
 
+## 27/10/2026 · 15043d0
+### pt
+- **Geração parando no "pip install":** em PCs com outro programa que traz o próprio Python (como o Inkscape), o gerador podia usar esse Python, que não tem o pip, e a geração parava logo no começo. Agora ele escolhe sozinho um Python 3.10 ou mais novo que funcione e, se só houver um sem pip, instala o pip nele.
+### en
+- **Generation stopping at "pip install":** on PCs with another program that brings its own Python (such as Inkscape), the generator could use that Python, which has no pip, and generation stopped right at the start. It now picks a working Python 3.10 or newer by itself and, if the only one has no pip, installs pip in it.
+### es
+- **La generación se detenía en "pip install":** en PC con otro programa que trae su propio Python (como Inkscape), el generador podía usar ese Python, que no tiene pip, y la generación se detenía al principio. Ahora elige solo un Python 3.10 o más nuevo que funcione y, si el único no tiene pip, le instala el pip.
+
 ## 27/10/2026 · a5e1053
 ### pt
 - **Pele manchada em placas AMD:** nas placas Radeon, Kratos, a Fúria e outros personagens apareciam com manchas claras e escuras na pele (às vezes com cara de vidro trincado). A causa era o jeito como os dados dos modelos chegavam à placa de vídeo. Agora a pele sai limpa. Vale depois que o launcher gerar o jogo com esta versão.
