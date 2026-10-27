@@ -160,6 +160,42 @@ function Etapa([string]$nome, [scriptblock]$corpo) {
 }
 
 # ---------------------------------------------------------------------------- ferramentas
+# o "python" do PATH pode não servir: o atalho da Microsoft Store (abre a loja) ou o Python de outro programa, sem
+# pip (report 85 do launcher: o do Inkscape vinha primeiro e o "pip install" parou a geração). Escolhe um Python
+# 3.10+ com pip, o do lançador py primeiro e depois cada python do PATH, e põe a pasta dele na frente do PATH
+# desta geração; um 3.10+ sem pip recebe o pip pelo ensurepip. Nenhum: a etapa 1_ferramentas diz o que instalar.
+function Escolher-Python {
+    $cands = @()
+    $e = SemExcecao { cmd /c 'py -3 -c "import sys; print(sys.executable)" 2>nul' }
+    if ($LASTEXITCODE -eq 0 -and $e) { $cands += "$(@($e)[0])".Trim() }
+    $w = SemExcecao { cmd /c 'where python 2>nul' }
+    if ($w) { $cands += @($w | ForEach-Object { "$_".Trim() }) }
+    $semPip = $null
+    foreach ($c in ($cands | Where-Object { $_ -and $_ -notmatch '\\WindowsApps\\' } | Select-Object -Unique)) {
+        if (-not (Test-Path -LiteralPath $c)) { continue }
+        $v = SemExcecao { & $c -c "import sys; print(sys.version_info[0]*100+sys.version_info[1])" 2>$null }
+        if (-not ("$(@($v)[0])" -match '^\d+$') -or [int]"$(@($v)[0])" -lt 310) { continue }
+        $null = SemExcecao { & $c -m pip --version 2>$null }
+        if ($LASTEXITCODE -eq 0) { return $c }
+        if (-not $semPip) { $semPip = $c }
+    }
+    if ($semPip) {
+        Msg "o Python em $semPip não tem pip; instalando o pip nele (ensurepip)"
+        $null = SemExcecao { & $semPip -m ensurepip --user 2>$null }
+        $null = SemExcecao { & $semPip -m pip --version 2>$null }
+        if ($LASTEXITCODE -eq 0) { return $semPip }
+        throw ("o único Python 3.10 ou mais novo encontrado ($semPip) não tem pip, e não deu para instalar o pip nele " +
+               "(é o Python de outro programa?). Instale o Python oficial: winget install -e --id Python.Python.3.12, " +
+               "feche e abra o launcher e gere de novo.")
+    }
+    return $null
+}
+$py = Escolher-Python
+if ($py) {
+    $env:PATH = (Split-Path -Parent $py) + ';' + $env:PATH
+    Msg "Python: $py"
+}
+
 $VS = $null
 function Achar-VS {
     $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
