@@ -330,7 +330,44 @@ typedef struct {
     int negate;
     int abs;
     char swz[5];    /* e.g. "xyzw" */
+    u32 prec;       /* source precision modifier (0 = none), see fp_prec_on */
 } Src;
+
+/* GOWA (27/10, mãos amarelas / brilho estourado): the RSX precision modifiers. Each
+ * instruction carries a destination precision (OPDEST bits 22-23) and each source an input
+ * modifier (SRC1 bits 19-21 / 22-24 / 25-27 for src0/1/2): 1 = fp16, 2 = fixed12 [-2, 2],
+ * 3 = fixed9 [-1, 1], 4 = saturate [0, 1] (sources only). In fixed point a NaN cannot exist:
+ * the hardware gives 0, so a NaN born inside a lighting term (a specular on the metal of
+ * Kratos' gauntlets) dies there and the colour comes out right. Without the modifiers it
+ * reached the export, where the NaN guard zeroed that channel -- blue -> yellow. Rules as on
+ * real hardware (RPCS3 FragmentProgramDecompiler SetDst/GetSRC, hwtested): saturate before
+ * abs, the others after abs and before neg; COL0/COL1/SSA inputs and an fp16 temp read as
+ * fp16 take none; the destination clamp skips NRM/MIN/MAX/COS/SIN/RFL/FRC/LIT/LIF/LG2,
+ * an fp16 MOV of an fp16 temp, and fp16 on a 32-bit register. GOWA_FP_PREC=0 turns it off. */
+static int fp_prec_on(void)
+{
+    static int on = -1;
+    if (on < 0) { const char* e = getenv("GOWA_FP_PREC"); on = !(e && *e == '0'); }
+    return on;
+}
+static _Thread_local int s_fp_uses_prec;   /* this program used _rsx_pc/_rsx_h */
+static _Thread_local int s_fp_uses_dp3;    /* this program used _rsx_dp3 */
+static int fp_dp3_on(void)
+{
+    static int on = -1;
+    if (on < 0) { const char* e = getenv("GOWA_FP_DP3"); on = !(e && *e == '0'); }
+    return on;
+}
+static void fp_prec_wrap(char* v, u32 vsz, u32 pm)
+{
+    char t[640];
+    if (pm == 1) snprintf(t, sizeof t, "_rsx_h(%s)", v);
+    else if (pm == 2) snprintf(t, sizeof t, "_rsx_pc(%s, -2.0, 2.0)", v);
+    else if (pm == 3) snprintf(t, sizeof t, "_rsx_pc(%s, -1.0, 1.0)", v);
+    else snprintf(t, sizeof t, "_rsx_pc(%s, 0.0, 1.0)", v);
+    snprintf(v, vsz, "%s", t);
+    s_fp_uses_prec = 1;
+}
 
 static void decode_src(u32 w, int abs_bit, Src* s)
 {
@@ -414,6 +451,20 @@ static void emit_src(const Src* s, u32 input_src, const float* k, int has_k,
     char swz[160];
     snprintf(swz, sizeof(swz), "(%s).%s", base, s->swz);
 
+    u32 pm = s->prec;
+    if (s->type == FP_REG_TYPE_TEMP && s->half && pm == 1) pm = 0;
+    if (s->type == FP_REG_TYPE_INPUT && input_src >= 1 && input_src <= 3) pm = 0;
+    if (pm >= 5) pm = 0;
+    if (pm) {
+        char v[640];
+        snprintf(v, sizeof v, "%s", swz);
+        if (pm == 4) fp_prec_wrap(v, sizeof v, 4);
+        if (s->abs) { char t[640]; snprintf(t, sizeof t, "abs(%s)", v); snprintf(v, sizeof v, "%s", t); }
+        if (pm != 4) fp_prec_wrap(v, sizeof v, pm);
+        if (s->negate) snprintf(buf, bufsz, "-(%s)", v);
+        else           snprintf(buf, bufsz, "%s", v);
+        return;
+    }
     const char* pre = "";
     const char* post = "";
     if (s->abs)    { pre = "abs("; post = ")"; }
@@ -774,6 +825,7 @@ static int rsx_fp_decompile_internal(
     Out o = { out, out_size, 0, 1 };
     s_fp_uses_face = 0;
     out[0] = '\0';
+    s_fp_uses_prec = 0; s_fp_uses_dp3 = 0;
     int uses_pack = 0;   /* a pack or unpack opcode was decoded: the preamble gets its helpers */
     out_puts(&o,
         "    float4 r[48]; float4 h[48];\n"
@@ -865,6 +917,8 @@ static int rsx_fp_decompile_internal(
         decode_src(w1, w1 & FP_SRC0_ABS, &s0);
         decode_src(w2, w2 & FP_SRC1_ABS, &s1);
         decode_src(w3, 0,                &s2);
+        if (fp_prec_on()) { s0.prec = (w2 >> 19) & 7u; s1.prec = (w2 >> 22) & 7u; s2.prec = (w2 >> 25) & 7u; }
+        else s0.prec = s1.prec = s2.prec = 0;
 
         /* Inline constant: any CONST source pulls the next 16 bytes as a
          * float4 literal and advances past it. */
@@ -970,7 +1024,11 @@ static int rsx_fp_decompile_internal(
         case OP_MUL: snprintf(rhs, sizeof(rhs), "(%s) * (%s)", a, b); break;
         case OP_ADD: snprintf(rhs, sizeof(rhs), "(%s) + (%s)", a, b); break;
         case OP_MAD: snprintf(rhs, sizeof(rhs), "(%s) * (%s) + (%s)", a, b, c); break;
-        case OP_DP3: snprintf(rhs, sizeof(rhs), "dot((%s).xyz, (%s).xyz)", a, b); break;
+        case OP_DP3:   /* GOWA_FP_DP3 (padrão 1): em precisão total, x*x' + (y*y' + z*z') com fma, a ordem do
+                        * RSX (RPCS3 PR #19293: a cor do céu do GoW3/Ascension, torre de Delfos) */
+            if (fp_prec_on() && ((w0 >> 22) & 3u) == 0 && fp_dp3_on()) { s_fp_uses_dp3 = 1; snprintf(rhs, sizeof(rhs), "_rsx_dp3((%s), (%s))", a, b); }
+            else snprintf(rhs, sizeof(rhs), "dot((%s).xyz, (%s).xyz)", a, b);
+            break;
         case OP_DP4: snprintf(rhs, sizeof(rhs), "dot((%s), (%s))", a, b); break;
         case OP_MIN: snprintf(rhs, sizeof(rhs), "min((%s), (%s))", a, b); break;
         case OP_MAX: snprintf(rhs, sizeof(rhs), "max((%s), (%s))", a, b); break;
@@ -1165,6 +1223,22 @@ static int rsx_fp_decompile_internal(
             dest_mask(w0, m);
 
             const char* sat = (w0 & FP_OUT_SAT) ? " _v = saturate(_v);" : "";
+            /* destination precision (fp_prec_on): after the scale, unless _sat */
+            u32 dprec = fp_prec_on() && !(w0 & FP_OUT_SAT) ? (w0 >> 22) & 3u : 0u;
+            switch (opcode) {
+            case OP_NRM: case OP_MAX: case OP_MIN: case OP_COS: case OP_SIN: case OP_RFL:
+            case OP_FRC: case OP_LIT: case OP_LIF: case OP_LG2: dprec = 0; break;
+            case OP_MOV: if (dst_half && s0.half && s0.type == FP_REG_TYPE_TEMP) dprec = 0; break;
+            default: break;
+            }
+            if (dprec == 1 && !dst_half) dprec = 0;
+            char satp[96];
+            if (dprec) {
+                snprintf(satp, sizeof satp, "%s _v = %s;", sat,
+                         dprec == 1 ? "_rsx_h(_v)" : dprec == 2 ? "_rsx_pc(_v, -2.0, 2.0)" : "_rsx_pc(_v, -1.0, 1.0)");
+                s_fp_uses_prec = 1;
+                sat = satp;
+            }
             /* NV40 per-instruction result-scale modifier (SRC1 word bits
              * 28-30): 1/2/3 = *2/*4/*8, 5/6/7 = /2//4//8; applied to the
              * result BEFORE saturate (RPCS3 FragmentProgramDecompiler.cpp
@@ -1394,6 +1468,11 @@ static int rsx_fp_decompile_internal(
      * decompiler skipped, leaving the destination with whatever it held.
      * Only for a program that uses one, so every other program's text is
      * unchanged. */
+    if (s_fp_uses_dp3) out_puts(&p,
+        "float _rsx_dp3(float4 a, float4 b) { return mad(a.x, b.x, mad(a.y, b.y, a.z * b.z)); }\n");
+    if (s_fp_uses_prec) out_puts(&p,
+        "float4 _rsx_pc(float4 x, float lo, float hi) { return clamp(((asuint(x) & 0x7FFFFFFFu) > 0x7F800000u) ? (float4)0 : x, lo, hi); }\n"
+        "float4 _rsx_h(float4 x) { return f16tof32(f32tof16(x)); }\n");
     if (uses_pack) out_puts(&p,
         "uint   _rsx_pk4ub(float4 v) { uint4 b = (uint4)round(saturate(v) * 255.0); return b.x | (b.y << 8) | (b.z << 16) | (b.w << 24); }\n"
         "float4 _rsx_up4ub(float v) { uint u = asuint(v); return float4(u & 255u, (u >> 8) & 255u, (u >> 16) & 255u, (u >> 24) & 255u) / 255.0; }\n"
