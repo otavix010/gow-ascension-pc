@@ -4,6 +4,14 @@ O Otavix Launcher mostra este arquivo na página "Novidades" do jogo. Cada atual
 "## <data> · <versão>" e o texto em português (### pt), inglês (### en) e, quando houver, espanhol (### es).
 As mais novas ficam em cima.
 
+## 27/10/2026 · 0348189
+### pt
+- **Mãos e armas amarelas, brilho estourado:** o PS3 faz algumas contas de cor com precisão reduzida, e nelas um valor inválido vira zero na hora. O port fazia essas contas com precisão total, e o valor inválido chegava até a tela, apagando uma das cores (o que sobrava ficava amarelo) ou estourando o brilho. Agora as contas seguem a precisão do PS3. A cor do céu em algumas áreas também ficou mais fiel.
+### en
+- **Yellow hands and weapons, blown-out brightness:** the PS3 does some color math at reduced precision, where an invalid value turns into zero on the spot. The port did that math at full precision, and the invalid value reached the screen, wiping out one of the colors (what was left looked yellow) or blowing out the brightness. The math now follows the PS3's precision. The sky color in some areas is also more faithful.
+### es
+- **Manos y armas amarillas, brillo excesivo:** la PS3 hace algunas cuentas de color con precisión reducida, y en ellas un valor inválido se vuelve cero al instante. El port hacía esas cuentas con precisión total, y el valor inválido llegaba a la pantalla, borrando uno de los colores (lo que quedaba se veía amarillo) o reventando el brillo. Ahora las cuentas siguen la precisión de la PS3. El color del cielo en algunas zonas también es más fiel.
+
 ## 27/10/2026 · launcher 1.0.49
 ### pt
 - **VRR desligado por padrão de novo:** com o VRR ligado, alguns monitores de 120 Hz ou mais ficavam com a tela preta e só o som no vídeo de abertura. A opção volta a vir desligada (o jogo espera a tela); quem tem monitor com G-SYNC ou FreeSync pode ligá-la em Opções avançadas > Vídeo. Vale assim que o launcher atualizar para a 1.0.49.
