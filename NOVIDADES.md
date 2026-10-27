@@ -4,6 +4,12 @@ O Otavix Launcher mostra este arquivo na página "Novidades" do jogo. Cada atual
 "## <data> · <versão>" e o texto em português (### pt), inglês (### en) e, quando houver, espanhol (### es).
 As mais novas ficam em cima.
 
+## 27/10/2026 · 1b60ed6
+### pt
+- **VRR (G-SYNC / FreeSync):** nova opção no Vídeo, no lugar do V-sync, ligada por padrão. Cada quadro vai para a tela assim que fica pronto: num monitor com G-SYNC ou FreeSync, uma queda de fps passa suave, sem engasgo. Num monitor sem VRR a imagem pode rasgar em movimento; aí desligue, e o jogo espera a tela (vsync). Vale depois que o launcher gerar o jogo com esta versão.
+### en
+- **VRR (G-SYNC / FreeSync):** a new option under Video, in place of V-sync, on by default. Each frame goes to the screen as soon as it is ready: on a G-SYNC or FreeSync monitor, a drop in fps stays smooth, without stutter. On a monitor without VRR the picture may tear in motion; then turn it off, and the game waits for the screen (vsync). It takes effect once the launcher generates the game with this version.
+
 ## 27/10/2026 · 6f42a1f
 ### pt
 - **Controles de PlayStation:** o jogo agora reconhece direto o DualSense (PS5), o DualSense Edge e o DualShock 4 (PS4), por cabo ou Bluetooth, sem precisar de DS4Windows ou do DSX em modo Xbox. Antes, só os controles no padrão Xbox funcionavam.
