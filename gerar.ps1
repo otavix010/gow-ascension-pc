@@ -269,7 +269,18 @@ function Achar-PS3Game([string]$raiz) {
     $nome = Split-Path -Leaf $raiz.TrimEnd('\')
     if ($nome -ieq 'PS3_GAME' -and (Test-Path -LiteralPath (Join-Path $raiz 'USRDIR') -PathType Container)) { return (Split-Path $raiz.TrimEnd('\')) }
     if ($nome -ieq 'USRDIR' -and (Split-Path -Leaf (Split-Path $raiz.TrimEnd('\'))) -ieq 'PS3_GAME') { return (Split-Path (Split-Path $raiz.TrimEnd('\'))) }
-    $p = Get-ChildItem -LiteralPath $raiz -Directory -Recurse -Depth 2 -Filter PS3_GAME -ErrorAction SilentlyContinue |
+    # report 109: a pasta do RPCS3 (dev_hdd0, dev_bdvd, games...): o jogo de disco fica em games\<algo> ou em
+    # dev_hdd0\disc\<id>, fundo demais para a busca geral; o BCUS98232 primeiro
+    foreach ($sub in @('games', 'dev_hdd0\disc', 'dev_bdvd')) {
+        $base = Join-Path $raiz $sub
+        if (-not (Test-Path -LiteralPath $base -PathType Container)) { continue }
+        if (Test-Path -LiteralPath (Join-Path $base 'PS3_GAME\USRDIR') -PathType Container) { return $base }
+        $c = @(Get-ChildItem -LiteralPath $base -Directory -ErrorAction SilentlyContinue |
+               Where-Object { Test-Path -LiteralPath (Join-Path $_.FullName 'PS3_GAME\USRDIR') -PathType Container })
+        $c = @($c | Sort-Object { if ($_.Name -match 'BCUS98232|Ascension') { 0 } else { 1 } })
+        if ($c) { return $c[0].FullName }
+    }
+    $p = Get-ChildItem -LiteralPath $raiz -Directory -Recurse -Depth 3 -Filter PS3_GAME -ErrorAction SilentlyContinue |
          Where-Object { Test-Path -LiteralPath (Join-Path $_.FullName 'USRDIR') -PathType Container } | Select-Object -First 1
     if ($p) { return $p.Parent.FullName }
     return $null
@@ -338,6 +349,14 @@ function Achar-Disco([string]$d) {
         $raizPort = [IO.Path]::GetFullPath($R).TrimEnd('\')
         if ($cheio -ieq $raizPort -or $cheio -ieq (Split-Path $raizPort)) {
             $como = ' (essa é a pasta onde o launcher instala os ports, não a do jogo)'
+        }
+        # reports 99 e 101: a pasta escolhida é o código do port (o gow-ascension-pc baixado do GitHub), não o jogo
+        elseif (@(Get-ChildItem -LiteralPath $d -Recurse -Depth 1 -Force -ErrorAction SilentlyContinue |
+                  Where-Object { $_.Name -in @('gerar.ps1', 'ps3recomp', 'NOVIDADES.md') }).Count -ge 2 -or
+                (Split-Path -Leaf $cheio) -ieq 'ps3recomp') {
+            $como = (' (essa é a pasta do CÓDIGO do port, o gow-ascension-pc baixado do GitHub, não o jogo: o launcher ' +
+                     'já baixa o port sozinho. Escolha aqui a sua cópia do God of War: Ascension do PS3, a pasta com ' +
+                     'PS3_GAME ou o arquivo baixado dela)')
         }
         # o que há lá dentro, para quem escolheu uma pasta com nome de .iso ou a pasta errada
         if (-not $como) {
