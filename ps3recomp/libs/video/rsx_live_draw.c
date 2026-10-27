@@ -7349,6 +7349,16 @@ static int ld_vslots_plan(const rsx_vertex_layout_plan* layout)
                 s->stride = (esz + 3u) & ~3u;
                 s->bytes = n * s->stride;
             }
+            /* GOWA (27/10, reports 35/91: video on half the screen, stretched buttons on
+             * RX 580 / RX 6700 XT): the view ended at the last ELEMENT ((n-1)*stride +
+             * esz). Older Radeons bound a vertex fetch by whole vertices (size / stride),
+             * so the last vertex fell outside and read as zero -- a corner of a quad
+             * pulled to the origin. The view now covers n whole strides; the bytes past
+             * the last element are zero (ld_vslots_upload copies only the element).
+             * GOWA_VS_TAIL=0 goes back to the short view (A/B). */
+            static int tail = -1;
+            if (tail < 0) { const char* e = getenv("GOWA_VS_TAIL"); tail = !(e && *e == '0'); }
+            if (tail && s->stride == s->sstride) s->bytes = n * s->stride;
         } else {
             s->kind = LD_VS_CONV; s->fmt = (u16)DXGI_FORMAT_R32G32B32A32_FLOAT; s->stride = 16; s->bytes = n * 16u;
         }
@@ -7404,8 +7414,14 @@ static int ld_vslots_upload(u32 n)
             for (u32 v = 0, nv = s->bytes / s->stride; v < nv; v++)
                 ld_copy_swap(dst + (u64)v * s->stride, s->src + (u64)v * s->sstride, s->esz, s->swap);
         }
-        else if (s->kind == LD_VS_RAW)
-            ld_copy_swap(dst, s->src, s->bytes, s->swap);
+        else if (s->kind == LD_VS_RAW) {
+            /* the guest bytes end at the last element; a view of n whole strides
+             * (GOWA_VS_TAIL) is padded with zeros past it */
+            const u32 n_el = s->stride ? (s->bytes - s->esz) / s->stride + 1u : 1u;
+            const u32 copy = s->stride ? (n_el - 1u) * s->stride + s->esz : s->bytes;
+            ld_copy_swap(dst, s->src, copy, s->swap);
+            if (copy < s->bytes) memset(dst + copy, 0, s->bytes - copy);
+        }
         else if (!rsx_vertex_fetch_attr_all(&dc.fetch_plan, s->attr, dc.refs, n, dst, 16u))
             return 0;
         g_ld_vs_view[si].BufferLocation = va + off;
