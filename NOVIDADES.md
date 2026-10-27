@@ -4,6 +4,14 @@ O Otavix Launcher mostra este arquivo na página "Novidades" do jogo. Cada atual
 "## <data> · <versão>" e o texto em português (### pt), inglês (### en) e, quando houver, espanhol (### es).
 As mais novas ficam em cima.
 
+## 27/10/2026 · 127ed67
+### pt
+- **Disco na pasta do RPCS3:** quem escolhia a pasta do RPCS3 como disco recebia "não achei o jogo". Agora o gerador procura o jogo dentro dela (games e dev_hdd0\disc). E quem escolhia a pasta do código do port, baixada do GitHub, recebe um aviso claro de que ali não está o jogo.
+### en
+- **Disc in the RPCS3 folder:** picking the RPCS3 folder as the disc gave "game not found". The generator now looks for the game inside it (games and dev_hdd0\disc). Picking the port's code folder, downloaded from GitHub, now says clearly that the game is not there.
+### es
+- **Disco en la carpeta de RPCS3:** elegir la carpeta de RPCS3 como disco daba "no encontré el juego". Ahora el generador busca el juego dentro (games y dev_hdd0\disc). Y elegir la carpeta del código del port, descargada de GitHub, avisa con claridad que el juego no está ahí.
+
 ## 27/10/2026 · 8b3fefd
 ### pt
 - **Vídeos pela metade e botões esticados (placas AMD mais antigas, como a RX 580):** nessas placas, o último ponto de alguns desenhos era lido como zero, o que cortava os vídeos de abertura pela metade e esticava ícones. Corrigido.
