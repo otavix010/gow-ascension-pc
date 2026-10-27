@@ -4,6 +4,14 @@ O Otavix Launcher mostra este arquivo na página "Novidades" do jogo. Cada atual
 "## <data> · <versão>" e o texto em português (### pt), inglês (### en) e, quando houver, espanhol (### es).
 As mais novas ficam em cima.
 
+## 27/10/2026 · 8b3fefd
+### pt
+- **Vídeos pela metade e botões esticados (placas AMD mais antigas, como a RX 580):** nessas placas, o último ponto de alguns desenhos era lido como zero, o que cortava os vídeos de abertura pela metade e esticava ícones. Corrigido.
+### en
+- **Half-screen videos and stretched buttons (older AMD cards, such as the RX 580):** on these cards, the last point of some drawings was read as zero, which cut the intro videos in half and stretched icons. Fixed.
+### es
+- **Videos a media pantalla y botones estirados (tarjetas AMD más antiguas, como la RX 580):** en estas tarjetas, el último punto de algunos dibujos se leía como cero, lo que cortaba los videos de inicio por la mitad y estiraba los íconos. Corregido.
+
 ## 27/10/2026 · 0348189
 ### pt
 - **Mãos e armas amarelas, brilho estourado:** o PS3 faz algumas contas de cor com precisão reduzida, e nelas um valor inválido vira zero na hora. O port fazia essas contas com precisão total, e o valor inválido chegava até a tela, apagando uma das cores (o que sobrava ficava amarelo) ou estourando o brilho. Agora as contas seguem a precisão do PS3. A cor do céu em algumas áreas também ficou mais fiel.
