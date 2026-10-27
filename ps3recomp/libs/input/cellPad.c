@@ -450,6 +450,197 @@ static void pad_poll_teclado_mouse(void)
 }
 #endif
 
+/* GOWA (27/10): Sony controllers read straight from HID, next to XInput. XInput sees only Xbox pads (and the
+ * virtual ones of DS4Windows/DSX in Xbox mode): a DualSense, a DualSense Edge or a DualShock 4 plugged in as it is
+ * (or DSX in DualSense mode) reached nothing. A thread looks for them every 2 s (USB and Bluetooth, VID 054C) and
+ * one thread per controller reads its reports: the DualSense's USB report 0x01 and Bluetooth 0x31, the DualShock
+ * 4's 0x01 and 0x11 (and over Bluetooth, the short 0x01 both send until someone asks for the full one, laid out as
+ * the DualShock 4's). Buttons pressed between two polls are kept for the next one, and a right-stick flick that is
+ * back at the centre too. They take the host ports XInput leaves free. GOWA_PAD_SONY=0 turns it off. */
+#include <setupapi.h>
+#include <hidsdi.h>
+#pragma comment(lib, "hid.lib")
+#pragma comment(lib, "setupapi.lib")
+#define PAD_SONY_MAX       4
+#define PAD_SONY_DEADZONE  5000   /* the Sony sticks rest closer to the centre than an Xbox pad's */
+typedef struct {
+    volatile LONG vivo;     /* a reader thread owns the slot */
+    int  ds5, bt, dados;    /* DualSense layout; Bluetooth; a report arrived */
+    WCHAR caminho[512];
+    SRWLOCK lock;
+    PadHostState st;
+    u16  apertados;         /* buttons seen pressed since the last poll */
+    u8   flick_x, flick_y;  /* the right stick's farthest point since the last poll */
+} PadSony;
+static PadSony s_sony[PAD_SONY_MAX];
+static volatile LONG s_sony_vivo;
+
+static int pad_sony_ler(const u8* r, DWORD n, int ds5, int bt, PadHostState* o)
+{
+    const u8 *ax, *b;   /* LX LY RX RY; the three button bytes */
+    u8 l2, r2;
+    if (r[0] == 0x01 && ds5 && !bt && n >= 11)  { ax = r + 1; l2 = r[5];  r2 = r[6];  b = r + 8; }
+    else if (r[0] == 0x31 && ds5 && n >= 12)    { ax = r + 2; l2 = r[6];  r2 = r[7];  b = r + 9; }
+    else if (r[0] == 0x01 && n >= 10)           { ax = r + 1; b = r + 5;  l2 = r[8];  r2 = r[9]; }
+    else if (r[0] == 0x11 && n >= 12)           { ax = r + 3; b = r + 7;  l2 = r[10]; r2 = r[11]; }
+    else return 0;
+    static const u16 hat[8] = { CELL_PAD_CTRL_UP, CELL_PAD_CTRL_UP | CELL_PAD_CTRL_RIGHT, CELL_PAD_CTRL_RIGHT,
+        CELL_PAD_CTRL_DOWN | CELL_PAD_CTRL_RIGHT, CELL_PAD_CTRL_DOWN, CELL_PAD_CTRL_DOWN | CELL_PAD_CTRL_LEFT,
+        CELL_PAD_CTRL_LEFT, CELL_PAD_CTRL_UP | CELL_PAD_CTRL_LEFT };
+    u16 btns = (b[0] & 0x0F) < 8 ? hat[b[0] & 0x0F] : 0;
+    if (b[0] & 0x10) btns |= CELL_PAD_CTRL_SQUARE;
+    if (b[0] & 0x20) btns |= CELL_PAD_CTRL_CROSS;
+    if (b[0] & 0x40) btns |= CELL_PAD_CTRL_CIRCLE;
+    if (b[0] & 0x80) btns |= CELL_PAD_CTRL_TRIANGLE;
+    if (b[1] & 0x01) btns |= CELL_PAD_CTRL_L1;
+    if (b[1] & 0x02) btns |= CELL_PAD_CTRL_R1;
+    if (b[1] & 0x10) btns |= CELL_PAD_CTRL_SELECT;      /* Share / Create */
+    if (b[1] & 0x20) btns |= CELL_PAD_CTRL_START;       /* Options */
+    if (b[1] & 0x40) btns |= CELL_PAD_CTRL_L3;
+    if (b[1] & 0x80) btns |= CELL_PAD_CTRL_R3;
+    if (b[2] & 0x02) btns |= CELL_PAD_CTRL_SELECT;      /* the touchpad's click, as in RPCS3 */
+    if (l2 > PAD_TRIGGER_THRESHOLD) btns |= CELL_PAD_CTRL_L2;
+    if (r2 > PAD_TRIGGER_THRESHOLD) btns |= CELL_PAD_CTRL_R2;
+    o->connected = 1;
+    o->buttons = btns;
+    /* Sony's Y grows downward like the PS3's: into XInput's signed range (Y up) for the same deadzone and squircle,
+     * then back as the XInput path does */
+    #define SONY_EIXO(v) ((short)(((int)(v) - 128) * 258 > 32767 ? 32767 : ((int)(v) - 128) * 258 < -32768 ? -32768 : ((int)(v) - 128) * 258))
+    pad_xinput_stick(SONY_EIXO(ax[0]), SONY_EIXO(256 - ax[1]), PAD_SONY_DEADZONE, &o->analog_lx, &o->analog_ly);
+    o->analog_ly = (u8)(256 - o->analog_ly);
+    pad_xinput_stick(SONY_EIXO(ax[2]), SONY_EIXO(256 - ax[3]), PAD_SONY_DEADZONE, &o->analog_rx, &o->analog_ry);
+    o->analog_ry = (u8)(256 - o->analog_ry);
+    #undef SONY_EIXO
+    o->trigger_l2 = l2;
+    o->trigger_r2 = r2;
+    o->press_up       = (btns & CELL_PAD_CTRL_UP)       ? 255 : 0;
+    o->press_down     = (btns & CELL_PAD_CTRL_DOWN)     ? 255 : 0;
+    o->press_left     = (btns & CELL_PAD_CTRL_LEFT)     ? 255 : 0;
+    o->press_right    = (btns & CELL_PAD_CTRL_RIGHT)    ? 255 : 0;
+    o->press_triangle = (btns & CELL_PAD_CTRL_TRIANGLE) ? 255 : 0;
+    o->press_circle   = (btns & CELL_PAD_CTRL_CIRCLE)   ? 255 : 0;
+    o->press_cross    = (btns & CELL_PAD_CTRL_CROSS)    ? 255 : 0;
+    o->press_square   = (btns & CELL_PAD_CTRL_SQUARE)   ? 255 : 0;
+    o->press_l1       = (btns & CELL_PAD_CTRL_L1)       ? 255 : 0;
+    o->press_r1       = (btns & CELL_PAD_CTRL_R1)       ? 255 : 0;
+    return 1;
+}
+
+static int pad_sony_longe(u8 x, u8 y) { return abs((int)x - 128) + abs((int)y - 128); }
+
+static DWORD WINAPI pad_sony_leitor(LPVOID arg)
+{
+    PadSony* s = (PadSony*)arg;
+    HANDLE h = CreateFileW(s->caminho, GENERIC_READ | GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_EXISTING, 0, NULL);
+    if (h == INVALID_HANDLE_VALUE)
+        h = CreateFileW(s->caminho, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_EXISTING, 0, NULL);
+    if (h != INVALID_HANDLE_VALUE) {
+        u8 r[128];
+        DWORD n;
+        PadHostState st;
+        int primeiro = 1;
+        while (s_sony_vivo && ReadFile(h, r, sizeof r, &n, NULL)) {
+            memset(&st, 0, sizeof st);
+            if (!pad_sony_ler(r, n, s->ds5, s->bt, &st)) continue;
+            if (primeiro) { printf("[cellPad] controle Sony lendo (%s, %s, relatório 0x%02X)\n", s->ds5 ? "DualSense" : "DualShock 4", s->bt ? "Bluetooth" : "USB", r[0]); primeiro = 0; }
+            AcquireSRWLockExclusive(&s->lock);
+            s->st = st;
+            s->dados = 1;
+            s->apertados |= st.buttons;
+            if (pad_sony_longe(st.analog_rx, st.analog_ry) > pad_sony_longe(s->flick_x, s->flick_y)) { s->flick_x = st.analog_rx; s->flick_y = st.analog_ry; }
+            ReleaseSRWLockExclusive(&s->lock);
+        }
+        CloseHandle(h);
+    }
+    AcquireSRWLockExclusive(&s->lock);
+    s->dados = 0;
+    ReleaseSRWLockExclusive(&s->lock);
+    InterlockedExchange(&s->vivo, 0);   /* unplugged: the next search opens it again */
+    return 0;
+}
+
+static DWORD WINAPI pad_sony_busca(LPVOID arg)
+{
+    (void)arg;
+    GUID hid;
+    HidD_GetHidGuid(&hid);
+    while (s_sony_vivo) {
+        HDEVINFO lista = SetupDiGetClassDevsW(&hid, NULL, NULL, DIGCF_PRESENT | DIGCF_DEVICEINTERFACE);
+        if (lista != INVALID_HANDLE_VALUE) {
+            SP_DEVICE_INTERFACE_DATA di = { sizeof di };
+            for (DWORD i = 0; SetupDiEnumDeviceInterfaces(lista, NULL, &hid, i, &di); i++) {
+                union { SP_DEVICE_INTERFACE_DETAIL_DATA_W d; u8 b[sizeof(SP_DEVICE_INTERFACE_DETAIL_DATA_W) + 1024]; } det;
+                det.d.cbSize = sizeof det.d;
+                if (!SetupDiGetDeviceInterfaceDetailW(lista, &di, &det.d, sizeof det, NULL, NULL)) continue;
+                const WCHAR* p = det.d.DevicePath;
+                if (!wcsstr(p, L"vid_054c") && !wcsstr(p, L"VID_054C")) continue;
+                int aberto = 0;
+                for (int k = 0; k < PAD_SONY_MAX; k++) aberto |= s_sony[k].vivo && !_wcsicmp(s_sony[k].caminho, p);
+                if (aberto) continue;
+                /* who it is (attributes need no access rights) and over what: USB reports are 64 bytes */
+                HANDLE h = CreateFileW(p, 0, FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_EXISTING, 0, NULL);
+                if (h == INVALID_HANDLE_VALUE) continue;
+                HIDD_ATTRIBUTES at = { sizeof at };
+                PHIDP_PREPARSED_DATA pp = NULL;
+                HIDP_CAPS caps;
+                int ok = HidD_GetAttributes(h, &at) && HidD_GetPreparsedData(h, &pp) && HidP_GetCaps(pp, &caps) == HIDP_STATUS_SUCCESS;
+                if (pp) HidD_FreePreparsedData(pp);
+                CloseHandle(h);
+                if (!ok || caps.UsagePage != 0x01 || (caps.Usage != 0x05 && caps.Usage != 0x04)) continue;
+                const int ds5 = at.ProductID == 0x0CE6 || at.ProductID == 0x0DF2;
+                const int ds4 = at.ProductID == 0x05C4 || at.ProductID == 0x09CC || at.ProductID == 0x0BA0;
+                if (!ds5 && !ds4) continue;
+                for (int k = 0; k < PAD_SONY_MAX; k++) {
+                    if (InterlockedCompareExchange(&s_sony[k].vivo, 1, 0) != 0) continue;
+                    PadSony* s = &s_sony[k];
+                    wcsncpy(s->caminho, p, 511);
+                    s->caminho[511] = 0;
+                    s->ds5 = ds5;
+                    s->bt = caps.InputReportByteLength != 64;
+                    HANDLE t = CreateThread(NULL, 0, pad_sony_leitor, s, 0, NULL);
+                    if (t) CloseHandle(t); else InterlockedExchange(&s->vivo, 0);
+                    break;
+                }
+            }
+            SetupDiDestroyDeviceInfoList(lista);
+        }
+        Sleep(2000);
+    }
+    return 0;
+}
+
+/* the Sony controllers into the host ports XInput left free, in order */
+static void pad_poll_sony(void)
+{
+    int porta = 0;
+    for (int k = 0; k < PAD_SONY_MAX; k++) {
+        PadSony* s = &s_sony[k];
+        if (!s->vivo) continue;
+        AcquireSRWLockExclusive(&s->lock);
+        PadHostState st = s->st;
+        const int tem = s->dados;
+        const u16 extra = s->apertados;
+        const u8 fx = s->flick_x, fy = s->flick_y;
+        s->apertados = 0;
+        s->flick_x = s->flick_y = 128;
+        ReleaseSRWLockExclusive(&s->lock);
+        if (!tem) continue;
+        while (porta < PAD_MAX_HOST_PORTS && s_host_state[porta].connected) porta++;
+        if (porta >= PAD_MAX_HOST_PORTS) return;
+        /* a press, or a flick, that began and ended between two polls still reaches this one */
+        st.buttons |= extra;
+        if (pad_sony_longe(st.analog_rx, st.analog_ry) < 64 && pad_sony_longe(fx, fy) >= 64) { st.analog_rx = fx; st.analog_ry = fy; }
+        s_host_state[porta] = st;
+        if (porta == 0) {
+            s_xinput_ligado = 1;
+            if (st.buttons || st.trigger_l2 > 40 || st.trigger_r2 > 40 || pad_sony_longe(st.analog_lx, st.analog_ly) > 64 ||
+                pad_sony_longe(st.analog_rx, st.analog_ry) > 64)
+                s_ultimo_teclado = 0;
+        }
+        porta++;
+    }
+}
+
 /* Map XInput buttons to PS3 CELL_PAD_CTRL_* (also read by the sampler thread above) */
 static u16 pad_xinput_botoes(const XINPUT_GAMEPAD* gp)
 {
@@ -526,10 +717,18 @@ static void pad_poll_xinput(void)
         s_host_state[i].press_l1       = (btns & CELL_PAD_CTRL_L1)       ? 255 : 0;
         s_host_state[i].press_r1       = (btns & CELL_PAD_CTRL_R1)       ? 255 : 0;
     }
+    pad_poll_sony();
 }
 
 static void pad_init_backend(void)
 {
+    const char* sony = getenv("GOWA_PAD_SONY");
+    if (!(sony && *sony == '0') && !InterlockedExchange(&s_sony_vivo, 1)) {
+        for (int k = 0; k < PAD_SONY_MAX; k++) InitializeSRWLock(&s_sony[k].lock);
+        HANDLE t = CreateThread(NULL, 0, pad_sony_busca, NULL, 0, NULL);
+        if (t) CloseHandle(t);
+        printf("[cellPad] controles Sony (DualSense, DualShock 4) pelo HID: %s\n", t ? "procurando" : "falhou");
+    }
     /* XInput needs no explicit init; the sampler thread (pad_tap_segurar) starts here */
     if (pad_amostra_ligada() && !InterlockedExchange(&s_amostra_viva, 1)) {
         s_amostra_thread = CreateThread(NULL, 0, pad_amostra_func, NULL, 0, NULL);
