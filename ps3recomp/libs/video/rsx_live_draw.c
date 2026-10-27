@@ -11385,11 +11385,16 @@ int rsx_live_draw_init(void* hwnd, u32 width, u32 height,
     { const char* e = getenv("GOWA_SWAP_BUFFERS");
       if (e) { const int n = atoi(e); if (n >= 2 && n <= LD_SWAP_BUFFERS) g_ld_swap_count = (u32)n; } }
     scd.BufferCount = g_ld_swap_count; scd.SwapEffect = DXGI_SWAP_EFFECT_FLIP_DISCARD;
-    /* GOWA_PRESENT_SYNC=0: present without waiting for the display (tearing
-     * allowed when the system supports it) -- for high-refresh displays and
-     * to keep Present from holding the thread that also walks the FIFO. */
+    /* GOWA (27/10): VRR (G-SYNC / FreeSync), o padrão; GOWA_VRR=0 desliga (opção
+     * "VRR" do launcher). Ligado, o quadro vai para a tela sem esperar a atualização
+     * dela (tearing permitido quando o sistema deixa): num monitor com VRR a tela
+     * acompanha o jogo, e uma queda de fps não vira travadinha; o ritmo é o do
+     * GOWA_FLIP_HZ e o da geração de quadros. Também tira do Present a espera que
+     * segurava a thread que anda o FIFO. Desligado, cada quadro espera a tela (vsync).
+     * GOWA_PRESENT_SYNC=0/1, quando definido, manda (o ajuste manual de antes). */
     {   const char* e = getenv("GOWA_PRESENT_SYNC");
-        g_ld_present_sync = !(e && *e == '0');
+        const char* vrr = getenv("GOWA_VRR");
+        g_ld_present_sync = (e && *e) ? *e != '0' : (vrr && *vrr == '0');
         if (!g_ld_present_sync) {
             IDXGIFactory5* f5 = NULL; BOOL allow = FALSE;
             if (SUCCEEDED(factory->lpVtbl->QueryInterface(factory, &IID_IDXGIFactory5, (void**)&f5)) && f5) {
@@ -11398,8 +11403,8 @@ int rsx_live_draw_init(void* hwnd, u32 width, u32 height,
             }
             g_ld_present_tearing = allow ? 1 : 0;
             if (allow) scd.Flags |= DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING;
-            fprintf(stderr, "[present] sem vsync (tearing %s)\n", allow ? "permitido" : "indisponivel");
-        } }
+            fprintf(stderr, "[present] VRR: sem esperar a tela (tearing %s)\n", allow ? "permitido" : "indisponivel");
+        } else fprintf(stderr, "[present] vsync: cada quadro espera a tela\n"); }
     IDXGISwapChain1* sc1 = NULL;
     if (FAILED(factory->lpVtbl->CreateSwapChainForHwnd(factory, (IUnknown*)g.queue,
             (HWND)hwnd, &scd, NULL, NULL, &sc1))) {

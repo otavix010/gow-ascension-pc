@@ -61,6 +61,7 @@ Versão nova do port: baixe por cima e rode `gerar.cmd -RefazerDe 4` num termina
 Opções (defina antes de abrir o `jogar.cmd`; pelo launcher, elas ficam nas configurações do jogo):
 - `GOWA_FLIP_HZ`: limitador, padrão 60. Acima de 60 o jogo **acelera** (parte da lógica avança por quadro); `0` = sem limite, com teto de 240.
 - `GOWA_RES_SCALE`: resolução interna, 1 = 720p, 2 = 1440p, 3 = 4K.
+- `GOWA_VRR`: VRR (G-SYNC / FreeSync), padrão 1: cada quadro vai para a tela assim que fica pronto, sem esperar a atualização dela. Num monitor sem VRR a imagem pode rasgar em movimento; `0` volta ao vsync (cada quadro espera a tela).
 - `GOWA_OSD=1`: medidor de desempenho na tela (FPS, ms por quadro, uso e temperatura da CPU e da GPU, VRAM e RAM; a temperatura da CPU some quando o Windows só tem a zona térmica da ACPI, que em muitos desktops fica parada). Vem desligado; **F10** liga e desliga durante o jogo (`GOWA_OSD_TECLA=0` desativa a tecla).
 - **Tela cheia sem bordas:** **F11** ou **Alt+Enter** (também o botão maximizar, ou Win+Cima) cobrem o monitor mantendo 16:9, com faixas pretas em telas de outro formato; F11, Alt+Enter ou **Esc** voltam para a janela. `GOWA_TELA_CHEIA=1` já abre assim.
 - `GOWA_AUDIO_MUTE=1`: sem som.
