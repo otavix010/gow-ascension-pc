@@ -830,4 +830,49 @@ Etapa '7_jogar' {
         "cd /d `"%RAIZ%port\$bdir`"",
         'gowa.exe "%RAIZ%jogo\GOWA.elf" > "%RAIZ%out\jogo.log" 2>&1')
 }
+# ---------------------------------------------------------------------------- shaders pré-compilados
+# Os shaders do jogo traduzidos e compilados (o DXBC, que serve a qualquer placa), juntados dos PCs de teste por
+# scripts\pacote_shaders.py, vêm de um asset da release "shaders" do repositório: sem eles, cada shader novo
+# custa ~40-75 ms na primeira vez que aparece e o jogo engasga ao entrar numa área nova. Vão para o cache do jogo
+# (o GOWA_CACHE_DIR do launcher, <port>\cache) sem sobrescrever o que o PC do jogador já compilou; um shader que
+# não esteja no pacote é compilado na hora, como antes. Roda a cada geração, baixa só quando o pacote mudou, e
+# uma falha aqui não para nada.
+$SHADERS_URL = 'https://github.com/otavix010/gow-ascension-pc/releases/download/shaders'
+function Instalar-Shaders {
+    $cache = Join-Path $R 'cache\rsx_shader_cache_v2'
+    $marca = Join-Path $R 'cache\shaders_pacote.txt'
+    $dl = Join-Path $R 'dl'
+    New-Item -ItemType Directory -Force $cache, $dl | Out-Null
+    $shaFile = Join-Path $dl 'shaders.zip.sha256'
+    Baixar "$SHADERS_URL/shaders.zip.sha256" $shaFile
+    $sha = ((Get-Content -LiteralPath $shaFile -Raw) -split '\s+')[0].Trim().ToLower()
+    if ($sha -notmatch '^[0-9a-f]{64}$') { throw "o sha256 do pacote de shaders veio estranho" }
+    if ((Test-Path -LiteralPath $marca) -and ((Get-Content -LiteralPath $marca -Raw).Trim() -eq $sha)) {
+        Msg 'shaders pré-compilados: já estão no cache'
+        return
+    }
+    $zip = Join-Path $dl 'shaders.zip'
+    Msg 'baixando os shaders pré-compilados (o jogo engasga menos ao entrar em áreas novas)'
+    Baixar "$SHADERS_URL/shaders.zip" $zip
+    $got = (Get-FileHash -LiteralPath $zip -Algorithm SHA256).Hash.ToLower()
+    if ($got -ne $sha) { Remove-Item -LiteralPath $zip -Force; throw "o pacote de shaders chegou diferente do esperado" }
+    Add-Type -AssemblyName System.IO.Compression.FileSystem
+    $z = [IO.Compression.ZipFile]::OpenRead($zip)
+    $novos = 0
+    try {
+        foreach ($e in $z.Entries) {
+            # só os arquivos de shader da pasta do pacote, pelo nome: nada fora do cache
+            if ($e.FullName -notmatch '^rsx_shader_cache_v2/([VP]_[0-9a-f]{16}_[0-9a-f]{8}\.bin)$') { continue }
+            $dest = Join-Path $cache $Matches[1]
+            if (Test-Path -LiteralPath $dest) { continue }
+            [IO.Compression.ZipFileExtensions]::ExtractToFile($e, $dest)
+            $novos++
+        }
+    } finally { $z.Dispose() }
+    Remove-Item -LiteralPath $zip -Force
+    Set-Content -LiteralPath $marca -Value $sha -Encoding ASCII
+    Msg "shaders pré-compilados: $novos novos no cache"
+}
+try { Instalar-Shaders } catch { Msg "shaders pré-compilados não instalados ($($_.Exception.Message)); o jogo compila cada um na primeira vez" }
+
 Msg "pronto. Para jogar: $R\jogar.cmd  (log em out\jogo.log)"
