@@ -463,7 +463,7 @@ static void ld_state_dirty(void) { memset(&g_ldc, 0, sizeof g_ldc); }
 /* GOWA (24/10): the per-slot vertex upload of the draw being recorded (ld_vslots_plan,
  * after draw_ctx): one vertex buffer per layout slot; build_pso/get_pso read the formats */
 enum { LD_VS_DEF = 0, LD_VS_RAW = 1, LD_VS_CONV = 2 };
-typedef struct { u8 kind, swap; u16 fmt; u32 attr, stride, bytes; const u8* src; } ld_vslot;
+typedef struct { u8 kind, swap; u16 fmt; u32 attr, stride, bytes, sstride, esz; const u8* src; } ld_vslot;
 static ld_vslot g_ld_vs[RSX_DSP_NUM_VERTEX_ATTR];
 static u32 g_ld_vs_n;
 static int g_ld_vs_active;
@@ -7166,6 +7166,19 @@ static int ld_vslots_plan(const rsx_vertex_layout_plan* layout)
             s->kind = LD_VS_RAW; s->fmt = fmt; s->swap = sw; s->stride = f->stride;
             s->src = f->stable_base + (u64)(e0 - f->stable_first) * f->stride;
             s->bytes = (n - 1) * f->stride + esz;
+            s->sstride = f->stride; s->esz = esz;
+            /* GOWA (27/10): EDGE's skinned vertices (Kratos, the Fury) come with
+             * strides of 54/58 bytes, so their SNORM16x4 and UNORM8x4 elements sat
+             * off a 4-byte boundary. Radeon drivers fetch those wrong (NVIDIA does
+             * not): dark and light patches on the skin, reports 26/35/71. Such an
+             * attribute goes up alone, each element at a 4-byte aligned stride.
+             * GOWA_VS_ALIGN4=0 goes back to the guest stride (A/B). */
+            static int al4 = -1;
+            if (al4 < 0) { const char* e = getenv("GOWA_VS_ALIGN4"); al4 = !(e && *e == '0'); }
+            if (al4 && (f->stride & 3u)) {
+                s->stride = (esz + 3u) & ~3u;
+                s->bytes = n * s->stride;
+            }
         } else {
             s->kind = LD_VS_CONV; s->fmt = (u16)DXGI_FORMAT_R32G32B32A32_FLOAT; s->stride = 16; s->bytes = n * 16u;
         }
@@ -7215,6 +7228,12 @@ static int ld_vslots_upload(u32 n)
         u8* dst = dst0 + off;
         if (s->kind == LD_VS_DEF)
             memcpy(dst, dc.fetch_plan.attr[s->attr].default_value, 16);
+        else if (s->kind == LD_VS_RAW && s->stride != s->sstride) {
+            /* repacked to an aligned stride (ld_vslots_plan): element by element */
+            if (s->esz != s->stride) memset(dst, 0, s->bytes);
+            for (u32 v = 0, nv = s->bytes / s->stride; v < nv; v++)
+                ld_copy_swap(dst + (u64)v * s->stride, s->src + (u64)v * s->sstride, s->esz, s->swap);
+        }
         else if (s->kind == LD_VS_RAW)
             ld_copy_swap(dst, s->src, s->bytes, s->swap);
         else if (!rsx_vertex_fetch_attr_all(&dc.fetch_plan, s->attr, dc.refs, n, dst, 16u))
