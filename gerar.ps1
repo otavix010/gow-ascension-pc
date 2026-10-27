@@ -533,6 +533,28 @@ function Conferir-Regiao([string]$ps3game) {
            'BCUS98232, a do update 1.04: os arquivos das outras versões são diferentes e o jogo fecha ao abrir. ' +
            'No launcher, clique em "Escolher o disco de novo" e escolha uma cópia do disco americano.')
 }
+# Reports 62 e 64 (27/10): o jogo abria e fechava sozinho, sem erro. Faltava um arquivo do disco na cópia do jogador
+# (EXTRASCIN2.PSARC num, GAME.PSARC no outro: extração ou cópia interrompida), e o jogo sai quando não acha um deles.
+# A lista dados\disco_bcus98232.tsv tem o nome e o tamanho de cada arquivo que o jogo lê do disco americano (só isso,
+# nada do jogo); o que faltar ou vier com outro tamanho para a geração com a lista.
+function Conferir-Arquivos([string]$pg) {
+    $lista = Join-Path $R 'dados\disco_bcus98232.tsv'
+    if (-not (Test-Path -LiteralPath $lista)) { return }
+    $ruins = @()
+    foreach ($linha in [IO.File]::ReadAllLines($lista)) {
+        $nome, $tam = $linha -split "`t"
+        if (-not $nome) { continue }
+        $f = Get-Item -LiteralPath (Join-Path $pg ($nome -replace '/', '\')) -Force -ErrorAction SilentlyContinue
+        if (-not $f) { $ruins += "$nome (falta)" }
+        elseif ($f.Length -ne [int64]$tam) { $ruins += ("{0} ({1:N0} bytes, deviam ser {2:N0})" -f $nome, $f.Length, [int64]$tam) }
+    }
+    if ($ruins) {
+        throw ("a sua cópia do jogo está incompleta: $($ruins.Count) arquivo(s) do disco faltando ou cortados: " +
+               (($ruins | Select-Object -First 6) -join '; ') + $(if ($ruins.Count -gt 6) { '; ...' }) + ". " +
+               "Sem eles o jogo abre e fecha sozinho. Extraia ou copie o jogo de novo (confira o espaço livre e se o " +
+               'antivírus não apagou nada) e, no launcher, clique em "Escolher o disco de novo".')
+    }
+}
 function Extrair-Pkg([string]$pkg) {
     $tmp = Join-Path $R 'out\update_pkg'
     Exec $LOG "python `"$R\ps3recomp\tools\pkg_extract.py`" `"$pkg`" `"$tmp`""
@@ -561,6 +583,7 @@ if ($Disco -and (Test-Path (Join-Path $OUT '2_jogo.ok'))) {
         Ligar-Disco $pg $real
         Msg "disco ligado de novo: $real"
     }
+    Conferir-Arquivos $pg
 }
 Etapa '2_jogo' {
     $Disco = Achar-Disco $Disco
@@ -577,6 +600,7 @@ Etapa '2_jogo' {
     }
     Conferir-Regiao $real
     Ligar-Disco $pg $real
+    Conferir-Arquivos $pg
 
     # o update escolhido (ver Achar-Update); se não for o 1.04, o gerador baixa o oficial, como no Automático
     $upd = ''
