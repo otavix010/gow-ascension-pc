@@ -4,6 +4,12 @@ O Otavix Launcher mostra este arquivo na página "Novidades" do jogo. Cada atual
 "## <data> · <versão>" e o texto em português (### pt), inglês (### en) e, quando houver, espanhol (### es).
 As mais novas ficam em cima.
 
+## 27/10/2026 · 6f42a1f
+### pt
+- **Controles de PlayStation:** o jogo agora reconhece direto o DualSense (PS5), o DualSense Edge e o DualShock 4 (PS4), por cabo ou Bluetooth, sem precisar de DS4Windows ou do DSX em modo Xbox. Antes, só os controles no padrão Xbox funcionavam.
+### en
+- **PlayStation controllers:** the game now recognizes the DualSense (PS5), the DualSense Edge and the DualShock 4 (PS4) directly, by cable or Bluetooth, with no need for DS4Windows or DSX in Xbox mode. Before, only Xbox-style controllers worked.
+
 ## 27/10/2026 · 12574d5
 ### pt
 - **"Não achei o jogo" com uma .iso:** quando o arquivo escolhido não abria (movido, renomeado, download por terminar), o gerador só dizia que não achou o jogo. Agora, se houver um único arquivo do jogo na mesma pasta, ele é usado; se não houver, o aviso diz por que o arquivo não abriu. Numa pasta sem o jogo, o aviso mostra o que há dentro dela.
