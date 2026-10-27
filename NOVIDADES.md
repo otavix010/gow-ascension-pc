@@ -7,10 +7,16 @@ As mais novas ficam em cima.
 ## 27/10/2026 · a75ee9a
 ### pt
 - **Firmware escolhido errado:** quem escolhia no campo "Firmware" a pasta do jogo, a PKGDIR ou um arquivo de outra versão via a geração parar. Agora o gerador avisa que aquilo não serve e baixa sozinho o firmware oficial do PS3, como já fazia com o campo vazio.
+- **Pasta do update no lugar do disco:** quem escolhia a pasta do update 1.12 (o arquivo .pkg) como disco agora tem o disco achado sozinho na pasta ao lado, quando ele está lá; senão, o aviso explica que aquilo é o update.
+- **Jogo dentro do OneDrive:** quando o Windows não deixa ligar os arquivos do disco (como no OneDrive), o gerador copia o disco para a pasta do port em vez de parar.
 ### en
 - **Wrong firmware picked:** picking the game folder, PKGDIR or a file from another version in the "Firmware" field stopped the generation. The generator now says it does not fit and downloads the official PS3 firmware by itself, as it already did with the field empty.
+- **Update folder instead of the disc:** picking the 1.12 update folder (the .pkg file) as the disc now finds the disc by itself in the folder next to it, when it is there; otherwise the message explains that it is the update.
+- **Game inside OneDrive:** when Windows does not allow linking the disc files (as in OneDrive), the generator copies the disc into the port folder instead of stopping.
 ### es
 - **Firmware equivocado:** elegir en el campo "Firmware" la carpeta del juego, PKGDIR o un archivo de otra versión detenía la generación. Ahora el generador avisa que eso no sirve y descarga solo el firmware oficial de PS3, como ya hacía con el campo vacío.
+- **Carpeta del update en lugar del disco:** elegir la carpeta del update 1.12 (el archivo .pkg) como disco ahora encuentra el disco solo en la carpeta de al lado, cuando está ahí; si no, el aviso explica que eso es el update.
+- **Juego dentro de OneDrive:** cuando Windows no deja enlazar los archivos del disco (como en OneDrive), el generador copia el disco a la carpeta del port en vez de detenerse.
 
 ## 27/10/2026 · ef9c8db
 ### pt
