@@ -813,6 +813,19 @@ Etapa '5_spu' {
         Where-Object { $_.Name -ne 'gowanat_tspm' } | Remove-Item -Recurse -Force
     # a ferramenta é dona da pasta de saída inteira (substitui a cada execução): gera à parte e copia
     $sw = Join-Path $R 'out\spu_workloads'
+    # report 128: a pasta de uma geração anterior sem permissão de leitura (criada como outro usuário ou como
+    # administrador): apaga para refazer; se nem isso der, diz o que fazer
+    if (Test-Path -LiteralPath $sw) {
+        try { $null = Get-ChildItem -LiteralPath $sw -ErrorAction Stop }
+        catch {
+            Msg "a pasta $sw de uma geração anterior não abre ($($_.Exception.Message)); apagando para refazer"
+            SemExcecao { cmd /c "rmdir /s /q `"$sw`" 2>&1" } | Out-Null
+            if (Test-Path -LiteralPath $sw) {
+                throw ("a pasta $sw ficou sem permissão (foi criada por outro usuário ou como administrador). Apague a " +
+                       'pasta out dentro da pasta do port pelo Explorer (ele pede a permissão) e gere de novo.')
+            }
+        }
+    }
     Exec $LOG "python `"$R\ps3recomp\tools\build_spu_workloads.py`" --input `"$R\jogo\GOWA.elf`" --input `"$R\fw\libsre.prx`" --lifted `"$sw`" --out `"$sw\spu_workloads.c`" --constructor --allow-partial"
     cmd /c "robocopy `"$sw`" `"$R\port\spu`" /E /NFL /NDL /NJH /NJS /NP >> `"$LOG`" 2>&1"
     if ($LASTEXITCODE -ge 8) { throw "falhou a cópia de $sw (robocopy $LASTEXITCODE)" }
