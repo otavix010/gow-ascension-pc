@@ -4,6 +4,14 @@ O Otavix Launcher mostra este arquivo na página "Novidades" do jogo. Cada atual
 "## <data> · <versão>" e o texto em português (### pt), inglês (### en) e, quando houver, espanhol (### es).
 As mais novas ficam em cima.
 
+## 27/10/2026 · a5e1053
+### pt
+- **Pele manchada em placas AMD:** nas placas Radeon, Kratos, a Fúria e outros personagens apareciam com manchas claras e escuras na pele (às vezes com cara de vidro trincado). A causa era o jeito como os dados dos modelos chegavam à placa de vídeo. Agora a pele sai limpa. Vale depois que o launcher gerar o jogo com esta versão.
+### en
+- **Blotchy skin on AMD cards:** on Radeon cards, Kratos, the Fury and other characters showed light and dark patches on their skin (sometimes looking like cracked glass). The cause was the way the models' data reached the graphics card. The skin now comes out clean. It takes effect once the launcher generates the game with this version.
+### es
+- **Piel manchada en tarjetas AMD:** en las tarjetas Radeon, Kratos, la Furia y otros personajes aparecían con manchas claras y oscuras en la piel (a veces con aspecto de vidrio roto). La causa era la forma en que los datos de los modelos llegaban a la tarjeta gráfica. Ahora la piel sale limpia. Se aplica después de que el launcher genere el juego con esta versión.
+
 ## 27/10/2026 · 1b60ed6
 ### pt
 - **VRR (G-SYNC / FreeSync):** nova opção no Vídeo, no lugar do V-sync, ligada por padrão. Cada quadro vai para a tela assim que fica pronto: num monitor com G-SYNC ou FreeSync, uma queda de fps passa suave, sem engasgo. Num monitor sem VRR a imagem pode rasgar em movimento; aí desligue, e o jogo espera a tela (vsync). Vale depois que o launcher gerar o jogo com esta versão.
