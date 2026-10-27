@@ -188,8 +188,21 @@ Etapa '1_ferramentas' {
         New-Item -ItemType Directory -Force (Join-Path $R 'dl\ffmpeg9') | Out-Null
         $zip = Join-Path $R "dl\$FFMPEG_NOME.zip"
         [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
-        Invoke-WebRequest -Uri $FFMPEG_URL -OutFile $zip -UseBasicParsing
-        Expand-Archive -Path $zip -DestinationPath (Join-Path $R 'dl\ffmpeg9') -Force
+        # report 53 do launcher: o zip chegou cortado ("End of Central Directory record could not be found") e a
+        # geração parou; pelo Baixar (curl com novas tentativas, que acusa download incompleto) e, se o zip ainda
+        # não abrir, apaga e baixa mais uma vez
+        for ($vez = 1; ; $vez++) {
+            Baixar $FFMPEG_URL $zip
+            try { Expand-Archive -Path $zip -DestinationPath (Join-Path $R 'dl\ffmpeg9') -Force; break }
+            catch {
+                Remove-Item $zip -ErrorAction SilentlyContinue
+                if ($vez -ge 2) {
+                    throw ("o FFmpeg chegou incompleto ou corrompido duas vezes ($FFMPEG_URL). Confira a internet " +
+                           "e se o antivírus não está bloqueando o download, e gere de novo.")
+                }
+                Msg 'o FFmpeg chegou incompleto; baixando de novo'
+            }
+        }
         Remove-Item $zip
     }
 }
