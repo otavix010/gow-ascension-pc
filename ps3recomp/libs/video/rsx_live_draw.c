@@ -1459,6 +1459,11 @@ typedef enum {
  * printed with each [fps] line (GOWA_FLUSH_STATS=1) */
 static volatile long g_ld_flush_n[LD_FLUSH_REASON_COUNT];
 static volatile long long g_ld_flush_wait_qpc;
+/* GOWA_ENGASGO=<ms> (27/10, report 80): cada quadro acima disso vira uma linha [engasgo] com o
+ * que custou nele: shaders compilados (D3DCompile) e PSOs criados fora da biblioteca, com o
+ * tempo de cada, esperas da GPU (flush) e texturas novas no cache. */
+static long long g_eng_hlsl_qpc, g_eng_pso_qpc;
+static u32 g_eng_hlsl_n, g_eng_pso_n;
 
 #if defined(YZ_PERF_PROFILE)
 typedef enum {
@@ -5915,6 +5920,136 @@ static void gowa_plib_tick(void)
     free(buf);
 }
 
+/* GOWA (27/10, report 80 -- "congela ao abrir uma porta"): compilação dos shaders fora da
+ * thread de desenho. Entrar numa área nova pedia dezenas de D3DCompile seguidos no meio do
+ * quadro (~40-75 ms cada; 66 num quadro só = 5,5 s parado no i5-11400F sem cache). Agora um
+ * shader que não está no cache (memória ou disco) vai para a fila de threads de trabalho e o
+ * desenho que precisa dele é pulado (o PSO não entra no cache: o próximo desenho com a mesma
+ * chave tenta de novo) até a compilação terminar -- o jogo segue, e o objeto aparece um ou
+ * dois quadros depois. O DXBC é o mesmo da compilação na hora (mesmas opções) e vai para o
+ * cache de disco como antes. GOWA_SHADER_ASYNC=0 volta a compilar na hora;
+ * GOWA_SHADER_ASYNC=<n> = threads (padrão: 1 por 4 lógicas, de 2 a 6). */
+typedef struct ld_cjob {
+    struct ld_cjob* next;      /* fila */
+    struct ld_cjob* tnext;     /* tabela */
+    char stage; u32 len; u64 hash;   /* stage 'S' = PSO: hash da descrição */
+    char* src;
+    volatile LONG done;
+    HRESULT hr; ID3DBlob* blob; ID3DBlob* err;
+    /* PSO: a descrição copiada, o layout e os blobs seguros pelo trabalho */
+    D3D12_GRAPHICS_PIPELINE_STATE_DESC pd; D3D12_INPUT_ELEMENT_DESC il[16];
+    ID3DBlob *vs, *ps; ID3D12PipelineState* pso;
+} ld_cjob;
+static SRWLOCK s_cj_lock = SRWLOCK_INIT;
+static CONDITION_VARIABLE s_cj_cv = CONDITION_VARIABLE_INIT;
+static ld_cjob *s_cj_head, *s_cj_tail, *s_cj_tab;
+static volatile LONG s_cj_pend;
+static int s_cj_on = -1;
+static int g_ld_pso_pendente;
+static DWORD WINAPI ld_cjob_worker(LPVOID a)
+{
+    (void)a;
+    SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_BELOW_NORMAL);
+    for (;;) {
+        AcquireSRWLockExclusive(&s_cj_lock);
+        while (!s_cj_head) SleepConditionVariableSRW(&s_cj_cv, &s_cj_lock, INFINITE, 0);
+        ld_cjob* j = s_cj_head;
+        s_cj_head = j->next;
+        if (!s_cj_head) s_cj_tail = NULL;
+        ReleaseSRWLockExclusive(&s_cj_lock);
+        if (j->stage == 'S')
+            j->hr = g.dev->lpVtbl->CreateGraphicsPipelineState(g.dev, &j->pd, &IID_ID3D12PipelineState, (void**)&j->pso);
+        else
+        j->hr = D3DCompile(j->src, j->len, j->stage == 'V' ? "xvs" : "xps", NULL, NULL, "main",
+                           j->stage == 'V' ? "vs_5_0" : "ps_5_0", 0, 0, &j->blob, &j->err);
+        InterlockedExchange(&j->done, 1);
+    }
+    return 0;
+}
+static int ld_cjob_on(void)
+{
+    if (s_cj_on < 0) {
+        const char* e = getenv("GOWA_SHADER_ASYNC");
+        int n = e ? atoi(e) : -1;
+        if (e && *e == '0') n = 0;
+        if (n < 0) { SYSTEM_INFO si; GetSystemInfo(&si); n = (int)si.dwNumberOfProcessors / 4; if (n < 2) n = 2; if (n > 6) n = 6; }
+        for (int i = 0; i < n; i++) CreateThread(NULL, 0, ld_cjob_worker, NULL, 0, NULL);
+        s_cj_on = n > 0;
+        fprintf(stderr, "[shader-async] %d threads de compilação\n", n);
+    }
+    return s_cj_on;
+}
+/* O shader pronto (*hr = resultado do D3DCompile, como antes) ou NULL com *hr = E_PENDING
+ * (posto na fila agora ou ainda compilando). */
+static ID3DBlob* ld_cjob_take(char stage, const char* src, u32 len, u64 hash, HRESULT* hr, ID3DBlob** err)
+{
+    ID3DBlob* blob = NULL;
+    *hr = E_PENDING;
+    AcquireSRWLockExclusive(&s_cj_lock);
+    ld_cjob** pp = &s_cj_tab;
+    while (*pp && !((*pp)->stage == stage && (*pp)->hash == hash && (*pp)->len == len)) pp = &(*pp)->tnext;
+    ld_cjob* j = *pp;
+    if (!j) {
+        j = (ld_cjob*)calloc(1, sizeof *j);
+        if (j) j->src = (char*)malloc(len ? len : 1);
+        if (!j || !j->src) { free(j); ReleaseSRWLockExclusive(&s_cj_lock); *hr = E_OUTOFMEMORY; return NULL; }
+        memcpy(j->src, src, len);
+        j->stage = stage; j->len = len; j->hash = hash;
+        j->tnext = s_cj_tab; s_cj_tab = j;
+        if (s_cj_tail) s_cj_tail->next = j; else s_cj_head = j;
+        s_cj_tail = j;
+        InterlockedIncrement(&s_cj_pend);
+        WakeConditionVariable(&s_cj_cv);
+    } else if (j->done) {
+        *pp = j->tnext;
+        *hr = j->hr; blob = j->blob; *err = j->err;
+        free(j->src); free(j);
+        InterlockedDecrement(&s_cj_pend);
+    }
+    ReleaseSRWLockExclusive(&s_cj_lock);
+    return blob;
+}
+/* O PSO pronto (*hr do CreateGraphicsPipelineState) ou NULL com *hr = E_PENDING. Chave: a
+ * descrição sem os ponteiros, o layout e o DXBC dos dois estágios. */
+static ID3D12PipelineState* ld_pjob_take(const D3D12_GRAPHICS_PIPELINE_STATE_DESC* pd, ID3DBlob* vs, ID3DBlob* ps, HRESULT* hr)
+{
+    D3D12_GRAPHICS_PIPELINE_STATE_DESC k = *pd;
+    k.pRootSignature = NULL; k.VS.pShaderBytecode = k.PS.pShaderBytecode = NULL; k.InputLayout.pInputElementDescs = NULL;
+    u64 h = fnv1a(&k, sizeof k, 1469598103934665603ull);
+    for (u32 i = 0; i < pd->InputLayout.NumElements && i < 16; i++) {
+        D3D12_INPUT_ELEMENT_DESC e = pd->InputLayout.pInputElementDescs[i]; e.SemanticName = NULL;
+        h = fnv1a(&e, sizeof e, h);
+    }
+    h = fnv1a(pd->VS.pShaderBytecode, (u32)pd->VS.BytecodeLength, h);
+    h = fnv1a(pd->PS.pShaderBytecode, (u32)pd->PS.BytecodeLength, h);
+    ID3D12PipelineState* pso = NULL;
+    *hr = E_PENDING;
+    AcquireSRWLockExclusive(&s_cj_lock);
+    ld_cjob** pp = &s_cj_tab;
+    while (*pp && !((*pp)->stage == 'S' && (*pp)->hash == h)) pp = &(*pp)->tnext;
+    ld_cjob* j = *pp;
+    if (!j) {
+        j = (ld_cjob*)calloc(1, sizeof *j);
+        if (!j || pd->InputLayout.NumElements > 16) { free(j); ReleaseSRWLockExclusive(&s_cj_lock); *hr = E_OUTOFMEMORY; return NULL; }
+        j->stage = 'S'; j->hash = h; j->pd = *pd;
+        for (u32 i = 0; i < pd->InputLayout.NumElements; i++) j->il[i] = pd->InputLayout.pInputElementDescs[i];
+        j->pd.InputLayout.pInputElementDescs = pd->InputLayout.NumElements ? j->il : NULL;
+        vs->lpVtbl->AddRef(vs); ps->lpVtbl->AddRef(ps); j->vs = vs; j->ps = ps;
+        j->tnext = s_cj_tab; s_cj_tab = j;
+        if (s_cj_tail) s_cj_tail->next = j; else s_cj_head = j;
+        s_cj_tail = j;
+        InterlockedIncrement(&s_cj_pend);
+        WakeConditionVariable(&s_cj_cv);
+    } else if (j->done) {
+        *pp = j->tnext;
+        *hr = j->hr; pso = j->pso;
+        j->vs->lpVtbl->Release(j->vs); j->ps->lpVtbl->Release(j->ps);
+        free(j);
+        InterlockedDecrement(&s_cj_pend);
+    }
+    ReleaseSRWLockExclusive(&s_cj_lock);
+    return pso;
+}
 static ID3D12PipelineState* build_pso(
     const char* vs_hlsl, const char* ps_hlsl, const render_state_t* rs,
     const rsx_vertex_layout_plan* masked_layout, int packed_offsets)
@@ -5968,9 +6103,13 @@ static ID3D12PipelineState* build_pso(
             g_ld_profile.total.vs_compile_calls++;
             const LONGLONG compile_begin = ld_profile_qpc();
 #endif
+            { LARGE_INTEGER e0, e1; QueryPerformanceCounter(&e0);
+            if (ld_cjob_on()) vs = ld_cjob_take('V', vs_hlsl, vs_length, vs_hash, &vs_hr, &err);
+            else
             vs_hr = D3DCompile(
                 vs_hlsl, vs_length, "xvs", NULL, NULL, "main",
                 "vs_5_0", 0, 0, &vs, &err);
+              QueryPerformanceCounter(&e1); g_eng_hlsl_qpc += e1.QuadPart - e0.QuadPart; g_eng_hlsl_n++; }
 #if defined(YZ_PERF_PROFILE)
             g_ld_profile.total.vs_compile_qpc +=
                 (u64)(ld_profile_qpc() - compile_begin);
@@ -5984,6 +6123,8 @@ static ID3D12PipelineState* build_pso(
             }
         }
     }
+    const int vs_pendente = vs_hr == E_PENDING;
+    if (vs_pendente) vs_hr = S_OK;
     if (FAILED(vs_hr)) {
         if (compile_fail_logs++ < 32) {
             const char* msg = err ? (const char*)err->lpVtbl->GetBufferPointer(err)
@@ -6030,9 +6171,13 @@ static ID3D12PipelineState* build_pso(
             g_ld_profile.total.ps_compile_calls++;
             const LONGLONG compile_begin = ld_profile_qpc();
 #endif
+            { LARGE_INTEGER e0, e1; QueryPerformanceCounter(&e0);
+            if (ld_cjob_on()) ps = ld_cjob_take('P', ps_hlsl, ps_length, ps_hash, &ps_hr, &err);
+            else
             ps_hr = D3DCompile(
                 ps_hlsl, ps_length, "xps", NULL, NULL, "main",
                 "ps_5_0", 0, 0, &ps, &err);
+              QueryPerformanceCounter(&e1); g_eng_hlsl_qpc += e1.QuadPart - e0.QuadPart; g_eng_hlsl_n++; }
 #if defined(YZ_PERF_PROFILE)
             g_ld_profile.total.ps_compile_qpc +=
                 (u64)(ld_profile_qpc() - compile_begin);
@@ -6045,6 +6190,13 @@ static ID3D12PipelineState* build_pso(
                     'P', ps_hash_seen);
             }
         }
+    }
+    if (ps_hr == E_PENDING || vs_pendente) {   /* na fila: este desenho fica de fora */
+        if (ps) ps->lpVtbl->Release(ps);
+        if (vs) vs->lpVtbl->Release(vs);
+        if (err) err->lpVtbl->Release(err);
+        g_ld_pso_pendente = 1;
+        return NULL;
     }
     if (FAILED(ps_hr)) {
         if (compile_fail_logs++ < 32) {
@@ -6113,9 +6265,23 @@ static ID3D12PipelineState* build_pso(
         from_lib = SUCCEEDED(hr) && pso;
         if (!from_lib) pso = NULL;
     }
-    if (!from_lib) {
+    if (!from_lib && ld_cjob_on()) {   /* GOWA_SHADER_ASYNC: o PSO também fora da thread de desenho */
+        pso = ld_pjob_take(&pd, vs, ps, &hr);
+        if (hr == E_PENDING) {
+            vs->lpVtbl->Release(vs); ps->lpVtbl->Release(ps);
+            g_ld_pso_pendente = 1;
+            return NULL;
+        }
+        if (SUCCEEDED(hr) && pso && s_plib_state == 1 &&
+            SUCCEEDED(s_plib->lpVtbl->StorePipeline(s_plib, plib_name, pso))) {
+            s_plib_dirty = 1;
+            QueryPerformanceCounter(&s_plib_last);
+        }
+    } else if (!from_lib) {
+        LARGE_INTEGER e0, e1; QueryPerformanceCounter(&e0);
         hr = g.dev->lpVtbl->CreateGraphicsPipelineState(
             g.dev, &pd, &IID_ID3D12PipelineState, (void**)&pso);
+        QueryPerformanceCounter(&e1); g_eng_pso_qpc += e1.QuadPart - e0.QuadPart; g_eng_pso_n++;
         if (SUCCEEDED(hr) && pso && s_plib_state == 1 &&
             SUCCEEDED(s_plib->lpVtbl->StorePipeline(s_plib, plib_name, pso))) {
             s_plib_dirty = 1;
@@ -6933,6 +7099,10 @@ static ID3D12PipelineState* get_pso(
     if (vi > 0 && fi > 0)
         pso = build_pso(
             vs_hlsl, ps_hlsl, &rs, masked_layout, packed_payload);
+    if (g_ld_pso_pendente) {   /* shader na fila de compilação: não guarda o PSO nulo */
+        g_ld_pso_pendente = 0;
+        return NULL;
+    }
 
     if (g.n_psos >= s_pso_cap) {   /* full: reuse the LRU position (checked above) */
         if (!pso_evict_lru(key, pso)) { if (pso) pso->lpVtbl->Release(pso); return NULL; }
@@ -14162,6 +14332,23 @@ ld_present_done:;
     /* First 32 frames verbatim, then every 32nd: keeps the log bounded while
      * making the TRUE frame count measurable from the log. (The old hard cap
      * at 32 made "stalls at frame ~32" unfalsifiable from the .err alone.) */
+    { static double lim = -1.0; static LARGE_INTEGER qf, t_ant; static long long h0, p0, w0; static u32 hn0, pn0, tx0;
+      static long fl0[LD_FLUSH_REASON_COUNT];
+      if (lim < 0.0) { const char* e = getenv("GOWA_ENGASGO"); lim = e ? atof(e) : 0.0; QueryPerformanceFrequency(&qf); }
+      if (lim > 0.0) {
+          LARGE_INTEGER t; QueryPerformanceCounter(&t);
+          const double ms = t_ant.QuadPart ? (t.QuadPart - t_ant.QuadPart) * 1000.0 / qf.QuadPart : 0.0;
+          if (ms >= lim) {
+              long fl = 0; for (int q = 0; q < LD_FLUSH_REASON_COUNT; q++) fl += g_ld_flush_n[q] - fl0[q];
+              fprintf(stderr, "[engasgo] quadro %u: %.0f ms | hlsl %u (%.0f ms) pso %u (%.0f ms) | flush %ld, espera da GPU %.0f ms | texturas %+d (%u no cache)\n",
+                      g_ld_frames, ms, g_eng_hlsl_n - hn0, (g_eng_hlsl_qpc - h0) * 1000.0 / qf.QuadPart,
+                      g_eng_pso_n - pn0, (g_eng_pso_qpc - p0) * 1000.0 / qf.QuadPart, fl,
+                      (g_ld_flush_wait_qpc - w0) * 1000.0 / qf.QuadPart, (int)(g.n_textures - tx0), g.n_textures);
+          }
+          t_ant = t; h0 = g_eng_hlsl_qpc; p0 = g_eng_pso_qpc; w0 = g_ld_flush_wait_qpc;
+          hn0 = g_eng_hlsl_n; pn0 = g_eng_pso_n; tx0 = g.n_textures;
+          for (int q = 0; q < LD_FLUSH_REASON_COUNT; q++) fl0[q] = g_ld_flush_n[q];
+      } }
     if (g_ld_frames <= 32 || (g_ld_frames & 31) == 0)
         fprintf(stderr,
                 "[live-draw] frame %u packets[seen=%llu queued=%llu movie=%llu qfull=%llu] "
