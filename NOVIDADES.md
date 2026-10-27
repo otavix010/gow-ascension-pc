@@ -4,6 +4,16 @@ O Otavix Launcher mostra este arquivo na página "Novidades" do jogo. Cada atual
 "## <data> · <versão>" e o texto em português (### pt), inglês (### en) e, quando houver, espanhol (### es).
 As mais novas ficam em cima.
 
+## 27/10/2026 · 11e8205
+### pt
+- **Pele amarela ou personagens cinza:** em algumas placas (principalmente RTX 30xx), um valor inválido nas contas de cor pintava mãos, rostos e corpos de amarelo ou cinza. Agora esses valores são barrados antes de chegar na tela. Se acontecia com você, conte pelo "Reportar problema" se melhorou.
+- **Ponteiro do mouse:** na tela cheia, o ponteiro não fica mais parado sobre o jogo.
+- **Cache de shaders:** agora fica na pasta "cache" do port. Na primeira abertura depois desta atualização, o jogo monta o cache de novo (alguns travadinhos no começo), e depois ele fica guardado mesmo se você mover o jogo de pasta pelo launcher.
+### en
+- **Yellow skin or gray characters:** on some cards (mostly RTX 30xx), an invalid value in the color math painted hands, faces and bodies yellow or gray. Now those values are stopped before they reach the screen. If it happened to you, tell us through "Report a problem" whether it got better.
+- **Mouse pointer:** in fullscreen, the pointer no longer sits over the game.
+- **Shader cache:** it now lives in the port's "cache" folder. The first time you open the game after this update it builds the cache again (a few hitches at the start), and then it stays even if you move the game to another folder through the launcher.
+
 ## 27/10/2026 · f4d25ff
 ### pt
 - **O jogo abre e fecha:** quando falta um arquivo do jogo na sua cópia (extração ou cópia interrompida, falta de espaço, antivírus, ou um pendrive/HD em FAT32, que corta arquivos acima de 4 GB), o jogo abria e fechava sem dizer nada. Agora o gerador confere a cópia inteira e diz quais arquivos faltam ou vieram cortados. Se o seu jogo abre e fecha, gere de novo para ver o aviso.
