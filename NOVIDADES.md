@@ -4,6 +4,14 @@ O Otavix Launcher mostra este arquivo na página "Novidades" do jogo. Cada atual
 "## <data> · <versão>" e o texto em português (### pt), inglês (### en) e, quando houver, espanhol (### es).
 As mais novas ficam em cima.
 
+## 27/10/2026 · ef9c8db
+### pt
+- **Idioma do jogo:** o port dizia ao jogo que o console estava sempre em inglês. Agora ele segue a opção "Idioma" do launcher (página Jogo): Automático usa o idioma do Windows quando o disco tem (inglês, francês, espanhol ou português do Brasil); as outras opções fixam um deles. O jogo guardava o idioma no save na primeira vez e não olhava mais; agora a escolha vale também para quem já tem save.
+### en
+- **Game language:** the port always told the game the console was in English. It now follows the launcher's "Language" option (Game page): Automatic uses the Windows language when the disc has it (English, French, Spanish or Brazilian Portuguese); the other choices pick one of them. The game stored the language in the save the first time and never looked again; the choice now also applies to existing saves.
+### es
+- **Idioma del juego:** el port le decía al juego que la consola siempre estaba en inglés. Ahora sigue la opción "Idioma" del launcher (página Juego): Automático usa el idioma de Windows cuando el disco lo tiene (inglés, francés, español o portugués de Brasil); las demás opciones fijan uno de ellos. El juego guardaba el idioma en la partida la primera vez y no volvía a mirarlo; ahora la elección vale también para quien ya tiene partida guardada.
+
 ## 27/10/2026 · 127ed67
 ### pt
 - **Disco na pasta do RPCS3:** quem escolhia a pasta do RPCS3 como disco recebia "não achei o jogo". Agora o gerador procura o jogo dentro dela (games e dev_hdd0\disc). E quem escolhia a pasta do código do port, baixada do GitHub, recebe um aviso claro de que ali não está o jogo.
