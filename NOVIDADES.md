@@ -4,6 +4,14 @@ O Otavix Launcher mostra este arquivo na página "Novidades" do jogo. Cada atual
 "## <data> · <versão>" e o texto em português (### pt), inglês (### en) e, quando houver, espanhol (### es).
 As mais novas ficam em cima.
 
+## 27/10/2026 · launcher 1.0.49
+### pt
+- **VRR desligado por padrão de novo:** com o VRR ligado, alguns monitores de 120 Hz ou mais ficavam com a tela preta e só o som no vídeo de abertura. A opção volta a vir desligada (o jogo espera a tela); quem tem monitor com G-SYNC ou FreeSync pode ligá-la em Opções avançadas > Vídeo. Vale assim que o launcher atualizar para a 1.0.49.
+### en
+- **VRR off by default again:** with VRR on, some 120 Hz or faster monitors showed a black screen with only the sound in the opening video. The option is off by default again (the game waits for the screen); with a G-SYNC or FreeSync monitor you can turn it on in Advanced options > Video. It takes effect once the launcher updates to 1.0.49.
+### es
+- **VRR desactivado por defecto otra vez:** con el VRR activado, algunos monitores de 120 Hz o más mostraban la pantalla negra y solo el sonido en el vídeo de apertura. La opción vuelve a venir desactivada (el juego espera a la pantalla); con un monitor G-SYNC o FreeSync puedes activarla en Opciones avanzadas > Vídeo. Se aplica en cuanto el launcher se actualice a la 1.0.49.
+
 ## 27/10/2026 · 236282e
 ### pt
 - **Sem congelar ao entrar em áreas novas (ao abrir uma porta, por exemplo):** quando o jogo precisava de efeitos visuais (shaders) que ainda não estavam prontos, ele parava até montar todos, por até alguns segundos. Agora eles são montados em segundo plano, sem parar o jogo; algum objeto pode aparecer um instante depois, só na primeira vez.
