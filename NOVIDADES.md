@@ -4,6 +4,14 @@ O Otavix Launcher mostra este arquivo na página "Novidades" do jogo. Cada atual
 "## <data> · <versão>" e o texto em português (### pt), inglês (### en) e, quando houver, espanhol (### es).
 As mais novas ficam em cima.
 
+## 27/10/2026 · 236282e
+### pt
+- **Sem congelar ao entrar em áreas novas (ao abrir uma porta, por exemplo):** quando o jogo precisava de efeitos visuais (shaders) que ainda não estavam prontos, ele parava até montar todos, por até alguns segundos. Agora eles são montados em segundo plano, sem parar o jogo; algum objeto pode aparecer um instante depois, só na primeira vez.
+### en
+- **No freezing when entering new areas (when opening a door, for example):** when the game needed visual effects (shaders) that were not ready yet, it stopped until all of them were built, for up to a few seconds. They are now built in the background without stopping the game; an object may show up a moment later, only the first time.
+### es
+- **Sin congelarse al entrar en zonas nuevas (al abrir una puerta, por ejemplo):** cuando el juego necesitaba efectos visuales (shaders) que aún no estaban listos, se detenía hasta prepararlos todos, por hasta algunos segundos. Ahora se preparan en segundo plano sin detener el juego; algún objeto puede aparecer un instante después, solo la primera vez.
+
 ## 27/10/2026 · 21186cc
 ### pt
 - **Menos engasgos ao entrar em áreas novas:** o jogo travava por um instante na primeira vez em cada área, enquanto montava os efeitos visuais (shaders) para a sua placa. Agora o launcher já traz esses shaders prontos, reunidos das partidas de teste, e os coloca no jogo ao gerar. Os que ainda não estiverem no pacote continuam sendo montados na primeira vez, e o pacote cresce a cada atualização. Vale depois que o launcher gerar o jogo com esta versão.
