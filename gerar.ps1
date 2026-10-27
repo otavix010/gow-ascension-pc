@@ -277,6 +277,18 @@ function Achar-Disco([string]$d) {
         if (-not $achou) { throw "não achei PS3_GAME\USRDIR dentro de $d (uma .iso criptografada, como as da Redump, não serve)" }
         return $achou
     }
+    # reports 66/72: um .iso escolhido que não é arquivo nenhum (movido, renomeado, download por terminar, sem acesso):
+    # com um só arquivo de disco na mesma pasta, é ele; senão, diz o que o Windows respondeu
+    if ($d -match '\.(7z|zip|rar|iso)$' -and -not (Test-Path -LiteralPath $d -PathType Container)) {
+        $outro = @(Get-ChildItem -LiteralPath (Split-Path $d) -File -ErrorAction SilentlyContinue | Where-Object { $_.Name -match '\.(7z|zip|rar|iso)$' })
+        if ($outro.Count -eq 1) {
+            Msg "o arquivo $d não existe; usando $($outro[0].FullName), o arquivo do jogo dessa pasta"
+            return (Achar-Disco $outro[0].FullName)
+        }
+        $erro = try { [void][IO.File]::GetAttributes($d); 'sem acesso' } catch { $_.Exception.InnerException.Message }
+        throw ("não consegui abrir o arquivo do jogo $d ($erro). Confira se ele ainda está nessa pasta com esse nome e " +
+               'se o download terminou, e escolha-o de novo em "Escolher o disco de novo".')
+    }
     $achou = Achar-PS3Game $d
     if (-not $achou) {
         # uma pasta com só o arquivo do disco dentro
@@ -290,6 +302,11 @@ function Achar-Disco([string]$d) {
         $raizPort = [IO.Path]::GetFullPath($R).TrimEnd('\')
         if ($cheio -ieq $raizPort -or $cheio -ieq (Split-Path $raizPort)) {
             $como = ' (essa é a pasta onde o launcher instala os ports, não a do jogo)'
+        }
+        # o que há lá dentro, para quem escolheu uma pasta com nome de .iso ou a pasta errada
+        if (-not $como) {
+            $dentro = @(Get-ChildItem -LiteralPath $d -Force -ErrorAction SilentlyContinue | Select-Object -First 6 | ForEach-Object Name)
+            $como = " (dentro dela há: $(if ($dentro) { $dentro -join ', ' } else { 'nada' }))"
         }
         throw ("não achei o jogo (PS3_GAME com USRDIR) em $d$como. No launcher, clique em `"Escolher o disco de novo`" e " +
                'escolha o arquivo do jogo (.7z, .zip, .rar ou .iso) ou a pasta onde ele foi extraído.')
