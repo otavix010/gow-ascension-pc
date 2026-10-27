@@ -4,6 +4,14 @@ O Otavix Launcher mostra este arquivo na página "Novidades" do jogo. Cada atual
 "## <data> · <versão>" e o texto em português (### pt), inglês (### en) e, quando houver, espanhol (### es).
 As mais novas ficam em cima.
 
+## 27/10/2026 · 21186cc
+### pt
+- **Menos engasgos ao entrar em áreas novas:** o jogo travava por um instante na primeira vez em cada área, enquanto montava os efeitos visuais (shaders) para a sua placa. Agora o launcher já traz esses shaders prontos, reunidos das partidas de teste, e os coloca no jogo ao gerar. Os que ainda não estiverem no pacote continuam sendo montados na primeira vez, e o pacote cresce a cada atualização. Vale depois que o launcher gerar o jogo com esta versão.
+### en
+- **Fewer stutters when entering new areas:** the game froze for a moment the first time in each area while it built the visual effects (shaders) for your graphics card. The launcher now brings those shaders ready, gathered from test playthroughs, and puts them in the game when generating it. Any not yet in the pack are still built the first time, and the pack grows with each update. It takes effect once the launcher generates the game with this version.
+### es
+- **Menos tirones al entrar en zonas nuevas:** el juego se trababa un instante la primera vez en cada zona mientras preparaba los efectos visuales (shaders) para tu tarjeta. Ahora el launcher ya trae esos shaders listos, reunidos de las partidas de prueba, y los pone en el juego al generarlo. Los que aún no estén en el paquete se siguen preparando la primera vez, y el paquete crece con cada actualización. Se aplica después de que el launcher genere el juego con esta versión.
+
 ## 27/10/2026 · 15043d0
 ### pt
 - **Geração parando no "pip install":** em PCs com outro programa que traz o próprio Python (como o Inkscape), o gerador podia usar esse Python, que não tem o pip, e a geração parava logo no começo. Agora ele escolhe sozinho um Python 3.10 ou mais novo que funcione e, se só houver um sem pip, instala o pip nele.
