@@ -2,6 +2,11 @@
 
 > **Projeto de fãs, sem fins lucrativos, sem relação com a Sony.** *God of War* é marca registrada da Sony Interactive Entertainment. Este repositório **não contém o jogo** nem o firmware: você precisa da **sua própria cópia** do jogo (BCUS98232). O **update 1.04** e o **firmware oficial do PS3** são **gratuitos**, baixados direto da Sony (links em [Como jogar](#como-jogar)).
 
+> [!IMPORTANT]
+> **Para jogar, baixe o [Otavix Launcher](https://github.com/otavix010/otavix-launcher/releases/latest).** Ele baixa este port, gera o jogo no seu PC e o mantém atualizado sozinho. O port recebe **cerca de 6 atualizações por dia**, feitas a partir dos reports e pedidos dos jogadores: para relatar um problema ou pedir algo, use **"Reportar problema"** na página do jogo no launcher. O relatório já vai com o log, as configurações e as fotos, e é por ele que as correções saem mais rápido.
+>
+> **To play, download the [Otavix Launcher](https://github.com/otavix010/otavix-launcher/releases/latest).** It downloads this port, makes the game on your PC and keeps it updated by itself. The port gets **about 6 updates a day**, driven by players' reports and requests: to report a problem or ask for something, use **"Report a problem"** on the game's page in the launcher. The report carries the log, the settings and the screenshots, and that is how fixes come out fastest.
+
 ![Capítulo 16 a 66 FPS num Ryzen 7 9800X3D](docs/imagens/cap16_9800x3d.png)
 
 [English summary below](#english-summary)
