@@ -577,13 +577,17 @@ static int fp_clamp16_on(void)
     if (on < 0) { const char* e = getenv("GOWA_FP_CLAMP16"); on = (e && *e == '1') ? 1 : 0; }
     return on;
 }
-/* GOWA_FP_NANINT=1: the export NaN guard on the bits (integer compare) instead
- * of `x == x`, which the HLSL compiler may fold to true when it assumes no
- * NaNs (no IEEE strictness flag) -- then a NaN export reached the target. */
+/* The export NaN guard on the bits (integer compare) instead of `x == x`,
+ * which the HLSL compiler may fold to true when it assumes no NaNs (no IEEE
+ * strictness flag) -- then a NaN export reached the target, and whether it
+ * did came down to each GPU's own shader compiler. On by default since 27/10
+ * (yellow hands and lights on RTX 30xx only, reports 17/49/55: a NaN channel
+ * read back as 0 later reads as a missing colour); GOWA_FP_NANINT=0 returns to
+ * `x == x`. */
 static int fp_nanint_on(void)
 {
     static int on = -1;
-    if (on < 0) { const char* e = getenv("GOWA_FP_NANINT"); on = (e && *e == '1') ? 1 : 0; }
+    if (on < 0) { const char* e = getenv("GOWA_FP_NANINT"); on = !(e && *e == '0'); }
     return on;
 }
 
@@ -1312,8 +1316,10 @@ static int rsx_fp_decompile_internal(
             out_puts(&o, line);
         }
         if (depth_export)
-            out_puts(&o, "    float _d = r[1].z;\n"
-                         "    _out.depth = (_d == _d) ? saturate(_d) : 0.0;\n");
+            out_puts(&o, fp_nanint_on() ? "    float _d = r[1].z;\n"
+                                          "    _out.depth = ((asuint(_d) & 0x7FFFFFFFu) > 0x7F800000u) ? 0.0 : saturate(_d);\n"
+                                        : "    float _d = r[1].z;\n"
+                                          "    _out.depth = (_d == _d) ? saturate(_d) : 0.0;\n");
         out_puts(&o, "    return _out;\n}\n");
     }
 

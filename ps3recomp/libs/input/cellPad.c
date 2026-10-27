@@ -87,10 +87,17 @@ static volatile int s_ultimo_teclado = -1;
 static volatile int s_xinput_ligado;
 int cellPad_teclado_ultimo(void)
 {
-    /* tests: GOWA_TESTE_TECLADO=1 (or 0) fixes the answer, for a run with no real key pressed */
+    /* tests: GOWA_TESTE_TECLADO=1 (or 0) fixes the answer, for a run with no real key pressed; "1:<s>" turns to
+     * the controller <s> seconds after the first call (the swap back to the PS3 buttons) */
     static int teste = -2;
-    if (teste == -2) { const char* e = getenv("GOWA_TESTE_TECLADO"); teste = e ? atoi(e) != 0 : -1; }
-    if (teste >= 0) return teste;
+    static ULONGLONG troca;
+    if (teste == -2) {
+        const char* e = getenv("GOWA_TESTE_TECLADO");
+        teste = e ? atoi(e) != 0 : -1;
+        const char* c = e ? strchr(e, ':') : NULL;
+        if (c) troca = GetTickCount64() + (ULONGLONG)atoi(c + 1) * 1000u;
+    }
+    if (teste >= 0) return troca && GetTickCount64() >= troca ? 0 : teste;
     const int u = s_ultimo_teclado;
     return u >= 0 ? u : !s_xinput_ligado;
 }

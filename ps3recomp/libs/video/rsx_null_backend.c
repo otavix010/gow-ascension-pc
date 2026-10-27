@@ -191,6 +191,10 @@ static LRESULT CALLBACK null_wndproc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
         }
         break;
 
+    case WM_SETCURSOR:    /* report 56: na tela cheia, sem o ponteiro do mouse sobre o jogo */
+        if (s_tela_cheia && LOWORD(lp) == HTCLIENT) { SetCursor(NULL); return TRUE; }
+        break;
+
     case WM_SYSCHAR:      /* sem o bipe do Alt+Enter */
         if (wp == VK_RETURN) return 0;
         break;

@@ -5352,6 +5352,23 @@ static void shader_disk_cache_progress(u64 value)
             (unsigned long long)g_ld_shader_disk_rejects);
 }
 
+/* GOWA (27/10): where the shader cache and the PSO library live. By default
+ * scratch\ beside the exe (the working directory), so each build variant
+ * (build_native, build_v3rz) kept its own and started empty after a switch;
+ * GOWA_CACHE_DIR (the launcher sets <port>\cache) keeps one for all of them. */
+static const char* gowa_cache_base(void)
+{
+    static char base[MAX_PATH];
+    if (!base[0]) {
+        const char* e = getenv("GOWA_CACHE_DIR");
+        if (!e || !e[0] || strlen(e) >= sizeof base - 64u)
+            e = "scratch";
+        snprintf(base, sizeof base, "%s", e);
+        CreateDirectoryA(base, NULL);
+    }
+    return base;
+}
+
 static int shader_disk_cache_prepare(void)
 {
     if (g_ld_shader_disk_ready >= 0)
@@ -5369,9 +5386,8 @@ static int shader_disk_cache_prepare(void)
             strlen(g_ld_shader_disk_dir) >= sizeof(g_ld_shader_disk_dir) - 1u)
             return 0;
     } else {
-        CreateDirectoryA("scratch", NULL);
         snprintf(g_ld_shader_disk_dir, sizeof(g_ld_shader_disk_dir),
-                 "scratch\\rsx_shader_cache_v%u",
+                 "%s\\rsx_shader_cache_v%u", gowa_cache_base(),
                  SHADER_DISK_CACHE_VERSION);
     }
 
@@ -5815,8 +5831,7 @@ static void gowa_plib_init(void)
     if (e && *e == '0') return;
     ID3D12Device1* d1 = NULL;
     if (FAILED(g.dev->lpVtbl->QueryInterface(g.dev, &IID_ID3D12Device1, (void**)&d1)) || !d1) return;
-    CreateDirectoryA("scratch", NULL);
-    snprintf(s_plib_path, sizeof s_plib_path, "scratch\\rsx_pso_lib_v%u_%u.bin",
+    snprintf(s_plib_path, sizeof s_plib_path, "%s\\rsx_pso_lib_v%u_%u.bin", gowa_cache_base(),
              SHADER_DISK_CACHE_VERSION, GOWA_PLIB_VERSION);
     SIZE_T n = 0;
     FILE* f = fopen(s_plib_path, "rb");
@@ -6837,7 +6852,9 @@ static ID3D12PipelineState* get_pso(
           if (!r) r = strstr(ps_hlsl, "    PSOutput _rsx_color_out = _out;");
           int single = 0;
           if (!r) { r = strstr(ps_hlsl, "    return (_o == _o)"); single = r != NULL; }
+          if (!r) { r = strstr(ps_hlsl, "    return ((asuint(_o)"); single = r != NULL; }   /* the NaN guard on the bits */
           if (!r) { r = strstr(ps_hlsl, "    float4 _rsx_color_out = (_o == _o)"); single = r != NULL; }
+          if (!r) { r = strstr(ps_hlsl, "    float4 _rsx_color_out = ((asuint(_o)"); single = r != NULL; }
           /* GOWA_PS_SHOW_A=<alpha> (default 1): an RGBM scene target reads
            * alpha as the multiplier -- 0 keeps the value as is */
           static const char* sa = (const char*)-1;
