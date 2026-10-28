@@ -12239,6 +12239,123 @@ static int ld_blit_pipeline(void)
 }
 /* Draws `srv_slot` (already a pixel-shader resource) over the whole
  * backbuffer `bbi`, which must be in the RENDER_TARGET state. */
+/* GOWA (28/10): tela preta com som (reports 90, 93, 103, 165, 176; não reproduz aqui). A cada 2 s nos 3 primeiros
+ * minutos e depois a cada 30 s, a surface que o jogo mandou mostrar e o backbuffer já pronto para o Present são
+ * copiados para a CPU (sem esperar a GPU), e "[tela]" registra o brilho médio (0-255) e a parte não preta de cada
+ * um: jogo escuro = o desenho do jogo; jogo claro e final escuro = a cópia para a janela; os dois claros = depois
+ * do Present (driver, HDR, monitor). Uma vez no começo, "[tela-saida]" diz o formato do swap chain, o monitor e o
+ * HDR. GOWA_TELA_DIAG=0 desliga. */
+int rsx_live_draw_framegen_on(void);
+typedef struct { ID3D12Resource* rb; UINT64 size, offset; u64 fence; u32 frame, w, h, pitch; DXGI_FORMAT fmt; int busy; } ld_tela_rb;
+static ld_tela_rb s_tela[2];   /* 0 = a surface do jogo, 1 = o backbuffer */
+static void ld_tela_copia(ld_tela_rb* t, ID3D12Resource* res, D3D12_RESOURCE_STATES state)
+{
+    t->busy = 0;
+    if (!res) return;
+    D3D12_RESOURCE_DESC d; res->lpVtbl->GetDesc(res, &d);
+    t->w = (u32)d.Width; t->h = d.Height; t->fmt = d.Format; t->frame = g_ld_frames;
+    if (d.Dimension != D3D12_RESOURCE_DIMENSION_TEXTURE2D || d.SampleDesc.Count != 1) { t->pitch = 0; return; }
+    D3D12_PLACED_SUBRESOURCE_FOOTPRINT fp; UINT rows; UINT64 rowsize, total = 0;
+    g.dev->lpVtbl->GetCopyableFootprints(g.dev, &d, 0, 1, 0, &fp, &rows, &rowsize, &total);
+    if (!total) return;
+    if (t->rb && t->size < total) { t->rb->lpVtbl->Release(t->rb); t->rb = NULL; }
+    if (!t->rb) {
+        D3D12_HEAP_PROPERTIES hp = {0}; hp.Type = D3D12_HEAP_TYPE_READBACK;
+        D3D12_RESOURCE_DESC bd = {0};
+        bd.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER; bd.Width = total;
+        bd.Height = 1; bd.DepthOrArraySize = 1; bd.MipLevels = 1; bd.SampleDesc.Count = 1;
+        bd.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
+        if (FAILED(g.dev->lpVtbl->CreateCommittedResource(g.dev, &hp, D3D12_HEAP_FLAG_NONE, &bd,
+                D3D12_RESOURCE_STATE_COPY_DEST, NULL, &IID_ID3D12Resource, (void**)&t->rb))) { t->rb = NULL; return; }
+        t->size = total;
+    }
+    D3D12_RESOURCE_BARRIER b = {0};
+    b.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION; b.Transition.pResource = res;
+    b.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+    b.Transition.StateBefore = state; b.Transition.StateAfter = D3D12_RESOURCE_STATE_COPY_SOURCE;
+    if (state != D3D12_RESOURCE_STATE_COPY_SOURCE) g.list->lpVtbl->ResourceBarrier(g.list, 1, &b);
+    D3D12_TEXTURE_COPY_LOCATION src = {0}, dst = {0};
+    src.pResource = res; src.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
+    dst.pResource = t->rb; dst.Type = D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT; dst.PlacedFootprint = fp;
+    g.list->lpVtbl->CopyTextureRegion(g.list, &dst, 0, 0, 0, &src, NULL);
+    b.Transition.StateBefore = D3D12_RESOURCE_STATE_COPY_SOURCE; b.Transition.StateAfter = state;
+    if (state != D3D12_RESOURCE_STATE_COPY_SOURCE) g.list->lpVtbl->ResourceBarrier(g.list, 1, &b);
+    t->offset = fp.Offset; t->pitch = fp.Footprint.RowPitch;
+    t->fence = g.fence_value + 1;   /* the next signal covers this list */
+    t->busy = 1;
+}
+static void ld_tela_medir(ld_tela_rb* t, char* out, size_t n)
+{
+    const int bgra = t->fmt == DXGI_FORMAT_B8G8R8A8_UNORM || t->fmt == DXGI_FORMAT_B8G8R8A8_UNORM_SRGB;
+    const int rgba = t->fmt == DXGI_FORMAT_R8G8B8A8_UNORM || t->fmt == DXGI_FORMAT_R8G8B8A8_UNORM_SRGB;
+    if (!t->busy || !t->pitch || !(bgra || rgba)) {
+        snprintf(out, n, "%ux%u fmt %d (não medido)", t->w, t->h, (int)t->fmt); t->busy = 0; return;
+    }
+    u8* m = NULL; D3D12_RANGE r0 = {0, (SIZE_T)t->size};
+    if (FAILED(t->rb->lpVtbl->Map(t->rb, 0, &r0, (void**)&m)) || !m) { snprintf(out, n, "map falhou"); t->busy = 0; return; }
+    u64 sum = 0, claros = 0, total = 0;
+    const u32 passo = t->w >= 1920 ? 8 : 4;
+    for (u32 y = 0; y < t->h; y += passo)
+        for (u32 x = 0; x < t->w; x += passo) {
+            const u8* p = m + t->offset + (size_t)y * t->pitch + (size_t)x * 4u;
+            const u32 r = bgra ? p[2] : p[0], gg = p[1], bl = bgra ? p[0] : p[2];
+            const u32 l = (r * 30 + gg * 59 + bl * 11) / 100;
+            sum += l; claros += l > 8; total++;
+        }
+    D3D12_RANGE w0 = {0, 0}; t->rb->lpVtbl->Unmap(t->rb, 0, &w0);
+    snprintf(out, n, "%ux%u brilho %.1f, %.0f%% não preto", t->w, t->h,
+             total ? (double)sum / (double)total : 0.0, total ? 100.0 * (double)claros / (double)total : 0.0);
+    t->busy = 0;
+}
+static void ld_tela_saida(void)
+{
+    DXGI_SWAP_CHAIN_DESC1 sd = {0}; g.swap->lpVtbl->GetDesc1(g.swap, &sd);
+    char mon[200] = "monitor ?";
+    IDXGIOutput* o = NULL;
+    if (SUCCEEDED(g.swap->lpVtbl->GetContainingOutput(g.swap, &o)) && o) {
+        IDXGIOutput6* o6 = NULL;
+        if (SUCCEEDED(o->lpVtbl->QueryInterface(o, &IID_IDXGIOutput6, (void**)&o6)) && o6) {
+            DXGI_OUTPUT_DESC1 od; o6->lpVtbl->GetDesc1(o6, &od);
+            snprintf(mon, sizeof mon, "monitor %ldx%ld, %u bits, espaço de cor %d (%s), luminância %.0f nits",
+                     od.DesktopCoordinates.right - od.DesktopCoordinates.left,
+                     od.DesktopCoordinates.bottom - od.DesktopCoordinates.top, od.BitsPerColor, (int)od.ColorSpace,
+                     od.ColorSpace == DXGI_COLOR_SPACE_RGB_FULL_G2084_NONE_P2020 ? "HDR ligado" : "SDR",
+                     od.MaxLuminance);
+            o6->lpVtbl->Release(o6);
+        }
+        o->lpVtbl->Release(o);
+    }
+    fprintf(stderr, "[tela-saida] swap chain %ux%u fmt %d, %u buffers, flags 0x%X, vsync %d, tearing %d; %s\n",
+            sd.Width, sd.Height, (int)sd.Format, sd.BufferCount, sd.Flags, g_ld_present_sync, g_ld_present_tearing, mon);
+}
+static void ld_tela_diag(ID3D12Resource* src, D3D12_RESOURCE_STATES src_state, ID3D12Resource* bb, D3D12_RESOURCE_STATES bb_state)
+{
+    static int on = -1; static ULONGLONG t0, next;
+    if (on < 0) {
+        const char* e = getenv("GOWA_TELA_DIAG"); on = !(e && *e == '0');
+        t0 = GetTickCount64(); next = t0 + 2000;
+        if (on) ld_tela_saida();
+    }
+    if (!on) return;
+    if (s_tela[0].busy || s_tela[1].busy) {
+        const u64 done = g.fence->lpVtbl->GetCompletedValue(g.fence);
+        if ((s_tela[0].busy && s_tela[0].fence > done) || (s_tela[1].busy && s_tela[1].fence > done)) return;
+        char a[96], b[96];
+        const u32 frame = s_tela[0].frame;
+        ld_tela_medir(&s_tela[0], a, sizeof a); ld_tela_medir(&s_tela[1], b, sizeof b);
+        HWND w = NULL; g.swap->lpVtbl->GetHwnd(g.swap, &w);
+        fprintf(stderr, "[tela] quadro %u, %.0f s: jogo %s | final %s | janela %ux%u%s%s\n", frame,
+                (GetTickCount64() - t0) / 1000.0, a, b, g.width, g.height, w && IsIconic(w) ? " (minimizada)" : "",
+                rsx_live_draw_framegen_on() ? " (geração de quadros)" : "");
+        return;
+    }
+    const ULONGLONG now = GetTickCount64();
+    if (now < next) return;
+    next = now + (now - t0 < 180000 ? 2000 : 30000);
+    ld_tela_copia(&s_tela[0], src, src_state);
+    ld_tela_copia(&s_tela[1], bb, bb_state);
+}
+
 static int ld_present_blit(u32 srv_slot, u32 bbi)
 {
     if (!ld_blit_pipeline()) return 0;
@@ -13988,6 +14105,7 @@ void rsx_live_draw_present(u32 buffer_id)
                     (unsigned long long)bdesc.Width, bdesc.Height);
         ld_present_blit(SRV_SURFACE_BASE + target, bbi);
     }
+    ld_tela_diag(srcimg, src_use, bb, bb_use);   /* GOWA: tela preta com som */
 
     bar[0].Transition.StateBefore = src_use;
     bar[0].Transition.StateAfter = D3D12_RESOURCE_STATE_RENDER_TARGET;
