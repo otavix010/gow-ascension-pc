@@ -53,6 +53,10 @@ param(
     [switch]$Refazer
 )
 $ErrorActionPreference = 'Stop'
+# Reports 171, 180 e 181 (28/10): num Windows em árabe (cp1256) ou vietnamita (cp1258) o print com acento do
+# unself.py dava UnicodeEncodeError depois de decriptar, e a geração parava. Os scripts Python falam UTF-8.
+$env:PYTHONUTF8 = '1'
+$env:PYTHONIOENCODING = 'utf-8'
 $R = $PSScriptRoot
 if ($R -match ' ') { throw "Coloque o projeto numa pasta sem espaços (agora: $R)" }
 if (-not $Jobs) { $Jobs = [Environment]::ProcessorCount }
