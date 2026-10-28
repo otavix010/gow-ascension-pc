@@ -4,6 +4,17 @@ O Otavix Launcher mostra este arquivo na página "Novidades" do jogo. Cada atual
 "## <data> · <versão>" e o texto em português (### pt), inglês (### en) e, quando houver, espanhol (### es).
 As mais novas ficam em cima.
 
+## 28/10/2026 · ada0f9c
+### pt
+- **Cópia tirada do PS3 para pendrive:** o arquivo maior do jogo (9,3 GB) vem dividido em partes (.66600, .66601...) e o gerador dizia que ele faltava. Agora ele junta as partes sozinho.
+- **Windows em árabe, vietnamita e outros idiomas:** a geração parava logo depois de decriptar o jogo, por causa de um acento numa mensagem. Corrigido.
+### en
+- **Copy taken from the PS3 to a USB drive:** the game's largest file (9.3 GB) comes split into parts (.66600, .66601...) and the generator said it was missing. It now joins the parts by itself.
+- **Windows in Arabic, Vietnamese and other languages:** generation stopped right after decrypting the game, because of an accent in a message. Fixed.
+### es
+- **Copia sacada de la PS3 a un pendrive:** el archivo más grande del juego (9,3 GB) viene dividido en partes (.66600, .66601...) y el generador decía que faltaba. Ahora junta las partes solo.
+- **Windows en árabe, vietnamita y otros idiomas:** la generación se detenía justo después de descifrar el juego, por un acento en un mensaje. Corregido.
+
 ## 28/10/2026 · 46fcafd
 ### pt
 - **Controle de PS5 e de PS4 por Bluetooth:** só funcionavam pelo cabo ou com o DSX. O port procurava o controle por um nome que o Windows só usa no USB; agora acha também pelo Bluetooth, sem programa extra.
