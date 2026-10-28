@@ -4,6 +4,14 @@ O Otavix Launcher mostra este arquivo na página "Novidades" do jogo. Cada atual
 "## <data> · <versão>" e o texto em português (### pt), inglês (### en) e, quando houver, espanhol (### es).
 As mais novas ficam em cima.
 
+## 28/10/2026 · 4c7c7e0
+### pt
+- **Tela preta com som depois do logo da Santa Monica:** ainda não conseguimos reproduzir esse defeito nos nossos PCs. Esta versão registra no log, a cada 2 segundos, o brilho da imagem que o jogo desenhou e o da imagem enviada para a janela, além do monitor, do HDR e do modo de vídeo. Se acontecer com você, mande um report pelo launcher logo depois: o log vai mostrar em que etapa a imagem fica preta.
+### en
+- **Black screen with sound after the Santa Monica logo:** we still cannot reproduce it on our PCs. This version logs, every 2 seconds, the brightness of the picture the game drew and of the picture sent to the window, plus the monitor, HDR and video mode. If it happens to you, send a report from the launcher right after: the log will show at which step the picture goes black.
+### es
+- **Pantalla negra con sonido después del logo de Santa Monica:** todavía no logramos reproducirlo en nuestros PC. Esta versión registra en el log, cada 2 segundos, el brillo de la imagen que dibujó el juego y el de la imagen enviada a la ventana, además del monitor, el HDR y el modo de video. Si te pasa, envía un report desde el launcher justo después: el log mostrará en qué paso la imagen se vuelve negra.
+
 ## 28/10/2026 · ada0f9c
 ### pt
 - **Cópia tirada do PS3 para pendrive:** o arquivo maior do jogo (9,3 GB) vem dividido em partes (.66600, .66601...) e o gerador dizia que ele faltava. Agora ele junta as partes sozinho.
