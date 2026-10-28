@@ -139,8 +139,9 @@ static u32 g_ld_swap_count = 3;
 /* GOWA: 8192 (was 1024). God of War Ascension's first level binds more than
  * 1024 distinct textures; the LRU then evicted and re-decoded thousands of
  * them (7,000+ evictions in a few minutes), a large share of the RSX thread.
- * Lookups go through an index (texture_srv_slot), not a linear scan. */
-#define MAX_TEXTURES     8192
+ * Lookups go through an index (texture_srv_slot), not a linear scan.
+ * 28/10: room for 16384; how many are kept is ld_tex_cap() (by the card's VRAM). */
+#define MAX_TEXTURES     16384
 #define MAX_RETIRED_TEXTURES 4096
 #define MAX_VTEX         64
 #define MAX_SAMPLERS     4096   /* GOWA: was 128 -- see sampler_slot */
@@ -3636,7 +3637,7 @@ static void write_texture_srv(u32 index, const texcache_t* entry)
  * in texture_srv_slot. A slot whose entry no longer carries the key (the
  * entry was replaced by an LRU eviction) is skipped like a tombstone; the
  * index is rebuilt from g.textures when such slots could have piled up. */
-#define TEX_INDEX_SIZE 32768u
+#define TEX_INDEX_SIZE 65536u
 static int32_t s_tex_index[TEX_INDEX_SIZE];
 static u32 s_tex_index_puts;
 static int s_tex_index_ready;
@@ -3703,6 +3704,25 @@ static void ld_tex_dump(const rsx_dsp_texture* t)
         const u8* wide = guest_ptr(t->location, t->offset - (u32)around, 2u * (u32)around);
         if (wide && (f = fopen(strcat(fn, ".viz"), "wb"))) { fwrite(wide, 1, 2u * (u32)around, f); fclose(f); }
     }
+}
+
+/* GOWA (28/10): textures kept before the LRU starts evicting. The cache fills in the first
+ * minutes of every session (the game streams textures to ever new addresses); in the
+ * reports from 12 GB cards it then evicted ~5 a frame and re-decoded what came back.
+ * 16384 with 8 GB of VRAM or more (henry: same fps as 8192), 8192 below that (the 4 GB
+ * cards). GOWA_TEX_CAP=<n> picks it (256..MAX_TEXTURES). */
+extern unsigned g_ld_gpu_vram_mb;
+static u32 ld_tex_cap(void)
+{
+    static u32 cap;
+    if (!cap) {
+        const char* e = getenv("GOWA_TEX_CAP");
+        cap = e ? (u32)atoi(e) : g_ld_gpu_vram_mb >= 7000u ? 16384u : 8192u;
+        if (cap < 256u) cap = 256u;
+        if (cap > MAX_TEXTURES) cap = MAX_TEXTURES;
+        fprintf(stderr, "[texture-cache] até %u texturas (%u MB de VRAM)\n", cap, g_ld_gpu_vram_mb);
+    }
+    return cap;
 }
 
 static u32 texture_srv_slot(const rsx_dsp_texture* t)
@@ -3828,7 +3848,7 @@ ld_tex_intacta:
 
     u32 index;
     ID3D12Resource* evicted = NULL;
-    const int cache_was_full = g.n_textures >= MAX_TEXTURES;
+    const int cache_was_full = g.n_textures >= ld_tex_cap();
     if (!cache_was_full) {
         index = g.n_textures++;
     } else {
@@ -3853,7 +3873,7 @@ ld_tex_intacta:
             (g_ld_texture_cache_full & (g_ld_texture_cache_full - 1)) == 0)
             fprintf(stderr,
                     "[texture-cache] FULL cap=%u lru-evictions=%llu\n",
-                    MAX_TEXTURES,
+                    ld_tex_cap(),
                     (unsigned long long)g_ld_texture_cache_evictions);
     }
 
@@ -14384,7 +14404,7 @@ ld_present_done:;
                 g_ld_stats.group_drop_ring, g_ld_stats.group_drop_surface,
                 g_ld_stats.clears, g_ld_stats.clear_drop_surface,
                 g_ld_stats.implicit_depth_clears,
-                g.n_textures, MAX_TEXTURES,
+                g.n_textures, ld_tex_cap(),
                 (unsigned long long)g_ld_texture_cache_full,
                 (unsigned long long)g_ld_texture_decode_fail,
                 (unsigned long long)g_ld_zdepth_srv_binds,
