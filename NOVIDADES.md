@@ -4,6 +4,14 @@ O Otavix Launcher mostra este arquivo na página "Novidades" do jogo. Cada atual
 "## <data> · <versão>" e o texto em português (### pt), inglês (### en) e, quando houver, espanhol (### es).
 As mais novas ficam em cima.
 
+## 28/10/2026 · 46fcafd
+### pt
+- **Controle de PS5 e de PS4 por Bluetooth:** só funcionavam pelo cabo ou com o DSX. O port procurava o controle por um nome que o Windows só usa no USB; agora acha também pelo Bluetooth, sem programa extra.
+### en
+- **PS5 and PS4 controllers over Bluetooth:** they only worked by cable or through DSX. The port looked for the controller under a name Windows uses only for USB; it now finds it over Bluetooth too, with no extra program.
+### es
+- **Control de PS5 y de PS4 por Bluetooth:** solo funcionaban por cable o con DSX. El port buscaba el control con un nombre que Windows solo usa en USB; ahora también lo encuentra por Bluetooth, sin programas extra.
+
 ## 28/10/2026 · 7df5048
 ### pt
 - **Apagar perfil:** a opção "Apagar perfil" do jogo não fazia nada (o port não tinha essa função do PS3). Agora apaga.
