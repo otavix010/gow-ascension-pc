@@ -4103,14 +4103,17 @@ class PPULifter:
         """Write `text` to `path` only when the content differs, so an
         unchanged file keeps its mtime and the build leaves its object alone.
         Returns True when the file was written."""
+        # Compare bytes: a file from an older run may be in another encoding
+        # (cp1252 before PYTHONUTF8), and decoding it would abort the lift.
+        data = text.replace("\n", os.linesep).encode("utf-8")
         try:
-            with open(path, "r") as f:
-                if f.read() == text:
+            with open(path, "rb") as f:
+                if f.read() == data:
                     return False
         except OSError:
             pass
         tmp = path + ".tmp"
-        with open(tmp, "w") as f:
+        with open(tmp, "w", encoding="utf-8") as f:
             f.write(text)
         os.replace(tmp, path)
         return True
