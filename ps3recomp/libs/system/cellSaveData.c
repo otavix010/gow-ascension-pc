@@ -1148,6 +1148,47 @@ static void savedata_reject_log(const char* fn, const char* why, int rc)
 #define SAVEDATA_REJECT(rc, why) \
     do { savedata_reject_log(__func__, (why), (rc)); return (rc); } while (0)
 
+/* GOWA (28/10): cellSaveDataFixedDelete (NID 0xCED17573) was unresolved, so "Delete Profile" in God of War
+ * Ascension did nothing. The title picks the directory in funcFixed (savedata_fixed, is_save = 2); it is removed
+ * here and funcDone gets a CellSaveDataDoneGet (excResult, dirName[32], sizeKB, hddFreeSizeKB, reserved[64]). */
+static s32 savedata_delete_dir(const char* directory, u32 funcDone, u32 cb)
+{
+    char path[1024];
+    build_save_path(path, sizeof path, directory);
+    int ok = 0;
+#ifdef _WIN32
+    {
+        char search[1100];
+        snprintf(search, sizeof search, "%s\\*", path);
+        WIN32_FIND_DATAA fd;
+        HANDLE h = FindFirstFileA(search, &fd);
+        if (h != INVALID_HANDLE_VALUE) {
+            do {
+                if (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) continue;
+                char f[1400];
+                snprintf(f, sizeof f, "%s\\%s", path, fd.cFileName);
+                DeleteFileA(f);
+            } while (FindNextFileA(h, &fd));
+            FindClose(h);
+        }
+        ok = RemoveDirectoryA(path) != 0;
+    }
+#endif
+    printf("[cellSaveData] FixedDelete: dir='%s' %s\n", directory, ok ? "apagado" : "NAO apagado");
+    if (funcDone && g_ps3_guest_caller) {
+        const u32 get = scratch_alloc(108);
+        if (get) {
+            memset(vm_base + get, 0, 108);
+            vm_write32(get, ok ? 0u : (u32)CELL_SAVEDATA_ERROR_ACCESS_ERROR);
+            memcpy(vm_base + get + 4, directory, strnlen(directory, CELL_SAVEDATA_DIRNAME_SIZE - 1));
+            vm_write32(get + 40, 1024u * 1024u);   /* hddFreeSizeKB */
+            marshal_cbresult_init(cb, CELL_SAVEDATA_CBRESULT_OK_NEXT, vm_read32(cb + 16));
+            g_ps3_guest_caller(funcDone, cb, get, 0, 0, 0, 0, 0, 0);
+        }
+    }
+    return ok ? CELL_OK : CELL_SAVEDATA_ERROR_ACCESS_ERROR;
+}
+
 static s32 savedata_fixed(int is_save, CellSaveDataSetList* setList,
                          CellSaveDataSetBuf* setBuf, CellSaveDataFixedCallback funcFixed,
                          CellSaveDataStatCallback funcStat, CellSaveDataFileCallback funcFile,
@@ -1179,9 +1220,10 @@ static s32 savedata_fixed(int is_save, CellSaveDataSetList* setList,
     free(dirs);
     g_ps3_guest_caller((u32)(uintptr_t)funcFixed, cb, get, set, 0, 0, 0, 0, 0);
     s32 result = marshal_cbresult_read_result(cb);
-    if (result == CELL_SAVEDATA_CBRESULT_OK_LAST ||
-        result == CELL_SAVEDATA_CBRESULT_OK_LAST_NOCONFIRM) return CELL_OK;
-    if (result != CELL_SAVEDATA_CBRESULT_OK_NEXT) {
+    const int ultimo = result == CELL_SAVEDATA_CBRESULT_OK_LAST ||
+                       result == CELL_SAVEDATA_CBRESULT_OK_LAST_NOCONFIRM;
+    if (ultimo && is_save != 2) return CELL_OK;
+    if (result != CELL_SAVEDATA_CBRESULT_OK_NEXT && !ultimo) {
         /* Name the value: the title chose this, so it says WHY it refused --
          * ERR_NODATA on a load means the dirList we handed it was empty or
          * held nothing it recognised, which is a different bug from a broken
@@ -1214,6 +1256,8 @@ static s32 savedata_fixed(int is_save, CellSaveDataSetList* setList,
     memcpy(directory, name, len + 1);
     printf("[cellSaveData] %s: proceeding with dir='%s' (%u listed)\n",
            __func__, directory, listed);
+    if (is_save == 2)   /* FixedDelete: funcStat carries funcDone */
+        return savedata_delete_dir(directory, (u32)(uintptr_t)funcStat, cb);
     return savedata_execute(directory, is_save, setBuf, funcStat, funcFile,
                             (void*)(uintptr_t)vm_read32(cb + 16));
 }
@@ -1590,8 +1634,18 @@ void ps3_savedata_list_auto_load(ppu_context* ctx)
         (u32)ctx->gpr[10], (void*)(uintptr_t)savedata_arg9(ctx));
 }
 
+static void hle_cellSaveDataFixedDelete(ppu_context* ctx)
+{
+    printf("[cellSaveData] FixedDelete\n");
+    ctx->gpr[3] = (uint64_t)(int64_t)savedata_fixed(2,
+        (CellSaveDataSetList*)(uintptr_t)(u32)ctx->gpr[3], (CellSaveDataSetBuf*)(uintptr_t)(u32)ctx->gpr[4],
+        (CellSaveDataFixedCallback)(uintptr_t)(u32)ctx->gpr[5], (CellSaveDataStatCallback)(uintptr_t)(u32)ctx->gpr[6],
+        NULL, (void*)(uintptr_t)(u32)ctx->gpr[8]);
+}
+
 void cellSaveData_register_ctx_handlers(void)
 {
+    ps3_hle_register_ctx(0xCED17573u, "cellSaveDataFixedDelete", hle_cellSaveDataFixedDelete);
     /* Overrides the generated 8-arg registration: ctx handlers are dispatched
      * before the generic table. */
     ps3_hle_register_ctx(0xCDC6AEFDu, "cellSaveDataUserAutoLoad",
