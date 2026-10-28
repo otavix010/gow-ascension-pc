@@ -631,7 +631,25 @@ function Conferir-Arquivos([string]$pg) {
     foreach ($linha in [IO.File]::ReadAllLines($lista)) {
         $nome, $tam = $linha -split "`t"
         if (-not $nome) { continue }
-        $f = Get-Item -LiteralPath (Join-Path $pg ($nome -replace '/', '\')) -Force -ErrorAction SilentlyContinue
+        $alvo = Join-Path $pg ($nome -replace '/', '\')
+        $f = Get-Item -LiteralPath $alvo -Force -ErrorAction SilentlyContinue
+        # Reports 161, 162, 163, 166, 174 e 177 (28/10): cópia tirada do PS3 para um pendrive FAT32 (sem arquivos de
+        # mais de 4 GB) vem com o EXTRASCIN2.PSARC (9,3 GB) em partes .66600, .66601, ...: junta as partes uma vez.
+        if (-not $f -and (Test-Path -LiteralPath "$alvo.66600")) {
+            Msg "juntando as partes de $nome (cópia de pendrive FAT32: .66600, .66601, ...)"
+            $saida = [IO.File]::Create("$alvo.juntando")
+            try {
+                for ($k = 0; (Test-Path -LiteralPath ("{0}.666{1:D2}" -f $alvo, $k)); $k++) {
+                    $parte = [IO.File]::OpenRead(("{0}.666{1:D2}" -f $alvo, $k))
+                    try { $parte.CopyTo($saida, 4MB) } finally { $parte.Dispose() }
+                }
+            } finally { $saida.Dispose() }
+            if ((Get-Item -LiteralPath "$alvo.juntando").Length -eq [int64]$tam) {
+                Move-Item -LiteralPath "$alvo.juntando" -Destination $alvo
+                Msg "$nome montado das partes"
+            } else { Remove-Item -LiteralPath "$alvo.juntando" -Force }
+            $f = Get-Item -LiteralPath $alvo -Force -ErrorAction SilentlyContinue
+        }
         if (-not $f) { $ruins += "$nome (falta)" }
         elseif ($f.Length -ne [int64]$tam) { $ruins += ("{0} ({1:N0} bytes, deviam ser {2:N0})" -f $nome, $f.Length, [int64]$tam) }
     }
