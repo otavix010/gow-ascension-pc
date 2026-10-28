@@ -3735,11 +3735,29 @@ s32 cellGcmAddressToOffset(u32 address, u32* offset)
 static u32 s_io_alloc_next = 0;
 static u32 gcm_io_alloc(u32 size)
 {
-    if (s_io_alloc_next == 0)
-        s_io_alloc_next = (s_config.ioSize + 0xFFFFFu) & ~0xFFFFFu;
-    if (s_io_alloc_next < 0x100000u) s_io_alloc_next = 0x100000u;
+    u32 base = (s_config.ioSize + 0xFFFFFu) & ~0xFFFFFu;
+    if (base < 0x100000u) base = 0x100000u;
+    /* GOWA (28/10): first fit over the free 1MB IO pages (s_ea_address_table, 0xFFFF = free;
+     * cellGcmUnmapIoAddress/UnmapEaIoAddress clear theirs). The old bump never reused what an
+     * unmap gave back: God of War Ascension maps and unmaps main memory at every area, passed
+     * 512 MB of IO after ~8 minutes, and its own address-to-offset lookup refuses table
+     * entries of 0x200 and up ("iooffset == -1, so don't even think about using this
+     * offset"): textures left half drawn, a cutscene in black. Kept under 512 MB. */
+    const u32 n = (size + 0xFFFFFu) >> 20;
+    for (u32 p = base >> 20; p + n <= 0x200u; ) {
+        u32 k = 0;
+        while (k < n && s_ea_address_table[p + k] == 0xFFFF) k++;
+        if (k == n) {
+            if (((p + n) << 20) > s_io_alloc_next) s_io_alloc_next = (p + n) << 20;
+            return p << 20;
+        }
+        p += k + 1;
+    }
+    /* no room below 512 MB: past everything handed out, as before */
+    if (s_io_alloc_next < base) s_io_alloc_next = base;
     u32 io = s_io_alloc_next;
-    s_io_alloc_next += (size + 0xFFFFFu) & ~0xFFFFFu;
+    s_io_alloc_next += n << 20;
+    printf("[cellGcmSys] WARNING: IO space below 512 MB full; io 0x%08X for 0x%X bytes\n", io, size);
     return io;
 }
 
