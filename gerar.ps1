@@ -637,6 +637,20 @@ function Conferir-Arquivos([string]$pg) {
                "Sem eles o jogo abre e fecha sozinho. Extraia ou copie o jogo de novo (confira o espaço livre e se o " +
                'antivírus não apagou nada) e, no launcher, clique em "Escolher o disco de novo".')
     }
+    # Reports 153, 155 e 157 (27/10): o jogo abria e fechava sem desenhar nada, com todos os arquivos no tamanho certo.
+    # Era uma .iso criptografada (as da Redump): os nomes e tamanhos se leem, mas o conteúdo vem cifrado, e o jogo sai
+    # ao ler a lista de pacotes. USRDIR\ARCHIVES é essa lista, em texto ("19", "GAME.PSARC", ...) em todo disco americano.
+    $arq = Join-Path $pg 'USRDIR\ARCHIVES'
+    if (Test-Path -LiteralPath $arq) {
+        $b = [IO.File]::ReadAllBytes($arq)
+        $txt = [Text.Encoding]::ASCII.GetString($b)
+        if ($b.Length -lt 2 -or $b[0] -lt 0x30 -or $b[0] -gt 0x39 -or $txt -notmatch 'GAME\.PSARC') {
+            throw ('a sua cópia do jogo está criptografada: os arquivos estão lá, mas o conteúdo vem cifrado (é o caso ' +
+                   'das .iso da Redump, feitas para gravar em disco), e com ele o jogo abre e fecha sozinho. O port precisa ' +
+                   'de uma cópia decriptada: a pasta com PS3_GAME tirada do seu PS3 ou do RPCS3, ou uma .iso decriptada. ' +
+                   'No launcher, clique em "Escolher o disco de novo" e escolha essa cópia.')
+        }
+    }
 }
 function Extrair-Pkg([string]$pkg) {
     $tmp = Join-Path $R 'out\update_pkg'
