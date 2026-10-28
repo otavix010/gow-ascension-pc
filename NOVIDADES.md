@@ -4,6 +4,20 @@ O Otavix Launcher mostra este arquivo na página "Novidades" do jogo. Cada atual
 "## <data> · <versão>" e o texto em português (### pt), inglês (### en) e, quando houver, espanhol (### es).
 As mais novas ficam em cima.
 
+## 28/10/2026 · 2802ddc
+### pt
+- **Texturas pela metade e cutscene em preto depois de uns minutos de jogo:** a cada área o jogo reserva e devolve memória para a placa de vídeo, e o port nunca reaproveitava o espaço devolvido. Depois de uns 8 minutos o espaço acabava, e o jogo deixava texturas incompletas e algumas cutscenes pretas (como a da Fúria depois do primeiro chefe). Corrigido.
+- **Menos texturas recarregadas em placas de 8 GB ou mais:** essas placas agora guardam o dobro de texturas antes de descartar as antigas, o que diminui os engasgos ao andar pelo jogo.
+- **Jogo que abre e fecha sem mostrar nada:** acontecia com a .iso criptografada (as da Redump). O gerador agora avisa e explica que precisa de uma cópia decriptada.
+### en
+- **Half-drawn textures and a black cutscene after a few minutes of play:** at every area the game reserves and returns memory for the graphics card, and the port never reused what was returned. After about 8 minutes it ran out, leaving textures incomplete and some cutscenes black (such as the Fury's after the first boss). Fixed.
+- **Fewer reloaded textures on cards with 8 GB or more:** these cards now keep twice as many textures before dropping old ones, which reduces stutters while playing.
+- **Game opening and closing without showing anything:** it happened with encrypted .iso files (the Redump ones). The generator now warns and explains that a decrypted copy is needed.
+### es
+- **Texturas a medias y cinemática en negro tras unos minutos de juego:** en cada zona el juego reserva y devuelve memoria para la tarjeta de video, y el port nunca reutilizaba lo devuelto. Tras unos 8 minutos se agotaba, dejando texturas incompletas y algunas cinemáticas en negro (como la de la Furia después del primer jefe). Corregido.
+- **Menos texturas recargadas en tarjetas de 8 GB o más:** ahora guardan el doble de texturas antes de descartar las viejas, lo que reduce los tirones al jugar.
+- **Juego que abre y se cierra sin mostrar nada:** pasaba con la .iso cifrada (las de Redump). El generador ahora avisa y explica que hace falta una copia descifrada.
+
 ## 27/10/2026 · a75ee9a
 ### pt
 - **Firmware escolhido errado:** quem escolhia no campo "Firmware" a pasta do jogo, a PKGDIR ou um arquivo de outra versão via a geração parar. Agora o gerador avisa que aquilo não serve e baixa sozinho o firmware oficial do PS3, como já fazia com o campo vazio.
