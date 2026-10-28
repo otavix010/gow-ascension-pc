@@ -930,9 +930,10 @@ Etapa '7_jogar' {
 # custa ~40-75 ms na primeira vez que aparece e o jogo engasga ao entrar numa área nova. Vão para o cache do jogo
 # (o GOWA_CACHE_DIR do launcher, <port>\cache) sem sobrescrever o que o PC do jogador já compilou; um shader que
 # não esteja no pacote é compilado na hora, como antes. Roda a cada geração, baixa só quando o pacote mudou, e
-# uma falha aqui não para nada.
-$SHADERS_URL = 'https://github.com/otavix010/gow-ascension-pc/releases/download/shaders'
-function Instalar-Shaders {
+# uma falha aqui não para nada. Primeiro o servidor do launcher (Cloudflare), depois a release do GitHub.
+$SHADERS_URLS = @('https://otavix-launcher.otavix-launcher-servidor.workers.dev/v1/arquivos/shaders/otavix010/gow-ascension-pc',
+                  'https://github.com/otavix010/gow-ascension-pc/releases/download/shaders')
+function Instalar-Shaders([string]$SHADERS_URL) {
     $cache = Join-Path $R 'cache\rsx_shader_cache_v2'
     $marca = Join-Path $R 'cache\shaders_pacote.txt'
     $dl = Join-Path $R 'dl'
@@ -967,6 +968,10 @@ function Instalar-Shaders {
     Set-Content -LiteralPath $marca -Value $sha -Encoding ASCII
     Msg "shaders pré-compilados: $novos novos no cache"
 }
-try { Instalar-Shaders } catch { Msg "shaders pré-compilados não instalados ($($_.Exception.Message)); o jogo compila cada um na primeira vez" }
+$falhas = @()
+foreach ($u in $SHADERS_URLS) {
+    try { Instalar-Shaders $u; $falhas = @(); break } catch { $falhas += $_.Exception.Message }
+}
+if ($falhas) { Msg "shaders pré-compilados não instalados ($($falhas -join '; ')); o jogo compila cada um na primeira vez" }
 
 Msg "pronto. Para jogar: $R\jogar.cmd  (log em out\jogo.log)"
