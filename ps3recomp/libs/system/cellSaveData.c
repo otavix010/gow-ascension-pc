@@ -1244,7 +1244,10 @@ static s32 savedata_fixed(int is_save, CellSaveDataSetList* setList,
     if (!funcStat)
         SAVEDATA_REJECT(CELL_SAVEDATA_ERROR_PARAM, "funcStat is NULL");
     u32 selected = vm_read32(set);
-    if (!selected || vm_read32(set + 8) > 1)
+    if (is_save == 2)   /* delete: the option does not apply; say what the title handed back */
+        printf("[cellSaveData] FixedDelete: cbresult=%d set dirName=0x%08X newIcon=0x%08X option=%u (%u listed)\n",
+               result, selected, vm_read32(set + 4), vm_read32(set + 8), listed);
+    if (!selected || (is_save != 2 && vm_read32(set + 8) > 1))
         SAVEDATA_REJECT(CELL_SAVEDATA_ERROR_PARAM, "funcFixed set no dirName, or an out-of-range option");
     const char* name = (const char*)vm_base + selected;
     size_t len = strnlen(name, CELL_SAVEDATA_DIRNAME_SIZE);
