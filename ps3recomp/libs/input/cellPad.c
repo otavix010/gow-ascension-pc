@@ -458,6 +458,7 @@ static void pad_poll_teclado_mouse(void)
  * the DualShock 4's). Buttons pressed between two polls are kept for the next one, and a right-stick flick that is
  * back at the centre too. They take the host ports XInput leaves free. GOWA_PAD_SONY=0 turns it off. */
 #include <setupapi.h>
+#include <wctype.h>
 #include <hidsdi.h>
 #pragma comment(lib, "hid.lib")
 #pragma comment(lib, "setupapi.lib")
@@ -573,7 +574,16 @@ static DWORD WINAPI pad_sony_busca(LPVOID arg)
                 det.d.cbSize = sizeof det.d;
                 if (!SetupDiGetDeviceInterfaceDetailW(lista, &di, &det.d, sizeof det, NULL, NULL)) continue;
                 const WCHAR* p = det.d.DevicePath;
-                if (!wcsstr(p, L"vid_054c") && !wcsstr(p, L"VID_054C")) continue;
+                /* 28/10: "vid_054c" over USB, but "..._VID&0002054c_PID&0ce6..." over Bluetooth: the old test
+                 * skipped every Bluetooth controller (a DualSense only worked by cable or through DSX). Any path
+                 * naming 054c, then the vendor in the attributes below. */
+                {
+                    WCHAR baixo[512];
+                    size_t i = 0;
+                    for (; p[i] && i < 511; i++) baixo[i] = (WCHAR)towlower(p[i]);
+                    baixo[i] = 0;
+                    if (!wcsstr(baixo, L"054c")) continue;
+                }
                 int aberto = 0;
                 for (int k = 0; k < PAD_SONY_MAX; k++) aberto |= s_sony[k].vivo && !_wcsicmp(s_sony[k].caminho, p);
                 if (aberto) continue;
@@ -586,7 +596,7 @@ static DWORD WINAPI pad_sony_busca(LPVOID arg)
                 int ok = HidD_GetAttributes(h, &at) && HidD_GetPreparsedData(h, &pp) && HidP_GetCaps(pp, &caps) == HIDP_STATUS_SUCCESS;
                 if (pp) HidD_FreePreparsedData(pp);
                 CloseHandle(h);
-                if (!ok || caps.UsagePage != 0x01 || (caps.Usage != 0x05 && caps.Usage != 0x04)) continue;
+                if (!ok || at.VendorID != 0x054C || caps.UsagePage != 0x01 || (caps.Usage != 0x05 && caps.Usage != 0x04)) continue;
                 const int ds5 = at.ProductID == 0x0CE6 || at.ProductID == 0x0DF2;
                 const int ds4 = at.ProductID == 0x05C4 || at.ProductID == 0x09CC || at.ProductID == 0x0BA0;
                 if (!ds5 && !ds4) continue;
