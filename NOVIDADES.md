@@ -4,6 +4,14 @@ O Otavix Launcher mostra este arquivo na página "Novidades" do jogo. Cada atual
 "## <data> · <versão>" e o texto em português (### pt), inglês (### en) e, quando houver, espanhol (### es).
 As mais novas ficam em cima.
 
+## 28/10/2026 · 7df5048
+### pt
+- **Apagar perfil:** a opção "Apagar perfil" do jogo não fazia nada (o port não tinha essa função do PS3). Agora apaga.
+### en
+- **Delete profile:** the game's "Delete Profile" option did nothing (the port lacked that PS3 function). It now deletes.
+### es
+- **Borrar perfil:** la opción "Borrar perfil" del juego no hacía nada (al port le faltaba esa función de la PS3). Ahora borra.
+
 ## 28/10/2026 · 2802ddc
 ### pt
 - **Texturas pela metade e cutscene em preto depois de uns minutos de jogo:** a cada área o jogo reserva e devolve memória para a placa de vídeo, e o port nunca reaproveitava o espaço devolvido. Depois de uns 8 minutos o espaço acabava, e o jogo deixava texturas incompletas e algumas cutscenes pretas (como a da Fúria depois do primeiro chefe). Corrigido.
