@@ -1207,8 +1207,54 @@ static int spu_mfc_getlist_lean(spu_context* ctx, uint32_t cmd)
     (void)base_cmd;
     return 1;
 }
+/* GOWA (29/10, reports 285/286/259/299/346): God of War Ascension mixes its
+ * sound in a SPURS workload (an SPU PUTs each 8 KB block into the cellAudio
+ * ring, writing 6-7 blocks ahead of the read). On a PC whose cores are all
+ * busy, the host thread of the SPU running it shares a core with the others
+ * and the blocks come late: the read plays silence, a stutter. The workload
+ * is found by its PUTs into the cellAudio rings (cellAudio.c keeps port n's
+ * ring at 0x58000000 + n * 2 MB, the read index 1 MB above), and an SPU
+ * thread runs at THREAD_PRIORITY_HIGHEST while that workload is the one in
+ * its LS (ls[0x1DF]) -- a short task per block, so it cannot starve the
+ * others -- and at its own priority again on the next workload.
+ * GOWA_AUDIO_SPU_PRIO=0 turns it off. */
+static volatile int g_spu_audio_wid = -1;
+static SPU_THREAD_LOCAL int t_audio_w = -1;      /* the workload this thread last ran */
+static SPU_THREAD_LOCAL int t_audio_up;          /* boosted, with t_audio_old to go back to */
+static SPU_THREAD_LOCAL int t_audio_old;
+static __attribute__((noinline)) void spu_audio_prio_switch(int w)
+{
+#ifdef _WIN32
+    static int s_on = -1;
+    if (s_on < 0) { const char* e = getenv("GOWA_AUDIO_SPU_PRIO"); s_on = !(e && *e == '0'); }
+    if (!s_on) return;
+    const int audio = w == g_spu_audio_wid;
+    if (audio && !t_audio_up) {
+        t_audio_old = GetThreadPriority(GetCurrentThread());
+        t_audio_up = SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_HIGHEST) ? 1 : 0;
+    } else if (!audio && t_audio_up) {
+        SetThreadPriority(GetCurrentThread(), t_audio_old);
+        t_audio_up = 0;
+    }
+#else
+    (void)w;
+#endif
+}
+static inline __attribute__((always_inline)) void spu_audio_prio(spu_context* ctx, uint32_t cmd)
+{
+    const int w = ctx->ls[0x1DF];
+    if (__builtin_expect((cmd & ~3u) == 0x20u, 0) && ctx->mfc_eal - 0x58000000u < 0x01000000u &&
+        (ctx->mfc_eal & 0x1FFFFFu) < 0x100000u && g_spu_audio_wid != w) {
+        g_spu_audio_wid = w;
+        fprintf(stderr, "[audio] o som do jogo Ã© mixado pelo workload %d da SPURS (spu%u): prioridade alta enquanto ele roda\n",
+                w, (unsigned)(ctx->spu_id & 7u));
+        t_audio_w = -1;
+    }
+    if (__builtin_expect(w != t_audio_w, 0)) { t_audio_w = w; spu_audio_prio_switch(w); }
+}
 int spu_mfc_cmd_lean(spu_context* ctx, uint32_t cmd)
 {
+    spu_audio_prio(ctx, cmd);
     if (__builtin_expect(s_mfc_lean <= 0, 0)) {
         if (s_mfc_lean < 0) mfc_lean_init();
         if (!s_mfc_lean) return 0;
