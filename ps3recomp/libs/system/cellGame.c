@@ -413,7 +413,10 @@ s32 cellGameContentPermit(char* contentInfoPath, char* usrdirPath)
         {
             extern const char* ppu_vfs_root;
             char vpath[CELL_GAME_PATH_MAX];
-            snprintf(vpath, sizeof vpath, "%s/game/%s/USRDIR", ppu_vfs_root, s_check_dir);
+            /* $PS3_HDD0_ROOT when set, as ppu_fs does (GoW report 340: the disc read in place from the player's
+             * folder, and this used to make game/<title> inside it) */
+            const char* hdd0 = getenv("PS3_HDD0_ROOT");
+            snprintf(vpath, sizeof vpath, "%s/game/%s/USRDIR", (hdd0 && *hdd0) ? hdd0 : ppu_vfs_root, s_check_dir);
             ensure_dirs(vpath);
         }
     }
