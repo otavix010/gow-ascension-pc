@@ -1212,6 +1212,9 @@ static int spu_mfc_getlist_lean(spu_context* ctx, uint32_t cmd)
  * likely because the SPU keeps that workload id in its LS while it idles in
  * the kernel, and a spinning HIGHEST thread starves the rest. */
 static volatile int g_spu_audio_wid = -1;
+/* time between the game's PUTs into the cellAudio rings (read by cellAudio's [audio] line) */
+volatile long long g_audio_put_last_us, g_audio_put_gap_max_us;
+volatile unsigned g_audio_put_gaps30;
 static SPU_THREAD_LOCAL int t_audio_w = -1;      /* the workload this thread last ran */
 static SPU_THREAD_LOCAL int t_audio_up;          /* boosted, with t_audio_old to go back to */
 static SPU_THREAD_LOCAL int t_audio_old;
@@ -1236,6 +1239,16 @@ static __attribute__((noinline)) void spu_audio_prio_switch(int w)
 static inline __attribute__((always_inline)) void spu_audio_prio(spu_context* ctx, uint32_t cmd)
 {
     const int w = ctx->ls[0x1DF];
+    if (__builtin_expect((cmd & ~3u) == 0x20u, 0) && ctx->mfc_eal - 0x58000000u < 0x01000000u &&
+        (ctx->mfc_eal & 0x1FFFFFu) < 0x100000u) {
+        const long long now = (long long)(spu_host_ns() / 1000u), last = g_audio_put_last_us;
+        if (last) {
+            const long long gap = now - last;
+            if (gap > g_audio_put_gap_max_us) g_audio_put_gap_max_us = gap;
+            if (gap > 30000) g_audio_put_gaps30++;
+        }
+        g_audio_put_last_us = now;
+    }
     if (__builtin_expect((cmd & ~3u) == 0x20u, 0) && ctx->mfc_eal - 0x58000000u < 0x01000000u &&
         (ctx->mfc_eal & 0x1FFFFFu) < 0x100000u && g_spu_audio_wid != w) {
         g_spu_audio_wid = w;

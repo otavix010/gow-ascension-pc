@@ -743,15 +743,19 @@ static void audio_stats_tick(void)
     if (now - t0 < (ruim ? 10000u : 60000u)) return;
     const double s = (now - t0) / 1000.0;
     const double ms_q = 1000.0 / CELL_AUDIO_SAMPLE_RATE;
+    extern volatile long long g_audio_put_gap_max_us;   /* spu_channels.c: the game's writes into the rings */
+    extern volatile unsigned g_audio_put_gaps30;
     char hist[96] = "";
     for (int i = 0, n = 0; i < 9; i++)
         n += snprintf(hist + n, sizeof hist - (size_t)n, "%s%u", i ? "/" : "", s_ast.lead_hist[i]);
     fprintf(stderr, "[audio] %.0f s: %u blocos (%.0f/s, o certo é 187,5), %u atrasados (o jogo não escreveu a tempo, tocou silêncio), "
                     "%u vezes o dispositivo ficou vazio, fila do dispositivo %.0f a %.0f ms, jogo adiantado %.1f blocos "
-                    "(mín. %u; por bloco 0..8: %s)\n",
+                    "(mín. %u; por bloco 0..8: %s), maior intervalo entre escritas do jogo %.1f ms, %u intervalos > 30 ms\n",
             s, s_ast.blocks, s_ast.blocks / s, s_ast.late, s_ast.dry,
             s_ast.q_min == (1 << 30) ? 0.0 : s_ast.q_min * ms_q, s_ast.q_max * ms_q,
-            s_ast.lead_n ? (double)s_ast.lead_sum / s_ast.lead_n : 0.0, s_ast.lead_n ? s_ast.lead_min : 0u, hist);
+            s_ast.lead_n ? (double)s_ast.lead_sum / s_ast.lead_n : 0.0, s_ast.lead_n ? s_ast.lead_min : 0u, hist,
+            g_audio_put_gap_max_us / 1000.0, g_audio_put_gaps30);
+    g_audio_put_gap_max_us = 0; g_audio_put_gaps30 = 0;
     s_ast.blocks = s_ast.late = s_ast.waits = s_ast.dry = 0;
     s_ast.q_min = 1 << 30; s_ast.q_max = 0;
     s_ast.lead_n = 0; s_ast.lead_sum = 0; s_ast.lead_min = ~0u; memset(s_ast.lead_hist, 0, sizeof s_ast.lead_hist);
