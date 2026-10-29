@@ -64,6 +64,7 @@ void     cellGame_init_from_paramsfo(const char* sfo_path);  /* libs/system/cell
 const char* cellGame_get_title_id(void);                     /* libs/system/cellGame.c */
 void     gowa_offline_register(void);                        /* GOWA: gowa_offline.cpp */
 int      gowa_conf_replay(const char* dir);                  /* GOWA: gowa_confere.cpp */
+void     gowa_perf_jogo_liga(void);                          /* GOWA: gowa_confere.cpp (GOWA_PERF_JOGO) */
 /* Optional hook: load real system PRX modules (libsre = cellSpurs/cellSync) into
  * guest RAM and register their exports. Weak default is a no-op; a title that
  * links a lifted PRX defines a strong version. Called after the lifted function
@@ -3010,6 +3011,7 @@ int main(int argc, char** argv)
     if (const char* cr = getenv("GOWA_CONF_REPLAY")) {
         return gowa_conf_replay(cr);
     }
+    gowa_perf_jogo_liga();
 
     /* Two scalars that make a milestone diff interpretable: a lift that found
      * fewer functions, or a build that registered fewer HLE handlers, explains

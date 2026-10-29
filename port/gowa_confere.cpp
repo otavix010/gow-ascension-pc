@@ -618,3 +618,115 @@ extern "C" int gowa_conf_replay(const char* dir)
 {
     return replay(dir);
 }
+
+/* GOWA_PERF_JOGO=<início s>,<duração s> (29/10): perfil do jogo de verdade, não da reprodução.
+ * Depois de <início> segundos, uma thread suspende a cada ~2 ms cada thread do processo que gastou CPU
+ * desde a passada anterior, lê o RIP e a solta. No fim (fora da suspensão): out\perfil_jogo_spu.txt,
+ * _ppu.txt e _outros.txt ("<rva hex> <amostras>", como o perfil.txt da reprodução:
+ * scripts_edge\perfil_map.py), o que caiu fora do exe por módulo e deslocamento no log ([perf-jogo] dll),
+ * e o uso de CPU de cada thread na janela ([perf-jogo] thread). Com a thread suspensa nada é alocado
+ * (ela pode estar com o lock do heap): as amostras vão para um vetor reservado antes. */
+#include <tlhelp32.h>
+#include <psapi.h>
+namespace {
+struct AmostraJogo { uint64_t rip; uint8_t papel; };   /* papel: 0 SPU, 1 PPU, 2 outras */
+DWORD WINAPI perf_jogo_laco(LPVOID arg)
+{
+    const char* cfg = (const char*)arg;
+    double ini = 60, dur = 30;
+    sscanf(cfg, "%lf,%lf", &ini, &dur);
+    Sleep((DWORD)(ini * 1000));
+    const uintptr_t base = (uintptr_t)GetModuleHandleA(nullptr);
+    const DWORD pid = GetCurrentProcessId(), eu = GetCurrentThreadId();
+    struct Alvo { HANDLE h; uint8_t papel; ULONG64 ciclos; char nome[40]; ULONG64 t0; };
+    std::vector<Alvo> alvos;
+    auto tempo = [](HANDLE h) -> ULONG64 {
+        FILETIME a, b, k, u;
+        if (!GetThreadTimes(h, &a, &b, &k, &u)) return 0;
+        return ((ULONG64)k.dwHighDateTime << 32 | k.dwLowDateTime) + ((ULONG64)u.dwHighDateTime << 32 | u.dwLowDateTime);
+    };
+    HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0);
+    THREADENTRY32 te; te.dwSize = sizeof te;
+    for (BOOL ok = Thread32First(snap, &te); ok; ok = Thread32Next(snap, &te)) {
+        if (te.th32OwnerProcessID != pid || te.th32ThreadID == eu) continue;
+        HANDLE h = OpenThread(THREAD_SUSPEND_RESUME | THREAD_GET_CONTEXT | THREAD_QUERY_INFORMATION, FALSE, te.th32ThreadID);
+        if (!h) continue;
+        Alvo a{h, 2, 0, "", 0};
+        { PWSTR w = nullptr;
+          if (SUCCEEDED(GetThreadDescription(h, &w)) && w) { WideCharToMultiByte(CP_UTF8, 0, w, -1, a.nome, sizeof a.nome, nullptr, nullptr); LocalFree(w); } }
+        if (!a.nome[0]) snprintf(a.nome, sizeof a.nome, "tid %lu", (unsigned long)te.th32ThreadID);
+        a.papel = (!strncmp(a.nome, "SPU", 3)) ? 0 : (!strncmp(a.nome, "P:", 2)) ? 1 : 2;
+        a.t0 = tempo(h);
+        alvos.push_back(a);
+    }
+    CloseHandle(snap);
+    std::vector<AmostraJogo> am;
+    am.reserve((size_t)(dur * 600 + 100) * alvos.size());
+    fprintf(stderr, "[perf-jogo] amostrando %zu threads por %.0f s\n", alvos.size(), dur);
+    LARGE_INTEGER f, t0, t, u; QueryPerformanceFrequency(&f); QueryPerformanceCounter(&t0);
+    for (;;) {
+        QueryPerformanceCounter(&t);
+        if ((double)(t.QuadPart - t0.QuadPart) / f.QuadPart >= dur) break;
+        for (Alvo& a : alvos) {
+            if (am.size() == am.capacity()) break;
+            ULONG64 cy = 0;
+            if (QueryThreadCycleTime(a.h, &cy) && cy == a.ciclos) continue;   /* parada (esperando no kernel) */
+            a.ciclos = cy;
+            if (SuspendThread(a.h) == (DWORD)-1) continue;
+            CONTEXT c; c.ContextFlags = CONTEXT_CONTROL;
+            if (GetThreadContext(a.h, &c)) am.push_back({c.Rip, a.papel});
+            ResumeThread(a.h);
+        }
+        do { YieldProcessor(); QueryPerformanceCounter(&u); } while ((u.QuadPart - t.QuadPart) * 1000000 / f.QuadPart < 2000);
+    }
+    QueryPerformanceCounter(&u);
+    const double janela = (double)(u.QuadPart - t0.QuadPart) / f.QuadPart;
+    /* uso de CPU por thread na janela (% de um núcleo) */
+    std::vector<std::pair<double, const Alvo*>> uso;
+    for (const Alvo& a : alvos) uso.push_back({(tempo(a.h) - a.t0) / 1e7 / janela * 100.0, &a});
+    std::sort(uso.begin(), uso.end(), [](const auto& x, const auto& y) { return x.first > y.first; });
+    for (const auto& x : uso) if (x.first >= 1.0) fprintf(stderr, "[perf-jogo] thread %-32s %5.1f%% de um núcleo\n", x.second->nome, x.first);
+    /* módulos, para o que caiu fora do exe */
+    HMODULE mods[512]; DWORD nb = 0;
+    EnumProcessModules(GetCurrentProcess(), mods, sizeof mods, &nb);
+    struct Mod { uintptr_t ini, fim; char nome[48]; };
+    std::vector<Mod> ms;
+    for (DWORD k = 0; k < nb / sizeof(HMODULE); k++) {
+        MODULEINFO mi; Mod m{};
+        if (!GetModuleInformation(GetCurrentProcess(), mods[k], &mi, sizeof mi)) continue;
+        m.ini = (uintptr_t)mi.lpBaseOfDll; m.fim = m.ini + mi.SizeOfImage;
+        GetModuleBaseNameA(GetCurrentProcess(), mods[k], m.nome, sizeof m.nome);
+        ms.push_back(m);
+    }
+    const char* nomes[3] = {"spu", "ppu", "outros"};
+    for (int p = 0; p < 3; p++) {
+        std::unordered_map<uint32_t, uint32_t> hist;
+        std::unordered_map<std::string, uint32_t> dll;
+        size_t n = 0, fora = 0;
+        for (const AmostraJogo& a : am) {
+            if (a.papel != p) continue;
+            n++;
+            if (a.rip - base < 0x10000000u) { hist[(uint32_t)(a.rip - base)]++; continue; }
+            fora++;
+            hist[0xFFFFFFFFu]++;
+            std::string k = "?";
+            for (const Mod& m : ms) if (a.rip >= m.ini && a.rip < m.fim) { char b[96]; snprintf(b, sizeof b, "%s+0x%llX", m.nome, (unsigned long long)((a.rip - m.ini) & ~0xFFull)); k = b; break; }
+            dll[k]++;
+        }
+        char cam[64]; snprintf(cam, sizeof cam, "../../out/perfil_jogo_%s.txt", nomes[p]);
+        if (FILE* fo = fopen(cam, "w")) { for (const auto& kv : hist) fprintf(fo, "%X %u\n", kv.first, kv.second); fclose(fo); }
+        fprintf(stderr, "[perf-jogo] %s: %zu amostras (%zu fora do exe) -> %s\n", nomes[p], n, fora, cam);
+        std::vector<std::pair<uint32_t, std::string>> top;
+        for (const auto& kv : dll) top.push_back({kv.second, kv.first});
+        std::sort(top.begin(), top.end(), [](const auto& x, const auto& y) { return x.first > y.first; });
+        for (size_t k = 0; k < top.size() && k < 12; k++)
+            fprintf(stderr, "[perf-jogo] dll %s %-40s %5.1f%%\n", nomes[p], top[k].second.c_str(), n ? 100.0 * top[k].first / n : 0.0);
+    }
+    for (const Alvo& a : alvos) CloseHandle(a.h);
+    return 0;
+}
+}  // namespace
+extern "C" void gowa_perf_jogo_liga(void)
+{
+    if (const char* e = getenv("GOWA_PERF_JOGO")) CloseHandle(CreateThread(nullptr, 0, perf_jogo_laco, (LPVOID)e, 0, nullptr));
+}
