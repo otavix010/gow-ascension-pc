@@ -1217,7 +1217,10 @@ static int spu_mfc_getlist_lean(spu_context* ctx, uint32_t cmd)
  * thread runs at THREAD_PRIORITY_HIGHEST while that workload is the one in
  * its LS (ls[0x1DF]) -- a short task per block, so it cannot starve the
  * others -- and at its own priority again on the next workload.
- * GOWA_AUDIO_SPU_PRIO=0 turns it off. */
+ * OFF by default (GOWA_AUDIO_SPU_PRIO=1 turns it on): measured on 2 CPUs it
+ * made the sound far worse (the writer's lead fell from ~6 blocks to ~1),
+ * likely because the SPU keeps that workload id in its LS while it idles in
+ * the kernel, and a spinning HIGHEST thread starves the rest. */
 static volatile int g_spu_audio_wid = -1;
 static SPU_THREAD_LOCAL int t_audio_w = -1;      /* the workload this thread last ran */
 static SPU_THREAD_LOCAL int t_audio_up;          /* boosted, with t_audio_old to go back to */
@@ -1226,7 +1229,7 @@ static __attribute__((noinline)) void spu_audio_prio_switch(int w)
 {
 #ifdef _WIN32
     static int s_on = -1;
-    if (s_on < 0) { const char* e = getenv("GOWA_AUDIO_SPU_PRIO"); s_on = !(e && *e == '0'); }
+    if (s_on < 0) { const char* e = getenv("GOWA_AUDIO_SPU_PRIO"); s_on = e && *e == '1'; }
     if (!s_on) return;
     const int audio = w == g_spu_audio_wid;
     if (audio && !t_audio_up) {
@@ -1246,7 +1249,7 @@ static inline __attribute__((always_inline)) void spu_audio_prio(spu_context* ct
     if (__builtin_expect((cmd & ~3u) == 0x20u, 0) && ctx->mfc_eal - 0x58000000u < 0x01000000u &&
         (ctx->mfc_eal & 0x1FFFFFu) < 0x100000u && g_spu_audio_wid != w) {
         g_spu_audio_wid = w;
-        fprintf(stderr, "[audio] o som do jogo Ã© mixado pelo workload %d da SPURS (spu%u): prioridade alta enquanto ele roda\n",
+        fprintf(stderr, "[audio] o som do jogo Ã© mixado pelo workload %d da SPURS (spu%u)\n",
                 w, (unsigned)(ctx->spu_id & 7u));
         t_audio_w = -1;
     }

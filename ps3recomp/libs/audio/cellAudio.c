@@ -193,6 +193,9 @@ static struct {
     unsigned long long last_written_ms;
     int writer_seen, stall_said;
 } s_ast;
+/* per port: the last block the game wrote in time (raw, big-endian) to fade out over a late one */
+static float s_prev_blk[CELL_AUDIO_PORT_MAX][CELL_AUDIO_BLOCK_SAMPLES * 8];
+static u8    s_prev_ok[CELL_AUDIO_PORT_MAX], s_after_late[CELL_AUDIO_PORT_MAX];
 
 /* ---------------------------------------------------------------------------
  * Host audio output backend
@@ -591,6 +594,25 @@ static void audio_mix_one_block(void)
             if (lead < s_ast.lead_min) s_ast.lead_min = lead;
             s_ast.lead_hist[lead < 8 ? lead : 8]++;
         }
+        /* A late block cut straight to silence and back, a click at each edge. The
+         * first late block of a run replays this port's last good one fading out,
+         * further ones are silence, and the next good block fades in over 64
+         * samples (1.3 ms). */
+        const float* msrc = src;
+        int ramp = 0;                               /* 1 = fade out, 2 = fade in */
+        if (late) {
+            msrc = s_prev_ok[p] ? s_prev_blk[p] : NULL;
+            ramp = 1;
+            s_prev_ok[p] = 0;
+            s_after_late[p] = 1;
+        } else {
+            if (s_after_late[p]) ramp = 2;
+            s_after_late[p] = 0;
+            memcpy(s_prev_blk[p], src, CELL_AUDIO_BLOCK_SAMPLES * nch * sizeof(float));
+            s_prev_ok[p] = 1;
+        }
+#define AUDIO_LV(s) (ramp == 1 ? level * (1.0f - (float)(s) / CELL_AUDIO_BLOCK_SAMPLES) \
+                   : ramp == 2 && (s) < 64 ? level * (float)(s) / 64.0f : level)
 
         /* AUDIO_PEAK diag: which blocks of this port's WHOLE ring hold data,
          * vs which block the read cursor is on -- distinguishes "writer never
@@ -611,40 +633,42 @@ static void audio_mix_one_block(void)
                         p, (unsigned long long)port->read_index, block_idx, map);
             } } }
 
-        if (late) {
+        if (!msrc) {
             /* nothing to mix */
         } else if (s_out_ch == 8) {
             for (u32 s = 0; s < CELL_AUDIO_BLOCK_SAMPLES; s++) {
                 float* o = &s_mix_buffer[s * 8];
+                const float lv = AUDIO_LV(s);
                 if (nch == 8) {
-                    for (u32 c = 0; c < 8; c++) o[c] += ld_be_f32(&src[s * 8 + c]) * level;
+                    for (u32 c = 0; c < 8; c++) o[c] += ld_be_f32(&msrc[s * 8 + c]) * lv;
                 } else if (nch >= 2) {
-                    o[0] += ld_be_f32(&src[s * nch + 0]) * level;
-                    o[1] += ld_be_f32(&src[s * nch + 1]) * level;
+                    o[0] += ld_be_f32(&msrc[s * nch + 0]) * lv;
+                    o[1] += ld_be_f32(&msrc[s * nch + 1]) * lv;
                 } else {
-                    const float m = ld_be_f32(&src[s]) * level;
+                    const float m = ld_be_f32(&msrc[s]) * lv;
                     o[0] += m; o[1] += m;
                 }
             }
         } else
         for (u32 s = 0; s < CELL_AUDIO_BLOCK_SAMPLES; s++) {
             float left, right;
+            const float lv = AUDIO_LV(s);
             if (nch >= 2) {
-                left  = ld_be_f32(&src[s * nch + 0]) * level;
-                right = ld_be_f32(&src[s * nch + 1]) * level;
+                left  = ld_be_f32(&msrc[s * nch + 0]) * lv;
+                right = ld_be_f32(&msrc[s * nch + 1]) * lv;
             } else {
                 /* Mono: duplicate to both channels */
-                left = right = ld_be_f32(&src[s]) * level;
+                left = right = ld_be_f32(&msrc[s]) * lv;
             }
 
             /* If 7.1, mix center and other channels into stereo */
             if (nch == 8) {
-                float center = ld_be_f32(&src[s * 8 + 2]) * level * 0.707f;
-                float lfe    = ld_be_f32(&src[s * 8 + 3]) * level * 0.5f;
-                float rl     = ld_be_f32(&src[s * 8 + 4]) * level * 0.5f;
-                float rr     = ld_be_f32(&src[s * 8 + 5]) * level * 0.5f;
-                float sl     = ld_be_f32(&src[s * 8 + 6]) * level * 0.3f;
-                float sr     = ld_be_f32(&src[s * 8 + 7]) * level * 0.3f;
+                float center = ld_be_f32(&msrc[s * 8 + 2]) * lv * 0.707f;
+                float lfe    = ld_be_f32(&msrc[s * 8 + 3]) * lv * 0.5f;
+                float rl     = ld_be_f32(&msrc[s * 8 + 4]) * lv * 0.5f;
+                float rr     = ld_be_f32(&msrc[s * 8 + 5]) * lv * 0.5f;
+                float sl     = ld_be_f32(&msrc[s * 8 + 6]) * lv * 0.3f;
+                float sr     = ld_be_f32(&msrc[s * 8 + 7]) * lv * 0.3f;
                 left  += center + lfe + rl + sl;
                 right += center + lfe + rr + sr;
             }
@@ -656,6 +680,7 @@ static void audio_mix_one_block(void)
         /* Firmware clears a ring-buffer block after consuming it. Besides
          * preventing stale PCM from replaying when a producer stalls, the
          * cleared block is an observable consumption signal for producers. */
+#undef AUDIO_LV
         memset(src, 0, CELL_AUDIO_BLOCK_SAMPLES * nch * sizeof(float));
         if (audio_wait_on()) memcpy(audio_block_last(src, nch), k_audio_marca, 4);
 

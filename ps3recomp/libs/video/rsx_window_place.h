@@ -32,8 +32,18 @@ static HWND rsx_create_placed_window(const char* cls, const char* title, unsigne
     AdjustWindowRect(&wr, WS_OVERLAPPEDWINDOW, FALSE);
     int x = CW_USEDEFAULT, y = CW_USEDEFAULT;
     int w = wr.right - wr.left, h = wr.bottom - wr.top;
-    int other = 0;
-    { const char* e = getenv("PS3_WINDOW_MONITOR"); other = e && e[0] && e[0] != '1' && e[0] != '0'; }
+    int other = 0, hidden = 0;
+    { const char* e = getenv("PS3_WINDOW_MONITOR"); other = e && e[0] && e[0] != '1' && e[0] != '0';
+      /* PS3_WINDOW_MONITOR=oculta (test runs on a PC with one screen): outside
+       * every monitor, no focus, no taskbar button; the game draws as usual */
+      hidden = e && (e[0] == 'o' || e[0] == 'O'); }
+    if (hidden) {
+        HWND hwnd = CreateWindowExA(WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE, cls, title, WS_OVERLAPPEDWINDOW,
+                                    GetSystemMetrics(SM_XVIRTUALSCREEN) - w - 200, GetSystemMetrics(SM_YVIRTUALSCREEN),
+                                    w, h, NULL, NULL, GetModuleHandle(NULL), NULL);
+        if (hwnd) ShowWindow(hwnd, SW_SHOWNOACTIVATE);
+        return hwnd;
+    }
     if (other) {
         struct rsx_mon_pick pick = {{0}, 0};
         EnumDisplayMonitors(NULL, NULL, rsx_mon_pick_cb, (LPARAM)&pick);
