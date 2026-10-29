@@ -221,6 +221,7 @@ add_executable(${PROJECT_NAME}
     ${GOWA_MAIN}
     stubs.cpp
     gowa_offline.cpp
+    gowa_confere.cpp                   # conferência dos jobs de SPU (GOWA_CONF / GOWA_CONF_REPLAY)
     otavix_osd.c                       # o medidor padrÃ£o dos ports Otavix (F10)
     otavix_legenda.c                   # a legenda das teclas (F1)
     ${LLE_SOURCES}

@@ -63,6 +63,7 @@ extern int32_t g_sys_process_exit_code;
 void     cellGame_init_from_paramsfo(const char* sfo_path);  /* libs/system/cellGame.c */
 const char* cellGame_get_title_id(void);                     /* libs/system/cellGame.c */
 void     gowa_offline_register(void);                        /* GOWA: gowa_offline.cpp */
+int      gowa_conf_replay(const char* dir);                  /* GOWA: gowa_confere.cpp */
 /* Optional hook: load real system PRX modules (libsre = cellSpurs/cellSync) into
  * guest RAM and register their exports. Weak default is a no-op; a title that
  * links a lifted PRX defines a strong version. Called after the lifted function
@@ -2963,6 +2964,10 @@ int main(int argc, char** argv)
     fprintf(stderr,"[boot-dbg] before lv2_init_syscalls\n"); fflush(stderr);
     lv2_init_syscalls();     /* real lv2 syscall table (semaphore/memory/fs/...) */
     gowa_offline_register(); /* GOWA: imports sem handler -> respostas "sem rede" */
+    /* GOWA_CONF_REPLAY=<pasta>: reproduz os jobs de SPU gravados e sai (gowa_confere.cpp) */
+    if (const char* cr = getenv("GOWA_CONF_REPLAY")) {
+        return gowa_conf_replay(cr);
+    }
 
     /* Two scalars that make a milestone diff interpretable: a lift that found
      * fewer functions, or a build that registered fewer HLE handlers, explains

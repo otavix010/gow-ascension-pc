@@ -214,6 +214,7 @@ extern "C" { int g_gowa_pula_luz = [] { const char* e = getenv("GOWA_PULA_LUZ");
 #include "rsx_edge_luz.h"
 /* padrão LIGADO desde 22/10 (A/B ablg2 cap. 16 +2,0%, fase 1 empate, imagem igual); =0 volta à SPU */
 static int s_luz_gpu_init = [] { const char* e = getenv("GOWA_LUZ_GPU"); g_gowa_luz_gpu = e ? atoi(e) : 1; return 0; }();
+extern "C" uint32_t gowa_conf_luz(void* ctx, uint32_t g);
 extern "C" int gowa_luz_gpu(void* vctx)
 {
     spu_context* ctx = (spu_context*)vctx;
@@ -240,7 +241,7 @@ extern "C" int gowa_luz_gpu(void* vctx)
     if (!n || n > 4096 || tot > GOWA_LUZ_MAX || c0 > GOWA_LUZ_MAX || c1 > GOWA_LUZ_MAX || c2 > GOWA_LUZ_MAX) { InterlockedIncrement(&s_mais); return 0; }
     InterlockedIncrement(&s_ok);
     const uint32_t lp = hdr + be32(hdr), lc = hdr + be32(hdr + 4), ld = hdr + be32(hdr + 8);
-    const uint32_t g = (uint32_t)InterlockedIncrement(&g_gowa_luz_prox);
+    const uint32_t g = gowa_conf_luz(ctx, (uint32_t)InterlockedIncrement(&g_gowa_luz_prox));   /* GOWA_CONF: gowa_confere.cpp */
     const uint32_t id = g & (GOWA_LUZ_ANEL - 1u);
     gowa_luz_slot* sl = &g_gowa_luz_anel[id];
     if (sl->gen && sl->visto != sl->gen) InterlockedIncrement(&s_perdido);   /* o motor live nunca viu o anterior */
@@ -957,6 +958,7 @@ extern "C" void spu_interp_hot_register(uint32_t lsa, uint32_t len, uint32_t ea,
 extern "C" void spu_interp_hot_register_reloc(uint32_t lifted_lsa, uint32_t len, uint32_t ea, uint32_t w0, void (*fn)(void*));
 extern "C" uint32_t spu_registry_size(void);
 extern "C" int spu_registry_entry_img(uint32_t i, void** host, uint32_t* ls_addr, int* image_id);
+extern "C" void gowa_conf_registrou(uint32_t va, int img);
 static void gowa_register_jobmod_lifts(void)
 {
     if (getenv("GOWA_NO_JOBLIFT")) return;
@@ -970,6 +972,7 @@ static void gowa_register_jobmod_lifts(void)
         g_gowa_jobmods[i].reg();
         spu_begin_image(0);
         spu_overlay_register_region(g_gowa_jobmods[i].va, g_gowa_jobmods[i].bytes, img);
+        gowa_conf_registrou(g_gowa_jobmods[i].va, img);   /* GOWA_CONF: gowa_confere.cpp */
         n++;
     }
     fprintf(stderr, "[gowa] %d módulos de job WWS registrados como overlay nativo\n", n);

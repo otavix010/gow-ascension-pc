@@ -131,12 +131,19 @@ void spu_ls_watch_slow(uint32_t lsa, int is_write, const uint8_t* p, uint32_t pc
 #include "spu_sjlj.h"   /* GOWA: spu_jmpbuf, SPU_HALT_SETJMP/LONGJMP */
 static SPU_TLS spu_jmpbuf s_spu_halt_env;
 static SPU_TLS int     s_spu_halt_armed = 0;
+/* GOWA (27/10): job conformance (port/gowa_confere.cpp). A recorded job that leaves through a
+ * non-local return (a guest stack reset, a halt) ends there: the hook closes the record before
+ * the jump, and in the replay it jumps back to the replay loop instead. */
+extern int g_gowa_conf_on;
+void gowa_conf_salto(void* ctx);
+void spu_halt_arm_replay(int on) { s_spu_halt_armed = on; }
 
 /* A non-local return replaces the old host call chain without changing
  * any architectural registers, local store, or pending guest work. */
 void spu_restart_dispatch(spu_context* ctx)
 {
     g_spu_trampoline_fn = 0;
+    if (__builtin_expect(g_gowa_conf_on != 0, 0)) gowa_conf_salto(ctx);
     if (s_spu_halt_armed) SPU_HALT_LONGJMP(s_spu_halt_env, 2);
     fprintf(stderr, "[spu] non-local return outside execution driver at 0x%05X\n", ctx->pc);
     ctx->status = SPU_STATUS_STOPPED_BY_HALT;
@@ -175,6 +182,7 @@ void spu_halt(spu_context* ctx)
                 ctx->gpr[80]._u32[0], ctx->gpr[85]._u32[0]);
         fflush(stderr);
       } }
+    if (__builtin_expect(g_gowa_conf_on != 0, 0)) gowa_conf_salto(ctx);
     if (s_spu_halt_armed) { s_spu_halt_armed = 0; SPU_HALT_LONGJMP(s_spu_halt_env, 1); }
 }
 
@@ -658,6 +666,8 @@ static int spu_mfc_atomic(spu_context* ctx, uint32_t cmd)
     if (cmd != MFC_GETLLAR_CMD && cmd != MFC_PUTLLC_CMD &&
         cmd != MFC_PUTLLUC_CMD && cmd != MFC_PUTQLLUC_CMD)
         return 0;
+    { extern int g_gowa_conf_on;   /* GOWA: job conformance replay (port/gowa_confere.cpp) */
+      if (__builtin_expect(g_gowa_conf_on == 2, 0)) { extern void gowa_conf_atom(void*, uint32_t, int); gowa_conf_atom(ctx, cmd, 0); } }
 
     uint32_t ea  = ctx->mfc_eal & ~(uint32_t)(MFC_ATOMIC_LINE - 1);
     uint32_t lsa = ctx->mfc_lsa & SPU_LS_MASK;
@@ -1212,7 +1222,8 @@ int spu_mfc_cmd_lean(spu_context* ctx, uint32_t cmd)
      * 96 transfers; GOWA_MFC_LEAN_PM=0 keeps them on it) */
     static int s_pm = -1;
     if (__builtin_expect(s_pm < 0, 0)) { const char* e = getenv("GOWA_MFC_LEAN_PM"); s_pm = !(e && *e == '0'); }
-    if ((ctx->policy_mode & !s_pm) | g_gowa_jobdma_on | g_gowa_dma_ea_log | (int)g_barrier_sync_watch | ctx->mfc_eah)
+    extern int g_gowa_conf_on;
+    if ((ctx->policy_mode & !s_pm) | g_gowa_jobdma_on | g_gowa_conf_on | g_gowa_dma_ea_log | (int)g_barrier_sync_watch | ctx->mfc_eah)
         return 0;
     if (lista) {
         static int s_ll = -1;
@@ -1307,6 +1318,8 @@ void spu_wrch(spu_context* ctx, uint32_t channel, u128 value)
         /* Atomic line ops (GETLLAR/PUTLLC/...) need real reservation semantics,
          * not the plain GET/PUT the DMA engine would do. */
         if (channel == MFC_Cmd && spu_mfc_atomic(ctx, v)) {
+            { extern int g_gowa_conf_on;   /* GOWA: job conformance (port/gowa_confere.cpp) */
+              if (__builtin_expect(g_gowa_conf_on != 0, 0)) { extern void gowa_conf_atom(void*, uint32_t, int); gowa_conf_atom(ctx, v, 1); } }
             extern FILE* gowa_pmtrace_file(spu_context*);
             FILE* tf = gowa_pmtrace_file(ctx);
             if (tf) { fprintf(tf, "ATOM pc=0x%05X cmd=0x%02X lsa=0x%05X ea=0x%08X stat=%u\n",
@@ -1546,6 +1559,8 @@ static void spu_ch_wait(spu_context* ctx, uint32_t channel, const char* op)
  * ===========================================================================*/
 u128 spu_rdch(spu_context* ctx, uint32_t channel)
 {
+    { extern int g_gowa_conf_on;   /* GOWA: job conformance replay (port/gowa_confere.cpp) */
+      if (__builtin_expect(g_gowa_conf_on == 2, 0)) { extern void gowa_conf_rdch_antes(void*, uint32_t); gowa_conf_rdch_antes(ctx, channel); } }
     { static int s_c = -1; if (s_c < 0) { const char* e = getenv("SPU_CHHIST"); s_c = e ? (atoi(e) > 0 ? atoi(e) : 2000) : 0; }
       if (s_c) { static unsigned long long r[128]; static unsigned long long n;
           r[channel & 127]++;
@@ -1630,6 +1645,8 @@ u128 spu_rdch(spu_context* ctx, uint32_t channel)
         v = 0;
         break;
     }
+    { extern int g_gowa_conf_on;   /* GOWA: job conformance (port/gowa_confere.cpp) */
+      if (__builtin_expect(g_gowa_conf_on != 0, 0)) { extern uint32_t gowa_conf_rdch(void*, uint32_t, uint32_t); v = gowa_conf_rdch(ctx, channel, v); } }
     return spu_make_preferred_u32(v);
 }
 
@@ -2181,6 +2198,22 @@ int spu_have_function(uint32_t addr)
     return spu_image_of_function(addr) >= 0;
 }
 
+/* GOWA (27/10, port/gowa_confere.cpp): swap the function registered for (image, addr),
+ * returning the old one -- the job conformance tool wraps a module's entry. Call before
+ * any SPU runs (the lookup caches are not flushed). Returns 0 if there is none. */
+int spu_registry_patch(int image_id, uint32_t addr, spu_fn fn, spu_fn* old)
+{
+    for (uint32_t n = s_hash_head[spu_fn_hash(addr)]; n; n = s_hash_next[n - 1]) {
+        spu_reg_entry* e = &s_registry[n - 1];
+        if (e->addr == addr && e->image_id == image_id) {
+            if (old) *old = e->fn;
+            e->fn = fn;
+            return 1;
+        }
+    }
+    return 0;
+}
+
 /* The pure interpreter's fast-path "is this LSA already lifted?" probe
  * (spu_interp.c, rejoin path). It IS the registry lookup, so overlay eviction and
  * self-modifying-code invalidation are honored automatically. Lived in
@@ -2280,6 +2313,7 @@ void spu_check_stack_reset(spu_context* ctx, void (*fn)(spu_context*))
         if (ctx->pc == s_stack_reset[i].entry &&
             fn == spu_lookup(ctx->pc, s_stack_reset[i].image_id)) {
             g_spu_trampoline_fn = 0;
+            if (__builtin_expect(g_gowa_conf_on != 0, 0)) gowa_conf_salto(ctx);
             SPU_HALT_LONGJMP(s_spu_halt_env, 2);
         }
 }
@@ -3279,6 +3313,7 @@ static __attribute__((noinline)) void spu_indirect_branch_full(spu_context* ctx)
              * Resume at depth zero so SPU_RET follows the restored guest link. */
             ctx->resident_task = ti;
             g_spu_trampoline_fn = 0;
+            if (__builtin_expect(g_gowa_conf_on != 0, 0)) gowa_conf_salto(ctx);
             SPU_HALT_LONGJMP(s_spu_halt_env, 2);
         }
         if (!ti && !ctx->resident_task) ti = spu_taskset_task_image(ctx->pc);

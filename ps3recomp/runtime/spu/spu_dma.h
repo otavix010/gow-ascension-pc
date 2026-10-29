@@ -171,10 +171,14 @@ static inline int mfc_is_fence(uint32_t cmd)
  * label by DMA shows up here. */
 void gowa_dma_ea_note(uint64_t ea, uint32_t size, uint32_t cmd);
 extern int g_gowa_dma_ea_log;
+/* GOWA (27/10): job conformance (port/gowa_confere.cpp) -- every transfer of a recorded job */
+extern int g_gowa_conf_on;
+void gowa_conf_xfer(void* ctx, uint32_t lsa, uint64_t ea, uint32_t size, uint32_t cmd);
 static inline int mfc_do_transfer(spu_context* spu, uint32_t lsa, uint64_t ea,
                                    uint32_t size, uint32_t cmd)
 {
     if (__builtin_expect(g_gowa_dma_ea_log, 0)) gowa_dma_ea_note(ea, size, cmd);
+    if (__builtin_expect(g_gowa_conf_on, 0)) gowa_conf_xfer(spu, lsa, ea, size, cmd);
     /* Upper16 command-channel bits carry replacement/transfer class IDs. */
     if ((cmd & 0xFFFFu) == MFC_SDCRZ_CMD) {
         /* CBEA 1.02 section 7.7.3: SDCRZ writes zeros in EA space, without an
