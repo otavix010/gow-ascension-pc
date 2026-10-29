@@ -23,6 +23,9 @@ if "%FFMPEG_DIR%"=="" set "FFMPEG_DIR=%RAIZ%\dl\ffmpeg9\ffmpeg-n9.0-latest-win64
 set "FFMPEG_F=%FFMPEG_DIR:\=/%"
 rem GOWA_VS = pasta do Visual Studio 2022 com "C++ Clang tools" (o gerar.ps1 acha com o vswhere)
 if "%GOWA_VS%"=="" set "GOWA_VS=C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools"
+rem Tira as aspas do PATH: entrada como "C:\Program Files (x86)\ZeroTier\One\" quebra o vcvars64.bat
+rem ("\ZeroTier\One\ was unexpected at this time"; reports 268, 273, 274, 283, 316, 318)
+set "PATH=%PATH:"=%"
 call "%GOWA_VS%\VC\Auxiliary\Build\vcvars64.bat" >nul
 set "PATH=%GOWA_VS%\VC\Tools\Llvm\x64\bin;%PATH%"
 if not exist "%DIR%\build.ninja" (
