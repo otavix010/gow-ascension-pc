@@ -20,11 +20,11 @@ import urllib.request
 import zlib
 from pathlib import Path
 
-try:
-    from Crypto.Cipher import AES
-    from Crypto.Util import Counter
-except ImportError:
-    sys.exit('falta o pycryptodome: python -m pip install pycryptodome')
+# o pycryptodome se carregar; senão o AES do próprio Windows (reports 331/334: o Controle Inteligente de
+# Aplicativos bloqueia as DLLs sem assinatura do pycryptodome). ps3recomp/tools/aes_cng.py
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / 'ps3recomp' / 'tools'))
+from aes_cng import carregar as _carregar_aes
+AES, Counter = _carregar_aes()
 
 KEY_APP, KEY_NPDRM = 4, 8
 COMMIT_RPCS3 = '8b9ee60569753db8406b66d135cce112156172a1'

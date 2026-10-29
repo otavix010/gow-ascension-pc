@@ -192,9 +192,10 @@ function Escolher-Python {
         $null = SemExcecao { & $semPip -m ensurepip --user 2>$null }
         $null = SemExcecao { & $semPip -m pip --version 2>$null }
         if ($LASTEXITCODE -eq 0) { return $semPip }
-        throw ("o único Python 3.10 ou mais novo encontrado ($semPip) não tem pip, e não deu para instalar o pip nele " +
-               "(é o Python de outro programa?). Instale o Python oficial: winget install -e --id Python.Python.3.12, " +
-               "feche e abra o launcher e gere de novo.")
+        # report 336: o pip só servia para o pycryptodome, e o AES agora tem reserva no próprio Windows
+        # (ps3recomp\tools\aes_cng.py): um Python sem pip também serve
+        Msg "o Python em $semPip não tem pip e não deu para instalar; segue sem ele (o AES vem do Windows)"
+        return $semPip
     }
     return $null
 }
@@ -234,7 +235,12 @@ Etapa '1_ferramentas' {
     }
     if ($falta) { throw ("Falta instalar:`r`n  - " + ($falta -join "`r`n  - ")) }
     SemExcecao { & python -c "import Crypto" 2>$null }
-    if ($LASTEXITCODE -ne 0) { Exec $LOG 'python -m pip install --user pycryptodome' }
+    # o pycryptodome é só o AES mais rápido: sem ele (sem pip, ou as DLLs bloqueadas pelo Controle Inteligente de
+    # Aplicativos, reports 331/334/336) as ferramentas usam o AES do Windows
+    if ($LASTEXITCODE -ne 0) {
+        $null = SemExcecao { cmd /c "python -m pip install --user pycryptodome >> `"$LOG`" 2>&1" }
+        if ($LASTEXITCODE -ne 0) { Msg 'pycryptodome não instalado; as ferramentas usam o AES do Windows' }
+    }
     $ff = Join-Path $R "dl\ffmpeg9\$FFMPEG_NOME"
     if (-not (Test-Path "$ff\include\libavcodec")) {
         Msg "baixando o FFmpeg 9 (LGPL)"

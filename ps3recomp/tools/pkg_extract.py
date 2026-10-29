@@ -19,10 +19,12 @@ PS3_GPKG_KEY = bytes.fromhex("2e7b71d7c9c9a14ea3221f188828b8f8")
 # CTR construction with a different key.
 PSP_PKG_KEY  = bytes.fromhex("07f2c68290b50d2c33818d709b60e62b")
 
-try:                                    # fast C AES; a project dependency (requirements.txt)
-    from Crypto.Cipher import AES as _AES
+try:                                    # fast C AES: pycryptodome if it loads, else Windows CNG (aes_cng.py)
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    from aes_cng import carregar as _carregar_aes
+    _AES, _ = _carregar_aes()
     _HAVE_PYCRYPTO = True
-except ImportError:
+except Exception:   # not Windows and no pycryptodome: the pure-python fallback below
     _HAVE_PYCRYPTO = False
 
 # --- pure-python AES-128 ECB fallback (encrypt path only, for the CTR keystream) -------
