@@ -14056,8 +14056,12 @@ void rsx_live_draw_present(u32 buffer_id)
               }
           }
       } }
-    if (rsx_live_draw_framegen_on() && ld_fg_present_guest(srcimg, SRV_SURFACE_BASE + target))
-        goto ld_present_done;   /* GOWA_FRAMEGEN */
+    if (rsx_live_draw_framegen_on()) {
+        /* GOWA: [tela] também com a geração de quadros (report 218 veio sem); só a surface do jogo */
+        ld_tela_diag(srcimg, D3D12_RESOURCE_STATE_RENDER_TARGET, NULL, D3D12_RESOURCE_STATE_PRESENT);
+        if (ld_fg_present_guest(srcimg, SRV_SURFACE_BASE + target))
+            goto ld_present_done;   /* GOWA_FRAMEGEN */
+    }
     {
     const u32 bbi = g.swap->lpVtbl->GetCurrentBackBufferIndex(g.swap);
     ID3D12Resource* bb = g.backbuf[bbi];
