@@ -73,6 +73,7 @@ void     ps3_load_prx_modules(void);   /* GOWA: definida em stubs.cpp (libsre LL
 #include <string.h>
 #include <stdlib.h>
 #include <signal.h>
+#include <ctype.h>
 
 #ifdef _WIN32
 #include <windows.h>
@@ -173,6 +174,63 @@ extern "C" uint32_t    g_last_hle_nid;    /* ppu_hle.cpp breadcrumb */
 extern "C" const char* g_last_hle_name;
 
 extern "C" PPU_THREAD_LOCAL ppu_context* g_active_ctx;
+
+/* GOWA (29/10, reports 276/281/309): os jogadores compilam o port no PC deles e não há PDB, então o RVA sozinho
+ * não diz a função. O linker sempre grava o gowa.map ao lado do exe (CMakeLists, /MAP): no crash ele é lido e
+ * cada endereço do exe sai como função+deslocamento. */
+#define CRASH_NOME 112
+static void crash_nomes(HMODULE self, const uint64_t* rva, int n, char (*nome)[CRASH_NOME])
+{
+    uint64_t melhor[32] = {0};
+    for (int i = 0; i < n; i++) nome[i][0] = 0;
+    char caminho[MAX_PATH + 16];
+    DWORD k = GetModuleFileNameA(self, caminho, MAX_PATH);
+    if (!k || k >= MAX_PATH) return;
+    char* barra = strrchr(caminho, '\\');
+    if (!barra) return;
+    strcpy(barra + 1, "gowa.map");
+    FILE* f = fopen(caminho, "rb");
+    if (!f) return;
+    uint64_t base = 0x140000000ull;
+    char ln[1024];
+    while (fgets(ln, sizeof ln, f)) {
+        const char* p = strstr(ln, "Preferred load address is ");
+        if (p) { base = strtoull(p + 26, NULL, 16); continue; }
+        p = ln;
+        while (*p == ' ') p++;
+        /* " 0001:07c69dc0       nome      0000000147c6adc0     lib:obj" */
+        if (!(isxdigit((unsigned char)p[0]) && p[4] == ':' && isxdigit((unsigned char)p[5]))) continue;
+        p += 13;
+        while (*p == ' ') p++;
+        const char* n0 = p;
+        while (*p && *p != ' ') p++;
+        const size_t nl = (size_t)(p - n0);
+        while (*p == ' ') p++;
+        char* fim = NULL;
+        const uint64_t va = strtoull(p, &fim, 16);
+        if (fim != p + 16 || va < base) continue;
+        const uint64_t ini = va - base;
+        for (int i = 0; i < n; i++)
+            if (ini <= rva[i] && (!nome[i][0] || ini > melhor[i])) {
+                melhor[i] = ini;
+                const size_t c = nl < CRASH_NOME - 1 ? nl : CRASH_NOME - 1;
+                memcpy(nome[i], n0, c); nome[i][c] = 0;
+            }
+    }
+    fclose(f);
+    for (int i = 0; i < n; i++)
+        if (nome[i][0]) {
+            const size_t l = strlen(nome[i]);
+            if (l < CRASH_NOME - 20) snprintf(nome[i] + l, CRASH_NOME - l, "+0x%llX", (unsigned long long)(rva[i] - melhor[i]));
+        }
+}
+static const char* crash_modulo(HMODULE m, char* buf, DWORD n)
+{
+    if (!m || !GetModuleFileNameA(m, buf, n)) return "?";
+    const char* b = strrchr(buf, '\\');
+    return b ? b + 1 : buf;
+}
+
 static LONG WINAPI ydkj_crash_filter(EXCEPTION_POINTERS* ep)
 {
     EXCEPTION_RECORD* er = ep->ExceptionRecord;
@@ -190,19 +248,32 @@ static LONG WINAPI ydkj_crash_filter(EXCEPTION_POINTERS* ep)
     GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
                        GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
                        (LPCSTR)er->ExceptionAddress, &mod);
-    fprintf(stderr, "[CRASH] module=%p rva=0x%llX  (llvm-symbolizer --obj=ydkj_boot.exe 0x%llX)\n",
-            (void*)mod, (unsigned long long)((char*)er->ExceptionAddress - (char*)mod),
+    char mb[MAX_PATH];
+    fprintf(stderr, "[CRASH] module=%p (%s) rva=0x%llX\n",
+            (void*)mod, crash_modulo(mod, mb, MAX_PATH),
             (unsigned long long)((char*)er->ExceptionAddress - (char*)mod));
-    /* Host call stack (RVAs) so the lifted caller can be symbolized. */
+    /* Host call stack: every frame with its module; the exe's frames get function+offset from gowa.map. */
+    HMODULE self = GetModuleHandleA(NULL);
     void* frames[24];
     USHORT n = RtlCaptureStackBackTrace(0, 24, frames, NULL);
+    uint64_t rvas[25]; HMODULE mods[25];
+    rvas[0] = (uint64_t)((char*)er->ExceptionAddress - (char*)self);
     for (USHORT i = 0; i < n; i++) {
-        HMODULE m = NULL;
+        mods[i + 1] = NULL;
         GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
-                           GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT, (LPCSTR)frames[i], &m);
-        if (m == mod)
-            fprintf(stderr, "[CRASH]   #%-2u rva=0x%llX\n", i,
-                    (unsigned long long)((char*)frames[i] - (char*)m));
+                           GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT, (LPCSTR)frames[i], &mods[i + 1]);
+        rvas[i + 1] = (uint64_t)((char*)frames[i] - (char*)mods[i + 1]);
+    }
+    static char nomes[25][CRASH_NOME];
+    crash_nomes(self, rvas, n + 1, nomes);
+    if (mod == self)
+        fprintf(stderr, "[CRASH] em %s\n", nomes[0][0] ? nomes[0] : "(sem gowa.map)");
+    for (USHORT i = 0; i < n; i++) {
+        HMODULE m = mods[i + 1];
+        if (m == self)
+            fprintf(stderr, "[CRASH]   #%-2u rva=0x%llX %s\n", i, (unsigned long long)rvas[i + 1], nomes[i + 1]);
+        else
+            fprintf(stderr, "[CRASH]   #%-2u %s+0x%llX\n", i, crash_modulo(m, mb, MAX_PATH), (unsigned long long)rvas[i + 1]);
     }
     fflush(stderr);
     return EXCEPTION_EXECUTE_HANDLER;
