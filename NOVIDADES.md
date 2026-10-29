@@ -4,16 +4,19 @@ O Otavix Launcher mostra este arquivo na página "Novidades" do jogo. Cada atual
 "## <data> · <versão>" e o texto em português (### pt), inglês (### en) e, quando houver, espanhol (### es).
 As mais novas ficam em cima.
 
-## 29/10/2026 · d0837a7
+## 29/10/2026 · d163758
 ### pt
-- **Áudio com engasgos ou cortes:** descobrimos que o som do jogo é mixado num dos núcleos SPU do PS3, junto com os gráficos. Quando o processador do PC fica sem folga, essa parte atrasa e o som falha. Esta versão deixa os cortes mais suaves (sem o estalo seco) e dá prioridade de áudio à mixagem final. A correção de fundo vem com a tradução do EDGE para código nativo, que tira peso dos núcleos SPU.
-- **Mande um report se o som falhar ou sumir:** o log agora registra, a cada 10 segundos, quantas vezes o jogo atrasou o som, a folga que ele tinha e se ele parou de mandar som. Com isso conseguimos ver exatamente o que acontece no seu PC.
+- **Áudio com engasgos ou cortes:** encontramos a causa. O som do jogo é mixado em rajadas por uma tarefa dos núcleos SPU do PS3, e num PC sem folga no processador essas rajadas atrasam (medimos até 40 ms entre elas, até em PCs rápidos), mais do que o jogo deixa guardado. Agora o port espera pelo jogo enquanto toca o que já tem guardado (o buffer de áudio do launcher, 100 ms por padrão). Nos nossos testes com o processador limitado a 2 núcleos, o tempo de som cortado caiu de 4 a 5 segundos para menos de 1 segundo. Parte da mixagem do som também rodava num modo lento (interpretada) e agora roda traduzida.
+- **Os cortes que sobrarem ficam mais suaves** (sem o estalo seco) e a mixagem final tem prioridade de áudio no Windows.
+- **Mande um report se o som falhar ou sumir:** o log agora registra a saúde do som a cada 10 segundos e avisa se o jogo parar de mandar som.
 ### en
-- **Stuttering or cutting audio:** we found that the game's sound is mixed on one of the PS3's SPU cores, alongside the graphics. When the PC's processor has no headroom left, that part runs late and the sound drops. This version makes the drops softer (no hard click) and gives the final mix audio priority. The real fix comes with translating EDGE to native code, which takes load off the SPU cores.
-- **Send a report if the sound drops or disappears:** the log now records, every 10 seconds, how often the game was late with the sound, how much headroom it had and whether it stopped sending sound. That shows us exactly what happens on your PC.
+- **Stuttering or cutting audio:** we found the cause. The game mixes its sound in bursts on a task of the PS3's SPU cores, and on a PC with no processor headroom those bursts run late (we measured up to 40 ms between them, even on fast PCs), longer than the game keeps buffered. The port now waits for the game while it plays what is already buffered (the launcher's audio buffer, 100 ms by default). In our tests with the processor limited to 2 cores, the time with the sound cut fell from 4-5 seconds to under 1 second. Part of the sound mixing also ran in a slow (interpreted) mode and now runs translated.
+- **Any drops that remain are softer** (no hard click) and the final mix gets audio priority in Windows.
+- **Send a report if the sound drops or disappears:** the log now records the sound's health every 10 seconds and says if the game stops sending sound.
 ### es
-- **Audio con tirones o cortes:** descubrimos que el sonido del juego se mezcla en uno de los núcleos SPU de la PS3, junto con los gráficos. Cuando el procesador del PC se queda sin margen, esa parte se retrasa y el sonido falla. Esta versión suaviza los cortes (sin el chasquido seco) y da prioridad de audio a la mezcla final. La solución de fondo llega con la traducción del EDGE a código nativo, que quita carga a los núcleos SPU.
-- **Envía un report si el sonido falla o desaparece:** el log ahora registra, cada 10 segundos, cuántas veces el juego se retrasó con el sonido, el margen que tenía y si dejó de enviar sonido. Así vemos exactamente lo que pasa en tu PC.
+- **Audio con tirones o cortes:** encontramos la causa. El juego mezcla su sonido a ráfagas en una tarea de los núcleos SPU de la PS3, y en un PC sin margen en el procesador esas ráfagas se retrasan (medimos hasta 40 ms entre ellas, incluso en PC rápidos), más de lo que el juego deja guardado. Ahora el port espera al juego mientras reproduce lo que ya tiene guardado (el búfer de audio del launcher, 100 ms por defecto). En nuestras pruebas con el procesador limitado a 2 núcleos, el tiempo con el sonido cortado bajó de 4-5 segundos a menos de 1 segundo. Parte de la mezcla del sonido también corría en un modo lento (interpretada) y ahora corre traducida.
+- **Los cortes que queden son más suaves** (sin el chasquido seco) y la mezcla final tiene prioridad de audio en Windows.
+- **Envía un report si el sonido falla o desaparece:** el log ahora registra la salud del sonido cada 10 segundos y avisa si el juego deja de enviar sonido.
 
 ## 29/10/2026 · 06c722e
 ### pt
