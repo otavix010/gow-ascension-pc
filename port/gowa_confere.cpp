@@ -381,9 +381,15 @@ int replay(const char* dir)
             uint32_t dif_ls = 0, dif_ls_a = 0;
             for (uint32_t k = 0; k < SPU_LS_SIZE; k++)
                 if (ctx->ls_store[k] != fim->ls_store[k] && dif_ls++ == 0) dif_ls_a = k;
-            uint32_t dif_reg = 0; int reg1 = -1;
+            /* GOWA_CONF_REGS_ABI=1 (EDGE nativo): os temporários r2-r79 não contam -- o código nativo não
+             * refaz o lixo que o pipeline da SPU deixa neles, e quem chamou não os lê; saem à parte */
+            static const int regs_abi = getenv("GOWA_CONF_REGS_ABI") != nullptr;
+            uint32_t dif_reg = 0, dif_tmp = 0; int reg1 = -1;
             for (int k = 0; k < 128; k++)
-                if (memcmp(&ctx->gpr[k], &fim->gpr[k], 16) && dif_reg++ == 0) reg1 = k;
+                if (memcmp(&ctx->gpr[k], &fim->gpr[k], 16)) {
+                    if (regs_abi && k >= 2 && k <= 79) { dif_tmp++; continue; }
+                    if (dif_reg++ == 0) reg1 = k;
+                }
             const bool pc_ok = ((ctx->pc ^ fim->pc) & SPU_LS_MASK) == 0 && pend == j.pend;
             /* interrompido no jogo (uma interrupção assíncrona de outra SPU parou o job ali) e não
              * aqui: confere as escritas e as transferências até onde o jogo foi; a LS e os
@@ -399,6 +405,7 @@ int replay(const char* dir)
             if (dif_ls) diz(" (1a em 0x%05X, sp 0x%05X)", dif_ls_a, fim->gpr[1]._u32[0] & SPU_LS_MASK);
             diz(" | regs %u dif", dif_reg);
             if (dif_reg) diz(" (r%d)", reg1);
+            if (dif_tmp) diz(" + %u temporários", dif_tmp);
             if (!pc_ok) diz(" | fim em 0x%05X (saída %u), gravado 0x%05X (saída %u)", ctx->pc & SPU_LS_MASK, (unsigned)pend,
                             fim->pc & SPU_LS_MASK, j.pend);
             if (rr.diverge) diz(" | 1a divergência na transf %d", rr.primeiro_div);
