@@ -208,9 +208,18 @@ $VS = $null
 function Achar-VS {
     $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
     if (-not (Test-Path $vswhere)) { return $null }
-    $p = & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Llvm.Clang -property installationPath
-    if ($p) { return ($p | Select-Object -First 1) }
-    return $null
+    # report 350: o -latest escolhia um Visual Studio 2026 Enterprise com o componente Clang mas sem o
+    # vcvars64.bat (C++ incompleto); agora só serve uma instalação com o vcvars64.bat e o clang-cl, e a 2022
+    # (a testada) vem antes das outras
+    $todas = @(& $vswhere -all -products * -requires Microsoft.VisualStudio.Component.VC.Llvm.Clang -format json | ConvertFrom-Json)
+    $boas = @($todas | Where-Object {
+        (Test-Path (Join-Path $_.installationPath 'VC\Auxiliary\Build\vcvars64.bat')) -and
+        (Test-Path (Join-Path $_.installationPath 'VC\Tools\Llvm\x64\bin\clang-cl.exe')) })
+    if (-not $boas.Count) { return $null }
+    $boa = $boas | Sort-Object @{ Expression = { if ("$($_.installationVersion)" -like '17.*') { 0 } else { 1 } } },
+                               @{ Expression = { [version]("$($_.installationVersion)" -replace '[^0-9.].*$', '') }; Descending = $true } |
+           Select-Object -First 1
+    return $boa.installationPath
 }
 Etapa '1_ferramentas' {
     $falta = @()
