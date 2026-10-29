@@ -63,6 +63,10 @@ if (-not $Jobs) { $Jobs = [Environment]::ProcessorCount }
 $SHA_GOWA = '813723ac4e091d79ea20ad2500b2e86cb0fd25f3736541431921273e7a77246d'
 $FFMPEG_NOME = 'ffmpeg-n9.0-latest-win64-lgpl-shared-9.0'
 $FFMPEG_URL = "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/$FFMPEG_NOME.zip"
+# reports 267 e 298: a conexão com o GitHub caía no meio; primeiro a cópia no servidor do launcher (a mesma build de
+# 16/10, conferida pelo sha256), o GitHub do BtbN fica de reserva
+$FFMPEG_ESPELHO = "https://otavix-launcher.otavix-launcher-servidor.workers.dev/v1/arquivos/terceiros/ffmpeg/$FFMPEG_NOME.zip"
+$FFMPEG_ESPELHO_SHA = 'f6affc440dd120d582e427bf2345b8c346bd1547851228cf2e7a75504663252b'
 # Arquivos gratuitos da Sony, baixados dos servidores oficiais dela quando o jogador não
 # indica os seus (nada deles vem neste repositório)
 $UPDATE_URL = 'http://b0.ww.np.dl.playstation.net/tppkg/np/BCUS98232/BCUS98232_T76/5525fbb7b6b5456d/UP9000-BCUS98232_00-GOWABDPATCH00001-A0104-V0100-PE.pkg'
@@ -224,7 +228,7 @@ Etapa '1_ferramentas' {
     if ($LASTEXITCODE -ne 0) { Exec $LOG 'python -m pip install --user pycryptodome' }
     $ff = Join-Path $R "dl\ffmpeg9\$FFMPEG_NOME"
     if (-not (Test-Path "$ff\include\libavcodec")) {
-        Msg "baixando o FFmpeg 9 (LGPL) de $FFMPEG_URL"
+        Msg "baixando o FFmpeg 9 (LGPL)"
         New-Item -ItemType Directory -Force (Join-Path $R 'dl\ffmpeg9') | Out-Null
         $zip = Join-Path $R "dl\$FFMPEG_NOME.zip"
         [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
@@ -232,7 +236,16 @@ Etapa '1_ferramentas' {
         # geração parou; pelo Baixar (curl com novas tentativas, que acusa download incompleto) e, se o zip ainda
         # não abrir, apaga e baixa mais uma vez
         for ($vez = 1; ; $vez++) {
-            Baixar $FFMPEG_URL $zip
+            $doEspelho = $false
+            try {
+                Baixar $FFMPEG_ESPELHO $zip
+                if ((Get-FileHash -Algorithm SHA256 -LiteralPath $zip).Hash.ToLower() -ne $FFMPEG_ESPELHO_SHA) { throw 'sha256 diferente' }
+                $doEspelho = $true
+            } catch {
+                Msg "a cópia do FFmpeg no servidor não veio ($($_.Exception.Message)); baixando do GitHub"
+                Remove-Item $zip -ErrorAction SilentlyContinue
+            }
+            if (-not $doEspelho) { Baixar $FFMPEG_URL $zip }
             try { Expand-Archive -Path $zip -DestinationPath (Join-Path $R 'dl\ffmpeg9') -Force; break }
             catch {
                 Remove-Item $zip -ErrorAction SilentlyContinue
