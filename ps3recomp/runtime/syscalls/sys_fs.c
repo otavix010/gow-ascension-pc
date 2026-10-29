@@ -143,6 +143,16 @@ void sys_fs_translate_path(const char* ps3_path, char* host_path, int host_path_
             return;
         }
     }
+    /* PS3_HDD1_ROOT: /dev_hdd1 (the game cache), as in ppu_fs.cpp */
+    {
+        static const char* hdd1_root = NULL; static int hdd1_init = 0;
+        if (!hdd1_init) { hdd1_root = getenv("PS3_HDD1_ROOT"); hdd1_init = 1; }
+        if (hdd1_root && strncmp(ps3_path, "/dev_hdd1/", 10) == 0) {
+            snprintf(host_path, (size_t)host_path_size, "%s/%s", hdd1_root, ps3_path + 10);
+            fs_normalize_sep(host_path);
+            return;
+        }
+    }
 
     /* /dev_flash is FIRMWARE, not game data. ppu_fs.cpp serves it from a real
      * dev_flash tree ($PS3_DEV_FLASH); this layer was missing the same branch, so

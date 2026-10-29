@@ -28,9 +28,14 @@ rem ("\ZeroTier\One\ was unexpected at this time"; reports 268, 273, 274, 283, 3
 set "PATH=%PATH:"=%"
 call "%GOWA_VS%\VC\Auxiliary\Build\vcvars64.bat" >nul
 set "PATH=%GOWA_VS%\VC\Tools\Llvm\x64\bin;%PATH%"
+rem O ninja que vem com o Visual Studio, pelo caminho completo: o primeiro do PATH pode ser de outro
+rem programa ou estar quebrado (report 332: 'ninja --version' terminou com 0xc000003e)
+set "NINJA=%GOWA_VS%\Common7\IDE\CommonExtensions\Microsoft\CMake\Ninja\ninja.exe"
+if not exist "%NINJA%" set "NINJA=ninja"
+set "NINJA_F=%NINJA:\=/%"
 if not exist "%DIR%\build.ninja" (
   cmake -S "%RAIZ%\port" -B "%DIR%" -G Ninja ^
-    -DCMAKE_MAKE_PROGRAM=ninja ^
+    "-DCMAKE_MAKE_PROGRAM=%NINJA_F%" ^
     -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_COMPILER=clang-cl -DCMAKE_CXX_COMPILER=clang-cl ^
     %PGO% ^
     -DGOWA_PPU_MARCH=x86-64-v3 -DGOWA_SPU_X86_V3=ON -DGOWA_SPU_MARCH=%MARCH% -DGOWA_HOST_FMA=ON ^
@@ -40,6 +45,6 @@ if not exist "%DIR%\build.ninja" (
   if errorlevel 1 goto fim
 )
 cd /d "%DIR%"
-if "%GOWA_JOBS%"=="" (ninja gowa.exe) else (ninja -j %GOWA_JOBS% gowa.exe)
+if "%GOWA_JOBS%"=="" ("%NINJA%" gowa.exe) else ("%NINJA%" -j %GOWA_JOBS% gowa.exe)
 :fim
 echo exit=%ERRORLEVEL%

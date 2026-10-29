@@ -2734,6 +2734,35 @@ int main(int argc, char** argv)
      *  FIOS (func_002C31E8 testa o bit 0x1 dos attributes). */
     if (!GetEnvironmentVariableA("PS3_BOOT_PATCH", NULL, 0))
         SetEnvironmentVariableA("PS3_BOOT_PATCH", "1");
+    /*  Report 340 (29/10): o disco em outro drive, onde a junção e o link físico não funcionam, e sem espaço para
+     *  copiar os 34 GB. O gerador então grava em <vfs>\disco_direto.txt (UTF-8) a pasta que contém o PS3_GAME do
+     *  jogador: o disco (/dev_bdvd) é lido direto de lá e o update (/dev_hdd0) continua no vfs do port. */
+    {   wchar_t vw[MAX_PATH]; const DWORD nv = GetEnvironmentVariableW(L"PS3_VFS_ROOT", vw, MAX_PATH);
+        if (nv && nv < MAX_PATH - 32) {
+            wchar_t arq[MAX_PATH]; swprintf(arq, MAX_PATH, L"%s\\disco_direto.txt", vw);
+            FILE* f = _wfopen(arq, L"rb");
+            if (f) {
+                char u8[2048] = {0}; const size_t k = fread(u8, 1, sizeof u8 - 1, f); fclose(f);
+                u8[k] = 0;
+                char* p = u8; if ((unsigned char)p[0] == 0xEF && (unsigned char)p[1] == 0xBB && (unsigned char)p[2] == 0xBF) p += 3;
+                size_t L = strlen(p); while (L && (p[L - 1] == '\r' || p[L - 1] == '\n' || p[L - 1] == ' ')) p[--L] = 0;
+                wchar_t dw[MAX_PATH] = {0};
+                if (L && MultiByteToWideChar(CP_UTF8, 0, p, -1, dw, MAX_PATH)) {
+                    wchar_t usr[MAX_PATH]; swprintf(usr, MAX_PATH, L"%s\\PS3_GAME\\USRDIR", dw);
+                    if (GetFileAttributesW(usr) != INVALID_FILE_ATTRIBUTES) {
+                        if (!GetEnvironmentVariableW(L"PS3_HDD0_ROOT", NULL, 0)) SetEnvironmentVariableW(L"PS3_HDD0_ROOT", vw);
+                        if (!GetEnvironmentVariableW(L"PS3_HDD1_ROOT", NULL, 0)) SetEnvironmentVariableW(L"PS3_HDD1_ROOT", vw);
+                        /* o runtime lê as variáveis em ANSI: com acento no caminho, o nome curto (8.3) evita perder letras */
+                        wchar_t curto[MAX_PATH]; const DWORD nc = GetShortPathNameW(dw, curto, MAX_PATH);
+                        SetEnvironmentVariableW(L"PS3_VFS_ROOT", (nc && nc < MAX_PATH) ? curto : dw);
+                        fprintf(stderr, "[disco] lido direto de %s (o update fica no vfs do port)\n", p);
+                    } else {
+                        fprintf(stderr, "[disco] AVISO: o disco_direto.txt aponta para %s, mas ali não há PS3_GAME\\USRDIR "
+                                        "(a pasta mudou de lugar ou o drive está desligado?)\n", p);
+                    }
+                }
+            }
+        } }
     if (!GetEnvironmentVariableA("PS3_HDD0_ROOT", NULL, 0)) {
         char vroot[1024];
         DWORD n = GetEnvironmentVariableA("PS3_VFS_ROOT", vroot, sizeof vroot);

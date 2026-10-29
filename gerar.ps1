@@ -192,9 +192,10 @@ function Escolher-Python {
         $null = SemExcecao { & $semPip -m ensurepip --user 2>$null }
         $null = SemExcecao { & $semPip -m pip --version 2>$null }
         if ($LASTEXITCODE -eq 0) { return $semPip }
-        throw ("o único Python 3.10 ou mais novo encontrado ($semPip) não tem pip, e não deu para instalar o pip nele " +
-               "(é o Python de outro programa?). Instale o Python oficial: winget install -e --id Python.Python.3.12, " +
-               "feche e abra o launcher e gere de novo.")
+        # report 336: o pip só servia para o pycryptodome, e o AES agora tem reserva no próprio Windows
+        # (ps3recomp\tools\aes_cng.py): um Python sem pip também serve
+        Msg "o Python em $semPip não tem pip e não deu para instalar; segue sem ele (o AES vem do Windows)"
+        return $semPip
     }
     return $null
 }
@@ -208,9 +209,18 @@ $VS = $null
 function Achar-VS {
     $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
     if (-not (Test-Path $vswhere)) { return $null }
-    $p = & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Llvm.Clang -property installationPath
-    if ($p) { return ($p | Select-Object -First 1) }
-    return $null
+    # report 350: o -latest escolhia um Visual Studio 2026 Enterprise com o componente Clang mas sem o
+    # vcvars64.bat (C++ incompleto); agora só serve uma instalação com o vcvars64.bat e o clang-cl, e a 2022
+    # (a testada) vem antes das outras
+    $todas = @(& $vswhere -all -products * -requires Microsoft.VisualStudio.Component.VC.Llvm.Clang -format json | ConvertFrom-Json)
+    $boas = @($todas | Where-Object {
+        (Test-Path (Join-Path $_.installationPath 'VC\Auxiliary\Build\vcvars64.bat')) -and
+        (Test-Path (Join-Path $_.installationPath 'VC\Tools\Llvm\x64\bin\clang-cl.exe')) })
+    if (-not $boas.Count) { return $null }
+    $boa = $boas | Sort-Object @{ Expression = { if ("$($_.installationVersion)" -like '17.*') { 0 } else { 1 } } },
+                               @{ Expression = { [version]("$($_.installationVersion)" -replace '[^0-9.].*$', '') }; Descending = $true } |
+           Select-Object -First 1
+    return $boa.installationPath
 }
 Etapa '1_ferramentas' {
     $falta = @()
@@ -225,7 +235,12 @@ Etapa '1_ferramentas' {
     }
     if ($falta) { throw ("Falta instalar:`r`n  - " + ($falta -join "`r`n  - ")) }
     SemExcecao { & python -c "import Crypto" 2>$null }
-    if ($LASTEXITCODE -ne 0) { Exec $LOG 'python -m pip install --user pycryptodome' }
+    # o pycryptodome é só o AES mais rápido: sem ele (sem pip, ou as DLLs bloqueadas pelo Controle Inteligente de
+    # Aplicativos, reports 331/334/336) as ferramentas usam o AES do Windows
+    if ($LASTEXITCODE -ne 0) {
+        $null = SemExcecao { cmd /c "python -m pip install --user pycryptodome >> `"$LOG`" 2>&1" }
+        if ($LASTEXITCODE -ne 0) { Msg 'pycryptodome não instalado; as ferramentas usam o AES do Windows' }
+    }
     $ff = Join-Path $R "dl\ffmpeg9\$FFMPEG_NOME"
     if (-not (Test-Path "$ff\include\libavcodec")) {
         Msg "baixando o FFmpeg 9 (LGPL)"
@@ -447,6 +462,31 @@ public static class LinkFisico {
   public static extern bool CreateHardLink(string novo, string existente, IntPtr reservado);
 }
 "@ }
+# Report 340 (29/10): o disco em outro drive, sem junção (falta de privilégio), sem link físico (não atravessa
+# drives) e sem espaço para a cópia de 34 GB. O jogo então lê o disco direto de onde ele está: vfs\disco_direto.txt
+# guarda a pasta que contém o PS3_GAME (o boot do gowa.exe aponta o /dev_bdvd para lá; o update continua no vfs), e o
+# vfs\PS3_GAME vira uma pasta mínima com a marca do gerador, o PARAM.SFO e os ícones (o launcher confere o PARAM.SFO).
+function Arquivo-Direto { Join-Path (Join-Path $R 'vfs') 'disco_direto.txt' }
+function Disco-Direto {
+    $f = Arquivo-Direto
+    if (-not (Test-Path -LiteralPath $f)) { return $null }
+    $raiz = ([IO.File]::ReadAllText($f, [Text.Encoding]::UTF8)).Trim()
+    $p = Join-Path $raiz 'PS3_GAME'
+    if (Test-Path -LiteralPath (Join-Path $p 'USRDIR') -PathType Container) { return $p }
+    return $null
+}
+# a pasta do disco que o jogo lê: a direta, se houver, senão o vfs\PS3_GAME (junção, espelho ou cópia)
+function Pasta-Do-Disco([string]$pg) { $d = Disco-Direto; if ($d) { $d } else { $pg } }
+function Ligar-Direto([string]$real, [string]$pg) {
+    New-Item -ItemType Directory -Force $pg | Out-Null
+    [IO.File]::WriteAllText((Join-Path $pg $MARCA_ESPELHO), "direto para $real`r`n")
+    foreach ($a in 'PARAM.SFO', 'ICON0.PNG', 'PIC1.PNG') {
+        $o = Join-Path $real $a
+        if (Test-Path -LiteralPath $o) { Copy-Item -LiteralPath $o -Destination (Join-Path $pg $a) -Force }
+    }
+    [IO.File]::WriteAllText((Arquivo-Direto), (Split-Path -Parent $real), (New-Object Text.UTF8Encoding($false)))
+    Msg "o disco fica onde está ($real): o jogo lê direto de lá, sem copiar (não mova nem desligue esse drive)"
+}
 function Tirar-Ligacao([string]$pg) {
     $it = Get-Item -LiteralPath $pg -Force -ErrorAction SilentlyContinue
     if (-not $it) { return }
@@ -489,6 +529,7 @@ function Ligar-Disco([string]$pg, [string]$real) {
         throw "o disco escolhido é a própria pasta do jogo ($pg). Escolha o arquivo do jogo (.7z, .zip, .rar ou .iso) ou a pasta onde ele foi extraído."
     }
     $saida = @()
+    Remove-Item -LiteralPath (Arquivo-Direto) -Force -ErrorAction SilentlyContinue   # o modo direto se refaz se precisar
     $semJuncao = $env:GOWA_TESTE_SEM_JUNCAO -eq '1'
     for ($tentativa = 1; $tentativa -le 3 -and -not $semJuncao; $tentativa++) {
         Tirar-Ligacao $pg
@@ -526,6 +567,16 @@ function Ligar-Disco([string]$pg, [string]$real) {
         # à cópia (lá o link físico nunca daria certo).
         # Report 123: no mesmo drive, mas dentro do OneDrive (arquivos que podem estar só na nuvem), o link físico deu
         # "privilégios insuficientes": qualquer falha do link leva à cópia.
+        # Report 340: em vez de copiar 34 GB, o jogo lê o disco de onde ele está (Ligar-Direto); a cópia fica de reserva
+        try {
+            Ligar-Direto $real $pg
+            if (Disco-Direto) { return }
+            throw 'o modo direto não ficou de pé'
+        } catch {
+            $erro = "$erro; o modo direto falhou: $($_.Exception.Message)"
+            Tirar-Ligacao $pg
+            Remove-Item -LiteralPath (Arquivo-Direto) -Force -ErrorAction SilentlyContinue
+        }
         try {
             Copiar-Disco $real $pg
             if (Test-Path -LiteralPath (Join-Path $pg 'USRDIR') -PathType Container) { Msg "disco copiado de $real"; return }
@@ -698,8 +749,9 @@ if ($Disco -and (Test-Path (Join-Path $OUT '2_jogo.ok'))) {
     $pg = Join-Path (Join-Path $R 'vfs') 'PS3_GAME'
     # refeita também quando o disco ligado é de outra região (ver Conferir-Regiao): o jogador escolhe o americano
     # depois, e a ligação que abria levava ainda ao outro
-    $quebrado = -not (Test-Path -LiteralPath (Join-Path $pg 'USRDIR') -PathType Container)
-    $idLigado = if ($quebrado) { '' } else { Id-Disco $pg }
+    $pgReal = Pasta-Do-Disco $pg   # o modo direto (report 340): o disco fica no outro drive
+    $quebrado = -not (Test-Path -LiteralPath (Join-Path $pgReal 'USRDIR') -PathType Container)
+    $idLigado = if ($quebrado) { '' } else { Id-Disco $pgReal }
     if ($quebrado -or ($idLigado -and $idLigado -ne 'BCUS98232')) {
         $Disco = Achar-Disco $Disco
         $alvo = Join-Path $Disco 'PS3_GAME'
@@ -715,7 +767,7 @@ if ($Disco -and (Test-Path (Join-Path $OUT '2_jogo.ok'))) {
         Ligar-Disco $pg $real
         Msg "disco ligado de novo: $real"
     }
-    Conferir-Arquivos $pg
+    Conferir-Arquivos (Pasta-Do-Disco $pg)
 }
 Etapa '2_jogo' {
     $Disco = Achar-Disco $Disco
@@ -732,7 +784,7 @@ Etapa '2_jogo' {
     }
     Conferir-Regiao $real
     Ligar-Disco $pg $real
-    Conferir-Arquivos $pg
+    Conferir-Arquivos (Pasta-Do-Disco $pg)
 
     # o update escolhido (ver Achar-Update); se não for o 1.04, o gerador baixa o oficial, como no Automático
     $upd = ''
