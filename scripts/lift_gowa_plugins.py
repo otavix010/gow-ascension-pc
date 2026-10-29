@@ -52,7 +52,9 @@ ENTRADAS_EXTRA = {0x754B80: [0x14], 0x755540: [0x14], 0x74C580: [0x20], 0x74EF90
                   # 23/10: GOWA_INTERP_ENTRY_LOG no cap. 16 com o xm1 -- a mesma rotina nos dois
                   0x75B710: [0x18], 0x75B470: [0x18],
                   # 23/10 (2): o mesmo, depois de tirar as de cima da lista do registro
-                  0x75CBC0: [0xC], 0x74CEC0: [0x18]}
+                  0x75CBC0: [0xC], 0x74CEC0: [0x18],
+                  # 29/10: fase 1 (0x755F80, 0x75A380) e reprodução das gravações do EDGE (os outros três)
+                  0x755F80: [0x30], 0x75A380: [0x64], 0x74D7E0: [0x8], 0x751450: [0x14], 0x757DD0: [0xC]}
 PROIBIDO = (r'spu_rdch|spu_wrch|spu_rchcnt|spu_indirect_branch|spu_drain_call|spu_halt|spu_stop|'
             r'spu_iret|spu_check_stack_reset|longjmp|SPU_STOP|spu_sync')
 
