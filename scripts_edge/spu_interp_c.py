@@ -148,7 +148,37 @@ def ctl_insercao(pos, tam):
         c[pos + k] = {1: [3], 2: [2, 3], 4: [0, 1, 2, 3]}[tam][k]
     return w4(bytes(c))
 
+def por_meia(f):
+    return lambda a, b: de_halfs([f(x, y) & 0xFFFF for x, y in zip(halfs(a), halfs(b))])
+
+def meia_imm(f):
+    return lambda a, i: de_halfs([f(x, i) & 0xFFFF for x in halfs(a)])
+
+def rot_h(h, n):
+    n &= 15
+    return ((h << n) | (h >> (16 - n))) & 0xFFFF if n else h
+
 OPS = {
+    'sf': por_palavra(lambda x, y: y - x),
+    'sfh': por_meia(lambda x, y: y - x),
+    'sfhi': meia_imm(lambda h, i: sx(i, 10) - h),
+    'ah': por_meia(lambda x, y: x + y),
+    'andhi': meia_imm(lambda h, i: h & (sx(i, 10) & 0xFFFF)),
+    'orhi': meia_imm(lambda h, i: h | (sx(i, 10) & 0xFFFF)),
+    'cgth': por_meia(lambda x, y: 0xFFFF if sx(x, 16) > sx(y, 16) else 0),
+    'cgthi': meia_imm(lambda h, i: 0xFFFF if sx(h, 16) > sx(i, 10) else 0),
+    'clgt': por_palavra(lambda x, y: M32 if x > y else 0),
+    'fsmb': lambda a: w4(bytes(0xFF if (a[0] >> (15 - k)) & 1 else 0 for k in range(16))),
+    'mpy': por_palavra(lambda x, y: sx(x & 0xFFFF, 16) * sx(y & 0xFFFF, 16)),
+    'mpyhh': por_palavra(lambda x, y: sx(x >> 16, 16) * sx(y >> 16, 16)),
+    'mpyi': lambda a, i: [(sx(w & 0xFFFF, 16) * sx(i, 10)) & M32 for w in a],
+    'rot': por_palavra(lambda x, n: ((x << (n & 31)) | (x >> ((32 - (n & 31)) & 31))) if n & 31 else x),
+    'roth': por_meia(lambda h, n: rot_h(h, n)),
+    'rothm': por_meia(lambda h, n: (h >> ((-n) & 31)) if ((-n) & 31) < 16 else 0),
+    'rothma': por_meia(lambda h, n: (sx(h, 16) >> min((-n) & 31, 15))),
+    'rotqmbyi': lambda a, n: shr_bytes(a, (-n) & 31),
+    'shl': por_palavra(lambda x, n: (x << (n & 63)) if (n & 63) < 32 else 0),
+    'shlhi': meia_imm(lambda h, n: (h << (n & 31)) if (n & 31) < 16 else 0),
     'cbd': lambda a, i: ctl_insercao((a[0] + i) & 15, 1),
     'chd': lambda a, i: ctl_insercao((a[0] + i) & 14, 2),
     'cwd': lambda a, i: ctl_insercao((a[0] + i) & 12, 4),

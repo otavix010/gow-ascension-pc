@@ -38,7 +38,7 @@ c = f'static SPU_PN void {fn}(spu_context* ctx) {{\n'
 i = s.index(c) + len(c)
 fim = s.index('\n}\n', i)
 corpo = s[i:fim]
-k = corpo.rindex('SPU_RET(ctx);')
+k = corpo.rindex('SPU_RET(ctx);') if 'SPU_RET(ctx);' in corpo else corpo.rindex('SPU_TAILX(')   # saída por chamada de cauda
 corpo = corpo[:k] + 'pl_foto(ctx, 1); ' + corpo[k:]
 s = s[:i] + '        pl_foto(ctx, 0);   /* SONDA */\n' + corpo + s[fim:]
 open(p, 'w', encoding='latin-1', newline='').write(s)
