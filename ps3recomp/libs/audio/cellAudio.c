@@ -578,7 +578,7 @@ static void audio_mix_one_block(void)
         float* src = port->buffer + block_offset;
         /* the game did not write this block in time: silence, and the marker must not reach the mix */
         const int late = audio_wait_on() && audio_block_unwritten(src, nch);
-        if (late) s_ast.late++;
+        if (late) { if (s_ast.writer_seen) s_ast.late++; }   /* not before the game's first block */
         else {
             s_ast.writer_seen = 1;
 #ifdef _WIN32

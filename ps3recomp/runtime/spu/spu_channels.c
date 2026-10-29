@@ -1258,6 +1258,14 @@ static inline __attribute__((always_inline)) void spu_audio_prio(spu_context* ct
             if (gap > 30000) g_audio_put_gaps30++;
         }
         g_audio_put_last_us = now;
+        /* the block is written: the rest of the workload's time (the kernel idling
+         * in it) at the thread's own priority, until it comes back into it */
+        if (t_audio_up) {
+#ifdef _WIN32
+            SetThreadPriority(GetCurrentThread(), t_audio_old);
+#endif
+            t_audio_up = 0;
+        }
     }
     if (__builtin_expect((cmd & ~3u) == 0x20u, 0) && ctx->mfc_eal - 0x58000000u < 0x01000000u &&
         (ctx->mfc_eal & 0x1FFFFFu) < 0x100000u && g_spu_audio_wid != w) {
