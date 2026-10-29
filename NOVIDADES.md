@@ -4,6 +4,17 @@ O Otavix Launcher mostra este arquivo na página "Novidades" do jogo. Cada atual
 "## <data> · <versão>" e o texto em português (### pt), inglês (### en) e, quando houver, espanhol (### es).
 As mais novas ficam em cima.
 
+## 29/10/2026 · d0837a7
+### pt
+- **Áudio com engasgos ou cortes:** descobrimos que o som do jogo é mixado num dos núcleos SPU do PS3, junto com os gráficos. Quando o processador do PC fica sem folga, essa parte atrasa e o som falha. Esta versão deixa os cortes mais suaves (sem o estalo seco) e dá prioridade de áudio à mixagem final. A correção de fundo vem com a tradução do EDGE para código nativo, que tira peso dos núcleos SPU.
+- **Mande um report se o som falhar ou sumir:** o log agora registra, a cada 10 segundos, quantas vezes o jogo atrasou o som, a folga que ele tinha e se ele parou de mandar som. Com isso conseguimos ver exatamente o que acontece no seu PC.
+### en
+- **Stuttering or cutting audio:** we found that the game's sound is mixed on one of the PS3's SPU cores, alongside the graphics. When the PC's processor has no headroom left, that part runs late and the sound drops. This version makes the drops softer (no hard click) and gives the final mix audio priority. The real fix comes with translating EDGE to native code, which takes load off the SPU cores.
+- **Send a report if the sound drops or disappears:** the log now records, every 10 seconds, how often the game was late with the sound, how much headroom it had and whether it stopped sending sound. That shows us exactly what happens on your PC.
+### es
+- **Audio con tirones o cortes:** descubrimos que el sonido del juego se mezcla en uno de los núcleos SPU de la PS3, junto con los gráficos. Cuando el procesador del PC se queda sin margen, esa parte se retrasa y el sonido falla. Esta versión suaviza los cortes (sin el chasquido seco) y da prioridad de audio a la mezcla final. La solución de fondo llega con la traducción del EDGE a código nativo, que quita carga a los núcleos SPU.
+- **Envía un report si el sonido falla o desaparece:** el log ahora registra, cada 10 segundos, cuántas veces el juego se retrasó con el sonido, el margen que tenía y si dejó de enviar sonido. Así vemos exactamente lo que pasa en tu PC.
+
 ## 29/10/2026 · 06c722e
 ### pt
 - **A geração parava no 6_compilar com "vcvars64.bat não é reconhecido" ou "'ninja' failed":** acontecia em PCs com o Visual Studio 2026 (ou outro sem as ferramentas de C++) instalado ao lado do 2022. O gerador agora escolhe uma instalação que tem o compilador e usa o ninja do próprio Visual Studio. Gere de novo pelo launcher.
