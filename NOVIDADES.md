@@ -4,6 +4,17 @@ O Otavix Launcher mostra este arquivo na página "Novidades" do jogo. Cada atual
 "## <data> · <versão>" e o texto em português (### pt), inglês (### en) e, quando houver, espanhol (### es).
 As mais novas ficam em cima.
 
+## 29/10/2026 · 67b94bc
+### pt
+- **FFmpeg pelo servidor do launcher:** a geração agora baixa o FFmpeg (usado nos vídeos do jogo) primeiro do nosso servidor, e o GitHub fica de reserva. Isso resolve quem tinha a conexão cortada no meio do download.
+- **Crashes ("O jogo fechou com erro"):** o log agora diz em qual função e em qual componente (o jogo, o driver de vídeo...) o erro aconteceu. Se o jogo fechar sozinho, mande um report logo depois.
+### en
+- **FFmpeg from the launcher's server:** generation now downloads FFmpeg (used for the game's videos) from our server first, with GitHub as a fallback. This fixes downloads that were cut off midway.
+- **Crashes ("The game closed with an error"):** the log now says in which function and which component (the game, the video driver...) the error happened. If the game closes by itself, send a report right after.
+### es
+- **FFmpeg desde el servidor del launcher:** la generación ahora descarga el FFmpeg (usado en los videos del juego) primero de nuestro servidor, y GitHub queda de respaldo. Esto resuelve las descargas que se cortaban a la mitad.
+- **Cierres ("El juego se cerró con un error"):** el log ahora dice en qué función y en qué componente (el juego, el driver de video...) ocurrió el error. Si el juego se cierra solo, envía un report justo después.
+
 ## 29/10/2026 · 4401d58
 ### pt
 - **A geração parava no 6_compilar com "...was unexpected at this time" (ou "No se esperaba...")**: acontecia quando o PATH do Windows tinha uma pasta entre aspas, como a do ZeroTier ou a da NVIDIA. Corrigido: gere de novo pelo launcher.
