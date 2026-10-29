@@ -181,6 +181,22 @@ static inline int audio_wait_on(void)
 static inline float* audio_block_last(float* blk, u32 nch) { return blk + CELL_AUDIO_BLOCK_SAMPLES * nch - 1; }
 static inline int audio_block_unwritten(float* blk, u32 nch) { return memcmp(audio_block_last(blk, nch), k_audio_marca, 4) == 0; }
 
+/* GOWA (29/10, 2nd try): wait for a late block -- with the read index published ONE BLOCK BEHIND.
+ * GoW's writer runs in bursts (measured up to 40 ms apart on a fast PC, in play) and fills the ring up to
+ * the block before the published read index; it never writes the block the index says is playing. So
+ * holding the read on an unwritten block R with R published (the first try) froze the writer out of R
+ * for good. Published as R-1, R is ahead of it and the writer's next burst fills it, while the device
+ * plays its queue (~100 ms with the launcher's default buffer): a writer gap up to ~6 blocks plus the
+ * device queue no longer drops sound. The block tags and timestamps follow the published index.
+ * GOWA_AUDIO_ESPERA=0 turns it off (no lag, no wait). Needs the marker (GOWA_AUDIO_MARCA). */
+static int s_espera = -1;
+static inline int audio_espera_on(void)
+{
+    if (s_espera < 0) { const char* e = getenv("GOWA_AUDIO_ESPERA"); s_espera = audio_wait_on() && !(e && *e == '0'); }
+    return s_espera;
+}
+static inline u64 audio_pub_index(u64 read_index) { return (audio_espera_on() && read_index) ? read_index - 1 : read_index; }
+
 /* Audio health, written to the game log (see audio_stats_tick): blocks mixed,
  * blocks the game had not written in time, waits for it, times the device ran
  * dry, and how long since the game last wrote a block. */
@@ -689,7 +705,7 @@ static void audio_mix_one_block(void)
          * size directly; an unbounded counter walks beyond the audio buffer. */
         port->read_index++;
         if (port->read_idx_addr)
-            vm_write64((u32)port->read_idx_addr, port->read_index % nblock);
+            vm_write64((u32)port->read_idx_addr, audio_pub_index(port->read_index) % nblock);
     }
 
     mutex_unlock(&s_audio_mutex);
@@ -718,6 +734,22 @@ static void audio_notify_event_queues(void)
             sys_event_queue_push_by_id(qid, s_notify_queues[i].key,
                                        0 /*CELL_AUDIO_EVENT_MIX*/, 0, 0);
     }
+}
+
+/* Is the next block of some running port still unwritten (its marker there)? */
+static int audio_ports_unwritten(void)
+{
+    int r = 0;
+    mutex_lock(&s_audio_mutex);
+    for (int p = 0; p < CELL_AUDIO_PORT_MAX && !r; p++) {
+        AudioPortSlot* port = &s_ports[p];
+        if (!port->in_use || !port->running || !port->buffer) continue;
+        const u32 nch = (u32)port->param.nChannel, nblock = (u32)port->param.nBlock;
+        if (!nblock) continue;
+        r = audio_block_unwritten(port->buffer + (u32)(port->read_index % nblock) * CELL_AUDIO_BLOCK_SAMPLES * nch, nch);
+    }
+    mutex_unlock(&s_audio_mutex);
+    return r;
 }
 
 #ifdef _WIN32
@@ -749,9 +781,9 @@ static void audio_stats_tick(void)
     for (int i = 0, n = 0; i < 9; i++)
         n += snprintf(hist + n, sizeof hist - (size_t)n, "%s%u", i ? "/" : "", s_ast.lead_hist[i]);
     fprintf(stderr, "[audio] %.0f s: %u blocos (%.0f/s, o certo é 187,5), %u atrasados (o jogo não escreveu a tempo, tocou silêncio), "
-                    "%u vezes o dispositivo ficou vazio, fila do dispositivo %.0f a %.0f ms, jogo adiantado %.1f blocos "
+                    "%u esperas de 1 ms pelo jogo, %u vezes o dispositivo ficou vazio, fila do dispositivo %.0f a %.0f ms, jogo adiantado %.1f blocos "
                     "(mín. %u; por bloco 0..8: %s), maior intervalo entre escritas do jogo %.1f ms, %u intervalos > 30 ms\n",
-            s, s_ast.blocks, s_ast.blocks / s, s_ast.late, s_ast.dry,
+            s, s_ast.blocks, s_ast.blocks / s, s_ast.late, s_ast.waits, s_ast.dry,
             s_ast.q_min == (1 << 30) ? 0.0 : s_ast.q_min * ms_q, s_ast.q_max * ms_q,
             s_ast.lead_n ? (double)s_ast.lead_sum / s_ast.lead_n : 0.0, s_ast.lead_n ? s_ast.lead_min : 0u, hist,
             g_audio_put_gap_max_us / 1000.0, g_audio_put_gaps30);
@@ -799,6 +831,12 @@ static unsigned __stdcall audio_mix_thread_func(void* arg)
             if (queued < s_ast.q_min) s_ast.q_min = queued;
             if (queued > s_ast.q_max) s_ast.q_max = queued;
             if (queued == 0 && blocks > 0) s_ast.dry++;
+            /* the game's next block not written yet: wait while the device still has sound queued */
+            if (audio_espera_on() && s_ast.writer_seen && queued > 2 * CELL_AUDIO_BLOCK_SAMPLES && audio_ports_unwritten()) {
+                s_ast.waits++;
+                Sleep(1);
+                continue;
+            }
         }
 #endif
         if (room < 0) {
@@ -1158,8 +1196,9 @@ s32 cellAudioGetPortBlockTag(u32 portNum, u64 blockNo, u64* tag)
         mutex_unlock(&s_audio_mutex);
         return CELL_AUDIO_ERROR_PARAM;
     }
-    u64 t = port->read_index + blockNo - (port->read_index % nblk);
-    if (blockNo < port->read_index % nblk) t += nblk;
+    const u64 ri = audio_pub_index(port->read_index);
+    u64 t = ri + blockNo - (ri % nblk);
+    if (blockNo < ri % nblk) t += nblk;
     mutex_unlock(&s_audio_mutex);
 
     vm_write64(tag_ea, t);
@@ -1179,7 +1218,7 @@ s32 cellAudioGetPortTimestamp(u32 portNum, u64 tag, u64* stamp)
         return CELL_AUDIO_ERROR_PARAM;
 
     mutex_lock(&s_audio_mutex);
-    u64 global_counter = s_ports[portNum].read_index;
+    u64 global_counter = audio_pub_index(s_ports[portNum].read_index);
     mutex_unlock(&s_audio_mutex);
     if (tag > global_counter)
         return CELL_AUDIO_ERROR_TAG_NOT_FOUND;
