@@ -4,6 +4,20 @@ O Otavix Launcher mostra este arquivo na página "Novidades" do jogo. Cada atual
 "## <data> · <versão>" e o texto em português (### pt), inglês (### en) e, quando houver, espanhol (### es).
 As mais novas ficam em cima.
 
+## 29/10/2026 · 06c722e
+### pt
+- **A geração parava no 6_compilar com "vcvars64.bat não é reconhecido" ou "'ninja' failed":** acontecia em PCs com o Visual Studio 2026 (ou outro sem as ferramentas de C++) instalado ao lado do 2022. O gerador agora escolhe uma instalação que tem o compilador e usa o ninja do próprio Visual Studio. Gere de novo pelo launcher.
+- **"WinError 4551" ou "Controle Inteligente de Aplicativos" ao decriptar o jogo ou o update:** o Windows 11 bloqueava um componente de criptografia do Python. Agora, quando isso acontece, a geração usa a criptografia do próprio Windows. Também deixou de ser obrigatório ter o pip no Python.
+- **Disco em outro HD sem espaço para a cópia:** quando o port não consegue apontar para o disco em outro drive, ele agora lê o jogo direto de lá, sem copiar os 34 GB. Não mova nem desligue esse HD. Se ele estiver desligado, o jogo avisa ao abrir.
+### en
+- **Generation stopped at 6_compilar with "vcvars64.bat is not recognized" or "'ninja' failed":** it happened on PCs with Visual Studio 2026 (or another one without the C++ tools) installed next to 2022. The generator now picks an installation that has the compiler and uses Visual Studio's own ninja. Generate again from the launcher.
+- **"WinError 4551" or "Smart App Control" while decrypting the game or the update:** Windows 11 blocked a Python encryption component. Now, when that happens, generation uses Windows' own encryption. Having pip in Python is no longer required either.
+- **Disc on another drive with no room for the copy:** when the port can't point to the disc on another drive, it now reads the game straight from there, without copying the 34 GB. Don't move that drive or turn it off. If it is off, the game says so when it opens.
+### es
+- **La generación se detenía en 6_compilar con "vcvars64.bat no se reconoce" o "'ninja' failed":** pasaba en PC con Visual Studio 2026 (u otro sin las herramientas de C++) instalado junto al 2022. El generador ahora elige una instalación que tiene el compilador y usa el ninja del propio Visual Studio. Genera de nuevo desde el launcher.
+- **"WinError 4551" o "Control inteligente de aplicaciones" al descifrar el juego o el update:** Windows 11 bloqueaba un componente de cifrado de Python. Ahora, cuando pasa eso, la generación usa el cifrado del propio Windows. Tampoco hace falta ya tener pip en Python.
+- **Disco en otro disco duro sin espacio para la copia:** cuando el port no puede apuntar al disco en otra unidad, ahora lee el juego directamente de ahí, sin copiar los 34 GB. No muevas ni apagues esa unidad. Si está apagada, el juego lo avisa al abrir.
+
 ## 29/10/2026 · 67b94bc
 ### pt
 - **FFmpeg pelo servidor do launcher:** a geração agora baixa o FFmpeg (usado nos vídeos do jogo) primeiro do nosso servidor, e o GitHub fica de reserva. Isso resolve quem tinha a conexão cortada no meio do download.
