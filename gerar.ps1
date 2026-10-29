@@ -855,11 +855,21 @@ Etapa '5_spu' {
         try { $null = Get-ChildItem -LiteralPath $sw -ErrorAction Stop }
         catch {
             Msg "a pasta $sw de uma geração anterior não abre ($($_.Exception.Message)); apagando para refazer"
+            SemExcecao { cmd /c "icacls `"$sw`" /reset /t /c /q 2>&1" } | Out-Null
             SemExcecao { cmd /c "rmdir /s /q `"$sw`" 2>&1" } | Out-Null
-            if (Test-Path -LiteralPath $sw) {
-                throw ("a pasta $sw ficou sem permissão (foi criada por outro usuário ou como administrador). Apague a " +
-                       'pasta out dentro da pasta do port pelo Explorer (ele pede a permissão) e gere de novo.')
+            # reports 279 e 288: nem assim sai (dono é outro usuário/administrador): gera numa pasta nova ao lado
+            # (a ferramenta só escreve aqui e o resultado é copiado para port\spu)
+            $n = 2
+            while ((Test-Path -LiteralPath $sw) -and
+                   -not $(try { $null = Get-ChildItem -LiteralPath $sw -ErrorAction Stop; $true } catch { $false })) {
+                if ($n -gt 9) {
+                    throw ("a pasta $sw ficou sem permissão (foi criada por outro usuário ou como administrador). " +
+                           'Apague a pasta out dentro da pasta do port pelo Explorer (ele pede a permissão) e gere de novo.')
+                }
+                $sw = Join-Path $R "out\spu_workloads$n"
+                $n++
             }
+            Msg "gerando em $sw"
         }
     }
     Exec $LOG "python `"$R\ps3recomp\tools\build_spu_workloads.py`" --input `"$R\jogo\GOWA.elf`" --input `"$R\fw\libsre.prx`" --lifted `"$sw`" --out `"$sw\spu_workloads.c`" --constructor --allow-partial"
