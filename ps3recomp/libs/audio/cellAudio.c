@@ -479,7 +479,11 @@ static void audio_backend_submit(const float* stereo_samples, u32 num_samples)
         if (s_wav == (FILE*)1) {
             const char* w = getenv("GOWA_AUDIO_WAV");
             s_wav = w ? fopen(w, "wb") : NULL;
-            if (s_wav) { static const uint8_t hdr[58] = {0}; fwrite(hdr, 1, sizeof hdr, s_wav); }
+            if (s_wav) { static const uint8_t hdr[58] = {0}; fwrite(hdr, 1, sizeof hdr, s_wav);
+                /* the wall clock of the first sample, to line the file up with captures of the picture */
+                FILETIME ft; GetSystemTimeAsFileTime(&ft);
+                const unsigned long long ms = ((((unsigned long long)ft.dwHighDateTime << 32) | ft.dwLowDateTime) - 116444736000000000ull) / 10000ull;
+                fprintf(stderr, "[audio] GOWA_AUDIO_WAV aberto: primeira amostra em %llu ms (Unix)\n", ms); }
         }
         if (s_wav) {
             fwrite(stereo_samples, sizeof(float) * s_out_ch, num_samples, s_wav);
