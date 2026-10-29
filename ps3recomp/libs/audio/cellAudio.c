@@ -160,6 +160,37 @@ static mutex_t       s_audio_mutex;
 static float s_mix_buffer[CELL_AUDIO_BLOCK_SAMPLES * 8];
 static u32   s_out_ch = 2;
 
+/* GOWA (29/10, reports 285/286/259/299/346): wait for the game's writer.
+ * The device clock paces the mixer, and the old loop read the next ring block
+ * whether the game had written it or not: on a PC where the game's audio task
+ * (an SPU job) runs late, the read went past it and played the block as
+ * silence -- a stutter at any device buffer size, since a bigger buffer only
+ * shields the mixer thread, not the producer. Now each consumed block keeps a
+ * marker in its last sample (a NaN no writer produces), the mixer holds the
+ * read index while the next block still has it and the device has more than
+ * two blocks queued (the buffer now gives the game that much time), and a
+ * block mixed with the marker still there counts as late and plays as
+ * silence. GOWA_AUDIO_ESPERA=0 turns it off (old behaviour). */
+static int s_wait_writer = -1;
+static const uint8_t k_audio_marca[4] = { 0x7F, 0xC0, 0xDE, 0xA5 };   /* big-endian quiet NaN */
+static inline int audio_wait_on(void)
+{
+    if (s_wait_writer < 0) { const char* e = getenv("GOWA_AUDIO_ESPERA"); s_wait_writer = (e && *e == '0') ? 0 : 1; }
+    return s_wait_writer;
+}
+static inline float* audio_block_last(float* blk, u32 nch) { return blk + CELL_AUDIO_BLOCK_SAMPLES * nch - 1; }
+static inline int audio_block_unwritten(float* blk, u32 nch) { return memcmp(audio_block_last(blk, nch), k_audio_marca, 4) == 0; }
+
+/* Audio health, written to the game log (see audio_stats_tick): blocks mixed,
+ * blocks the game had not written in time, waits for it, times the device ran
+ * dry, and how long since the game last wrote a block. */
+static struct {
+    unsigned blocks, late, waits, dry;
+    int q_min, q_max;                 /* device queue, frames */
+    unsigned long long last_written_ms;
+    int writer_seen, stall_said;
+} s_ast;
+
 /* ---------------------------------------------------------------------------
  * Host audio output backend
  * -----------------------------------------------------------------------*/
@@ -539,6 +570,15 @@ static void audio_mix_one_block(void)
         u32 block_idx = (u32)(port->read_index % nblock);
         u32 block_offset = block_idx * CELL_AUDIO_BLOCK_SAMPLES * nch;
         float* src = port->buffer + block_offset;
+        /* the game did not write this block in time: silence, and the marker must not reach the mix */
+        const int late = audio_wait_on() && audio_block_unwritten(src, nch);
+        if (late) s_ast.late++;
+        else {
+            s_ast.writer_seen = 1;
+#ifdef _WIN32
+            s_ast.last_written_ms = GetTickCount64();
+#endif
+        }
 
         /* AUDIO_PEAK diag: which blocks of this port's WHOLE ring hold data,
          * vs which block the read cursor is on -- distinguishes "writer never
@@ -559,7 +599,9 @@ static void audio_mix_one_block(void)
                         p, (unsigned long long)port->read_index, block_idx, map);
             } } }
 
-        if (s_out_ch == 8) {
+        if (late) {
+            /* nothing to mix */
+        } else if (s_out_ch == 8) {
             for (u32 s = 0; s < CELL_AUDIO_BLOCK_SAMPLES; s++) {
                 float* o = &s_mix_buffer[s * 8];
                 if (nch == 8) {
@@ -603,6 +645,7 @@ static void audio_mix_one_block(void)
          * preventing stale PCM from replaying when a producer stalls, the
          * cleared block is an observable consumption signal for producers. */
         memset(src, 0, CELL_AUDIO_BLOCK_SAMPLES * nch * sizeof(float));
+        if (audio_wait_on()) memcpy(audio_block_last(src, nch), k_audio_marca, 4);
 
         /* Keep the monotonic counter for tags/timestamps, but publish the
          * ring slot to the guest. SurMixer multiplies this value by the block
@@ -640,11 +683,73 @@ static void audio_notify_event_queues(void)
     }
 }
 
+/* Is the next block of some running port still unwritten (its marker there)? */
+static int audio_ports_unwritten(void)
+{
+    int r = 0;
+    mutex_lock(&s_audio_mutex);
+    for (int p = 0; p < CELL_AUDIO_PORT_MAX && !r; p++) {
+        AudioPortSlot* port = &s_ports[p];
+        if (!port->in_use || !port->running || !port->buffer) continue;
+        const u32 nch = (u32)port->param.nChannel, nblock = (u32)port->param.nBlock;
+        if (!nblock) continue;
+        r = audio_block_unwritten(port->buffer + (u32)(port->read_index % nblock) * CELL_AUDIO_BLOCK_SAMPLES * nch, nch);
+    }
+    mutex_unlock(&s_audio_mutex);
+    return r;
+}
+
 #ifdef _WIN32
+/* One line in the game log every 10 s when something went wrong (blocks late,
+ * the device run dry), else every 60 s; and a line when the game stops writing
+ * sound for 3 s or more (a stuck audio task) and when it comes back. */
+static void audio_stats_tick(void)
+{
+    static ULONGLONG t0;
+    const ULONGLONG now = GetTickCount64();
+    if (!t0) { t0 = now; s_ast.q_min = 1 << 30; }
+    if (s_ast.writer_seen && s_ast.last_written_ms && now - s_ast.last_written_ms >= 3000 && !s_ast.stall_said) {
+        s_ast.stall_said = 1;
+        unsigned long long ridx = 0;
+        for (int p = 0; p < CELL_AUDIO_PORT_MAX; p++) if (s_ports[p].in_use && s_ports[p].running) { ridx = s_ports[p].read_index; break; }
+        fprintf(stderr, "[audio] o jogo não escreve som há %.1f s (bloco %llu): a tarefa de áudio dele parou ou está atrasada\n",
+                (now - s_ast.last_written_ms) / 1000.0, ridx);
+    } else if (s_ast.stall_said && now - s_ast.last_written_ms < 3000) {
+        s_ast.stall_said = 0;
+        fprintf(stderr, "[audio] o jogo voltou a escrever o som\n");
+    }
+    const int ruim = s_ast.late > 2 || s_ast.dry > 0;
+    if (now - t0 < (ruim ? 10000u : 60000u)) return;
+    const double s = (now - t0) / 1000.0;
+    const double ms_q = 1000.0 / CELL_AUDIO_SAMPLE_RATE;
+    fprintf(stderr, "[audio] %.0f s: %u blocos (%.0f/s, o certo é 187,5), %u atrasados (o jogo não escreveu a tempo, tocou silêncio), "
+                    "%u esperas pelo jogo, %u vezes o dispositivo ficou vazio, fila do dispositivo %.0f a %.0f ms%s\n",
+            s, s_ast.blocks, s_ast.blocks / s, s_ast.late, s_ast.waits, s_ast.dry,
+            s_ast.q_min == (1 << 30) ? 0.0 : s_ast.q_min * ms_q, s_ast.q_max * ms_q,
+            audio_wait_on() ? "" : " (espera desligada)");
+    s_ast.blocks = s_ast.late = s_ast.waits = s_ast.dry = 0;
+    s_ast.q_min = 1 << 30; s_ast.q_max = 0;
+    t0 = now;
+}
+
 static unsigned __stdcall audio_mix_thread_func(void* arg)
 {
     (void)arg;
     printf("[cellAudio] Mixing thread started\n");
+    /* GOWA (29/10, report 285: Xeon E5-2680 v4, stutter): the mixer thread
+     * competes with the SPU and PPU threads, which keep every core busy on a
+     * slower CPU; MMCSS "Pro Audio" (what XAudio2 and WASAPI apps use) and a
+     * time-critical priority get it on a core in time. */
+    {
+        HMODULE av = LoadLibraryA("avrt.dll");
+        typedef HANDLE (WINAPI *AvSet)(LPCSTR, LPDWORD);
+        AvSet f = av ? (AvSet)(void*)GetProcAddress(av, "AvSetMmThreadCharacteristicsA") : NULL;
+        DWORD task = 0;
+        HANDLE h = f ? f("Pro Audio", &task) : NULL;
+        const BOOL pr = SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_TIME_CRITICAL);
+        fprintf(stderr, "[audio] thread de mixagem: MMCSS %s, prioridade %s, espera pelo jogo %s\n",
+                h ? "Pro Audio" : "indisponível", pr ? "time-critical" : "normal", audio_wait_on() ? "ligada" : "desligada");
+    }
 
     /* Pace to the device clock. The PS3 consumes one block every 5.33 ms;
      * the old Sleep(2)/Sleep(5) loop keyed on a queue depth the 1056-frame
@@ -655,8 +760,23 @@ static unsigned __stdcall audio_mix_thread_func(void* arg)
     LARGE_INTEGER qf, q0; QueryPerformanceFrequency(&qf); QueryPerformanceCounter(&q0);
     unsigned long long blocks = 0;
     while (s_mix_thread_running) {
+        audio_stats_tick();
         const int room = audio_backend_room();
         if (room >= 0 && room < CELL_AUDIO_BLOCK_SAMPLES) { audio_backend_wait(); continue; }
+#if AUDIO_BACKEND_WASAPI
+        if (room >= 0) {
+            const int queued = (int)s_wasapi_buf_frames - room;
+            if (queued < s_ast.q_min) s_ast.q_min = queued;
+            if (queued > s_ast.q_max) s_ast.q_max = queued;
+            if (queued == 0 && blocks > 0) s_ast.dry++;
+            /* the game's next block not written yet: wait for it while the device has sound to play */
+            if (audio_wait_on() && queued > 2 * CELL_AUDIO_BLOCK_SAMPLES && audio_ports_unwritten()) {
+                s_ast.waits++;
+                Sleep(1);
+                continue;
+            }
+        }
+#endif
         if (room < 0) {
             LARGE_INTEGER now; QueryPerformanceCounter(&now);
             const long long due = q0.QuadPart +
@@ -669,6 +789,7 @@ static unsigned __stdcall audio_mix_thread_func(void* arg)
                     (long long)(blocks * CELL_AUDIO_BLOCK_SAMPLES * qf.QuadPart / CELL_AUDIO_SAMPLE_RATE);
         }
         blocks++;
+        s_ast.blocks++;
         /* Mix and submit one block */
         audio_mix_one_block();
         /* AUDIO_PEAK=1: report the mixed block's peak amplitude periodically so
