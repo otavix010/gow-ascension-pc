@@ -105,7 +105,61 @@ def fsmbi(imm):
 def fcmp_gt(a, b):
     return [M32 if fx(x) > fx(y) else 0 for x, y in zip(a, b)]
 
+FRSQEST_LUT = [
+    0x350160, 0x34E954, 0x2F993D, 0x2F993D, 0x2AA523, 0x2AA523, 0x26190D, 0x26190D,
+    0x21E4F9, 0x21E4F9, 0x1E00E9, 0x1E00E9, 0x1A5CD9, 0x1A5CD9, 0x16F8CB, 0x16F8CB,
+    0x13CCC0, 0x13CCC0, 0x10CCB3, 0x10CCB3, 0x0E00AA, 0x0E00AA, 0x0B58A1, 0x0B58A1,
+    0x08D498, 0x08D498, 0x067491, 0x067491, 0x043089, 0x043089, 0x020C83, 0x020C83,
+    0x7FFDF4, 0x7FD1DE, 0x7859C8, 0x783DBA, 0x71559C, 0x71559C, 0x6AE57C, 0x6AE57C,
+    0x64F561, 0x64F561, 0x5F7149, 0x5F7149, 0x5A4D33, 0x5A4D33, 0x55811F, 0x55811F,
+    0x51050F, 0x51050F, 0x4CC8FE, 0x4CC8FE, 0x48D0F0, 0x48D0F0, 0x4510E4, 0x4510E4,
+    0x4180D7, 0x4180D7, 0x3E24CC, 0x3E24CC, 0x3AF4C3, 0x3AF4C3, 0x37E8BA, 0x37E8BA]
+
+def frsqest(a):   # spu_frsqest_ref do runtime
+    out = []
+    for w in a:
+        e = (w >> 23) & 0xFF
+        rexp = 0xFF if e == 0 else 190 - (e + 1) // 2
+        out.append(((rexp << 23) | (FRSQEST_LUT[(w >> 18) & 0x3F] & 0x7FFFFF)) & M32)
+    return out
+
+def fi(a, b):     # spu_fi_ref do runtime
+    out = []
+    for ya, est in zip(a, b):
+        sinal = est & 0x80000000
+        e = (est >> 23) & 0xFF
+        base = (est >> 10) & 0x1FFF
+        passo = est & 0x3FF
+        y = ya & 0x7FFFF
+        if e == 0:
+            out.append(0); continue
+        m = (((1 << 13) | base) << 19) - passo * y
+        if m < (1 << 32):
+            m <<= 1
+            e -= 1
+            if e == 0:
+                out.append(0); continue
+        out.append(sinal | (e << 23) | ((m >> 9) & 0x7FFFFF))
+    return out
+
+def ctl_insercao(pos, tam):
+    c = bytearray(range(0x10, 0x20))
+    for k in range(tam):
+        c[pos + k] = {1: [3], 2: [2, 3], 4: [0, 1, 2, 3]}[tam][k]
+    return w4(bytes(c))
+
 OPS = {
+    'cbd': lambda a, i: ctl_insercao((a[0] + i) & 15, 1),
+    'chd': lambda a, i: ctl_insercao((a[0] + i) & 14, 2),
+    'cwd': lambda a, i: ctl_insercao((a[0] + i) & 12, 4),
+    'clz': lambda a: [32 - w.bit_length() for w in a],
+    'gbb': lambda a: [sum(((b & 1) << (15 - k)) for k, b in enumerate(b16(a))), 0, 0, 0],
+    'rotm': lambda a, b: [rotm(w, n) for w, n in zip(a, b)],
+    'frsqest': frsqest,
+    'fi': fi,
+    'fa_r': fop(lambda x, y: x + y),
+    'fs_r': fop(lambda x, y: x - y),
+    'fms_r': fop(lambda x, y, z: x * y - z),
     'shufb': shufb,
     'ori': lambda a, i: [(w | (sx(i, 10) & M32)) & M32 for w in a],
     'orbi': lambda a, i: w4(bytes(x | (i & 0xFF) for x in b16(a))),
@@ -172,8 +226,13 @@ class Maquina:
         self.g = regs
         self.ls = bytearray(ls)
 
+    reloc = 0
+
     def end(self, e):
         e = e.strip()
+        m = re.fullmatch(r'\(uint32_t\)\((0x[0-9A-Fa-f]+) \+ g_spu_hot_reloc\)', e)
+        if m:
+            return (int(m.group(1), 16) + self.reloc) & 0x3FFF0
         tot = 0
         for t in e.split('+'):
             t = t.strip()
@@ -216,6 +275,14 @@ def compila(bloco):
         m = re.fullmatch(r'goto (loc_[0-9A-F]+);', l)
         if m:
             prog.append(('goto', m.group(1))); continue
+        # passagem para a função seguinte por trampolim (o corpo dela vem em seguida no programa)
+        m = re.fullmatch(r'\{ ctx->pc = 0x([0-9A-F]+); g_spu_trampoline_fn = [A-Za-z0-9_]+; return; \}', l)
+        if m:
+            prog.append(('goto', 'loc_%08X' % int(m.group(1), 16))); continue
+        if l == 'SPU_RET(ctx);':
+            prog.append(('goto', 'loc_FIM')); continue
+        if l in ('}',) or l.startswith('void ') or l.startswith('static '):
+            continue
         m = re.fullmatch(r'spu_ls_write128\(ctx, (.+), ' + R_REG + r'\);', l)
         if m:
             prog.append(('st', m.group(1), int(m.group(2)))); continue
