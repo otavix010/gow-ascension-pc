@@ -1270,7 +1270,7 @@ static inline __attribute__((always_inline)) void spu_audio_prio(spu_context* ct
     if (__builtin_expect((cmd & ~3u) == 0x20u, 0) && ctx->mfc_eal - 0x58000000u < 0x01000000u &&
         (ctx->mfc_eal & 0x1FFFFFu) < 0x100000u && g_spu_audio_wid != w) {
         g_spu_audio_wid = w;
-        fprintf(stderr, "[audio] o som do jogo Ã© mixado pelo workload %d da SPURS (spu%u)\n",
+        fprintf(stderr, "[audio] o som do jogo é mixado pelo workload %d da SPURS (spu%u)\n",
                 w, (unsigned)(ctx->spu_id & 7u));
         t_audio_w = -1;
     }
