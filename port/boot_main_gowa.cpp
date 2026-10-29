@@ -2756,8 +2756,21 @@ int main(int argc, char** argv)
                         SetEnvironmentVariableW(L"PS3_VFS_ROOT", (nc && nc < MAX_PATH) ? curto : dw);
                         fprintf(stderr, "[disco] lido direto de %s (o update fica no vfs do port)\n", p);
                     } else {
-                        fprintf(stderr, "[disco] AVISO: o disco_direto.txt aponta para %s, mas ali não há PS3_GAME\\USRDIR "
-                                        "(a pasta mudou de lugar ou o drive está desligado?)\n", p);
+                        /* o vfs\PS3_GAME é só a pasta mínima (PARAM.SFO e ícones): sem o disco o jogo sairia calado */
+                        fprintf(stderr, "[disco] o disco_direto.txt aponta para %s, mas ali não há PS3_GAME\\USRDIR "
+                                        "(a pasta mudou de lugar ou o drive está desligado)\n", p);
+                        fflush(stderr);
+                        wchar_t msg[2400];
+                        swprintf(msg, sizeof msg / sizeof msg[0],
+                                 L"O jogo não achou o disco do God of War: Ascension em:\n%ls\n\n"
+                                 L"O port lê o disco direto dessa pasta, e ela foi movida, apagada ou está num HD desligado.\n\n"
+                                 L"Ligue o HD de novo ou, no Otavix Launcher, abra o God of War: Ascension e clique em "
+                                 L"\"Escolher o disco de novo\".\n\n"
+                                 L"The game could not find the God of War: Ascension disc in the folder above: it was moved, "
+                                 L"deleted or is on a drive that is off. Turn the drive on or, in the Otavix Launcher, open "
+                                 L"the game and click \"Pick the disc again\".", dw);
+                        MessageBoxW(NULL, msg, L"God of War: Ascension", MB_ICONERROR | MB_OK | MB_SETFOREGROUND);
+                        ExitProcess(3);
                     }
                 }
             }
