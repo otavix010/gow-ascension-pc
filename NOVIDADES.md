@@ -4,6 +4,20 @@ O Otavix Launcher mostra este arquivo na página "Novidades" do jogo. Cada atual
 "## <data> · <versão>" e o texto em português (### pt), inglês (### en) e, quando houver, espanhol (### es).
 As mais novas ficam em cima.
 
+## 29/10/2026 · 4401d58
+### pt
+- **A geração parava no 6_compilar com "...was unexpected at this time" (ou "No se esperaba...")**: acontecia quando o PATH do Windows tinha uma pasta entre aspas, como a do ZeroTier ou a da NVIDIA. Corrigido: gere de novo pelo launcher.
+- **"A pasta out\spu_workloads ficou sem permissão"**: agora o gerador tenta liberar a pasta sozinho e, se não conseguir, gera numa pasta nova ao lado, sem precisar apagar nada pelo Explorer.
+- **Tela preta logo depois da Santa Monica:** os logs novos mostraram que, na primeira vez, o jogo pode ficar escuro enquanto compila os shaders, principalmente em placas mais antigas e em PCs com poucos núcleos. Espere de 1 a 2 minutos antes de fechar. Se continuar preto, mande um report: o diagnóstico agora também funciona com a geração de quadros ligada.
+### en
+- **Generation stopped at 6_compilar with "...was unexpected at this time"**: it happened when the Windows PATH had a folder in quotes, such as ZeroTier's or NVIDIA's. Fixed: generate again from the launcher.
+- **"The out\spu_workloads folder has no permission"**: the generator now tries to unlock the folder by itself and, if it can't, generates into a new folder next to it, with no need to delete anything in Explorer.
+- **Black screen right after Santa Monica:** the new logs showed that, on the first run, the game can stay dark while it compiles the shaders, especially on older graphics cards and PCs with few cores. Wait 1 to 2 minutes before closing. If it stays black, send a report: the diagnosis now also works with frame generation on.
+### es
+- **La generación se detenía en 6_compilar con "No se esperaba... en este momento"**: pasaba cuando el PATH de Windows tenía una carpeta entre comillas, como la de ZeroTier o la de NVIDIA. Corregido: genera de nuevo desde el launcher.
+- **"La carpeta out\spu_workloads quedó sin permiso"**: ahora el generador intenta liberar la carpeta solo y, si no puede, genera en una carpeta nueva al lado, sin tener que borrar nada en el Explorador.
+- **Pantalla negra justo después de Santa Monica:** los logs nuevos mostraron que, la primera vez, el juego puede quedar oscuro mientras compila los shaders, sobre todo en tarjetas gráficas más antiguas y en PC con pocos núcleos. Espera de 1 a 2 minutos antes de cerrar. Si sigue negro, envía un report: el diagnóstico ahora también funciona con la generación de fotogramas activada.
+
 ## 28/10/2026 · 4c7c7e0
 ### pt
 - **Tela preta com som depois do logo da Santa Monica:** ainda não conseguimos reproduzir esse defeito nos nossos PCs. Esta versão registra no log, a cada 2 segundos, o brilho da imagem que o jogo desenhou e o da imagem enviada para a janela, além do monitor, do HDR e do modo de vídeo. Se acontecer com você, mande um report pelo launcher logo depois: o log vai mostrar em que etapa a imagem fica preta.
