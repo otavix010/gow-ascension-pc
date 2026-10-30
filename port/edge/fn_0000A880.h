@@ -145,14 +145,121 @@ static inline __mmask16 a880_quatro(const uint8_t* pa, const uint8_t* pb, uint8_
     if (!ruim) _mm512_storeu_si512(o, a880_bswap(_mm512_castps_si512(r)));
     return ruim;
 }
+#elif defined(SPU_SX_RZ) && defined(__AVX2__) && defined(__FMA__)
+#define A880_VETOR 2
+/* build portátil (o MXCSR da thread da SPU arredonda para zero): os 8 vetores da volta em SoA, uma faixa por vetor
+ * (ordem v0 v2 v4 v6 | v1 v3 v5 v7, a da transposição); as mesmas contas, na mesma ordem, de cada faixa do AoS */
+static inline __m256 a880_z8(__m256 x)
+{
+    const __m256i i = _mm256_castps_si256(x);
+    return _mm256_castsi256_ps(_mm256_andnot_si256(_mm256_cmpeq_epi32(_mm256_and_si256(i, _mm256_set1_epi32(0x7F800000)), _mm256_setzero_si256()), i));
+}
+static inline __m256i a880_ruim8(__m256 r)
+{
+    return _mm256_cmpgt_epi32(_mm256_and_si256(_mm256_castps_si256(r), _mm256_set1_epi32(0x7FFFFFFF)), _mm256_set1_epi32(0x7F7FFFFE));
+}
+static inline __m256i a880_bswap8(__m256i v)
+{
+    return _mm256_shuffle_epi8(v, _mm256_setr_epi8(3, 2, 1, 0, 7, 6, 5, 4, 11, 10, 9, 8, 15, 14, 13, 12,
+                                                   3, 2, 1, 0, 7, 6, 5, 4, 11, 10, 9, 8, 15, 14, 13, 12));
+}
+static inline void a880_soa(const uint8_t* p, __m256* x, __m256* y, __m256* z, __m256* w)
+{
+    const __m256 A = a880_z8(_mm256_castsi256_ps(a880_bswap8(_mm256_loadu_si256((const __m256i*)p))));
+    const __m256 B = a880_z8(_mm256_castsi256_ps(a880_bswap8(_mm256_loadu_si256((const __m256i*)(p + 32)))));
+    const __m256 C = a880_z8(_mm256_castsi256_ps(a880_bswap8(_mm256_loadu_si256((const __m256i*)(p + 64)))));
+    const __m256 D = a880_z8(_mm256_castsi256_ps(a880_bswap8(_mm256_loadu_si256((const __m256i*)(p + 96)))));
+    const __m256 t0 = _mm256_unpacklo_ps(A, B), t1 = _mm256_unpackhi_ps(A, B), t2 = _mm256_unpacklo_ps(C, D), t3 = _mm256_unpackhi_ps(C, D);
+    *x = _mm256_shuffle_ps(t0, t2, _MM_SHUFFLE(1, 0, 1, 0)); *y = _mm256_shuffle_ps(t0, t2, _MM_SHUFFLE(3, 2, 3, 2));
+    *z = _mm256_shuffle_ps(t1, t3, _MM_SHUFFLE(1, 0, 1, 0)); *w = _mm256_shuffle_ps(t1, t3, _MM_SHUFFLE(3, 2, 3, 2));
+}
+static inline __m256 a880_rsq8(__m256 d)
+{
+    const __m256i ui = _mm256_castps_si256(d);
+    const __m256i e = _mm256_and_si256(_mm256_srli_epi32(ui, 23), _mm256_set1_epi32(0xFF));
+    const __m256i idx = _mm256_and_si256(_mm256_srli_epi32(ui, 18), _mm256_set1_epi32(0x3F));
+    /* a tabela de 64 em 8 registros (sem gather): bits 3, 4 e 5 do índice escolhem */
+    __m256i t[8];
+    for (int i = 0; i < 8; i++) t[i] = _mm256_permutevar8x32_epi32(_mm256_loadu_si256((const __m256i*)&a880_lut[8 * i]), idx);
+    const __m256 b3 = _mm256_castsi256_ps(_mm256_slli_epi32(idx, 28)), b4 = _mm256_castsi256_ps(_mm256_slli_epi32(idx, 27)),
+                 b5 = _mm256_castsi256_ps(_mm256_slli_epi32(idx, 26));
+#define A880_BL(a, b, m) _mm256_castps_si256(_mm256_blendv_ps(_mm256_castsi256_ps(a), _mm256_castsi256_ps(b), m))
+    const __m256i l0 = A880_BL(t[0], t[1], b3), l1 = A880_BL(t[2], t[3], b3), l2 = A880_BL(t[4], t[5], b3), l3 = A880_BL(t[6], t[7], b3);
+    const __m256i fr = A880_BL(A880_BL(l0, l1, b4), A880_BL(l2, l3, b4), b5);
+#undef A880_BL
+    const __m256i rexp = _mm256_blendv_epi8(_mm256_sub_epi32(_mm256_set1_epi32(190), _mm256_srli_epi32(_mm256_add_epi32(e, _mm256_set1_epi32(1)), 1)),
+                                            _mm256_set1_epi32(0xFF), _mm256_cmpeq_epi32(e, _mm256_setzero_si256()));
+    const __m256i est = _mm256_or_si256(_mm256_slli_epi32(rexp, 23), _mm256_and_si256(fr, _mm256_set1_epi32(0x7FFFFF)));
+    const __m256i fe = _mm256_and_si256(_mm256_srli_epi32(est, 23), _mm256_set1_epi32(0xFF));
+    const __m256i base = _mm256_or_si256(_mm256_and_si256(_mm256_srli_epi32(est, 10), _mm256_set1_epi32(0x1FFF)), _mm256_set1_epi32(0x2000));
+    const __m256i prod = _mm256_mullo_epi32(_mm256_and_si256(est, _mm256_set1_epi32(0x3FF)), _mm256_and_si256(ui, _mm256_set1_epi32(0x7FFFF)));
+    const __m256i m8 = _mm256_sub_epi32(_mm256_slli_epi32(base, 11), _mm256_srli_epi32(_mm256_add_epi32(prod, _mm256_set1_epi32(255)), 8));
+    const __m256i baixo = _mm256_cmpgt_epi32(_mm256_set1_epi32(1 << 24), m8);
+    const __m256i frac = _mm256_and_si256(_mm256_blendv_epi8(_mm256_srli_epi32(m8, 1), m8, baixo), _mm256_set1_epi32(0x7FFFFF));
+    const __m256i e2 = _mm256_add_epi32(fe, baixo);
+    __m256i fiv = _mm256_or_si256(_mm256_and_si256(est, _mm256_set1_epi32((int)0x80000000u)), _mm256_or_si256(_mm256_slli_epi32(e2, 23), frac));
+    fiv = _mm256_andnot_si256(_mm256_or_si256(_mm256_cmpeq_epi32(fe, _mm256_setzero_si256()), _mm256_cmpeq_epi32(e2, _mm256_setzero_si256())), fiv);
+    return _mm256_castsi256_ps(fiv);
+}
+/* a volta inteira (8 vetores de cada fluxo -> 8 normais em o); devolve a máscara (bit = vetor) dos ruins */
+static inline unsigned a880_oito(const uint8_t* pa, const uint8_t* pb, uint8_t* o)
+{
+    __m256 ax, ay, az, aw, bx, by, bz, bw;
+    a880_soa(pa, &ax, &ay, &az, &aw); a880_soa(pb, &bx, &by, &bz, &bw);
+    (void)aw;
+    __m256i ruim = _mm256_setzero_si256();
+#define A880_R(v) ruim = _mm256_or_si256(ruim, a880_ruim8(v))
+    /* c_i = b_i * a_(i+1) - a_i * b_(i+1) (o AoS com a.yzxx, b.yzxx), i = 0, 1, 2 */
+    __m256 p0 = _mm256_mul_ps(bx, ay), p1 = _mm256_mul_ps(by, az), p2 = _mm256_mul_ps(bz, ax);
+    A880_R(p0); A880_R(p1); A880_R(p2);
+    const __m256 c0 = a880_z8(_mm256_fnmadd_ps(ax, by, a880_z8(p0)));
+    const __m256 c1 = a880_z8(_mm256_fnmadd_ps(ay, bz, a880_z8(p1)));
+    const __m256 c2 = a880_z8(_mm256_fnmadd_ps(az, bx, a880_z8(p2)));
+    A880_R(c0); A880_R(c1); A880_R(c2);
+    /* n = (c1, c2, c0) * b.w */
+    const __m256 nx = a880_z8(_mm256_mul_ps(bw, c1)), ny = a880_z8(_mm256_mul_ps(bw, c2)), nz = a880_z8(_mm256_mul_ps(bw, c0));
+    A880_R(nx); A880_R(ny); A880_R(nz);
+    const __m256 sx = a880_z8(_mm256_mul_ps(nx, nx)), sy = a880_z8(_mm256_mul_ps(ny, ny)), sz = a880_z8(_mm256_mul_ps(nz, nz));
+    A880_R(sx); A880_R(sy); A880_R(sz);
+    const __m256 q = _mm256_add_ps(sx, sy);
+    A880_R(q);
+    const __m256 d = a880_z8(_mm256_add_ps(a880_z8(q), sz));
+    A880_R(d);
+#undef A880_R
+    const __m256 gt = _mm256_castsi256_ps(_mm256_cmpgt_epi32(_mm256_castps_si256(d), _mm256_set1_epi32(0x0DA2425F)));
+    const __m256 y = a880_rsq8(d);
+    const __m256 t = _mm256_mul_ps(y, y);
+    __m256i r2 = a880_ruim8(t);
+    const __m256 u = a880_z8(_mm256_fnmadd_ps(d, a880_z8(t), _mm256_set1_ps(1.0f)));
+    r2 = _mm256_or_si256(r2, a880_ruim8(u));
+    const __m256 h = a880_z8(_mm256_mul_ps(a880_z8(y), _mm256_set1_ps(0.5f)));
+    const __m256 y2 = a880_z8(_mm256_fmadd_ps(u, h, a880_z8(y)));
+    r2 = _mm256_or_si256(r2, _mm256_or_si256(a880_ruim8(y2), a880_ruim8(y)));
+    const __m256 ox = a880_z8(_mm256_mul_ps(nx, y2)), oy = a880_z8(_mm256_mul_ps(ny, y2)), oz = a880_z8(_mm256_mul_ps(nz, y2));
+    r2 = _mm256_or_si256(r2, _mm256_or_si256(a880_ruim8(ox), _mm256_or_si256(a880_ruim8(oy), a880_ruim8(oz))));
+    ruim = _mm256_or_si256(ruim, _mm256_and_si256(r2, _mm256_castps_si256(gt)));   /* com d <= épsilon sai n */
+    const __m256 rx = _mm256_blendv_ps(nx, ox, gt), ry = _mm256_blendv_ps(ny, oy, gt), rz = _mm256_blendv_ps(nz, oz, gt);
+    const __m256 Z0 = _mm256_setzero_ps();
+    const __m256 u0 = _mm256_unpacklo_ps(rx, ry), u1 = _mm256_unpackhi_ps(rx, ry), u2 = _mm256_unpacklo_ps(rz, Z0), u3 = _mm256_unpackhi_ps(rz, Z0);
+    _mm256_storeu_si256((__m256i*)(o), a880_bswap8(_mm256_castps_si256(_mm256_shuffle_ps(u0, u2, _MM_SHUFFLE(1, 0, 1, 0)))));
+    _mm256_storeu_si256((__m256i*)(o + 32), a880_bswap8(_mm256_castps_si256(_mm256_shuffle_ps(u0, u2, _MM_SHUFFLE(3, 2, 3, 2)))));
+    _mm256_storeu_si256((__m256i*)(o + 64), a880_bswap8(_mm256_castps_si256(_mm256_shuffle_ps(u1, u3, _MM_SHUFFLE(1, 0, 1, 0)))));
+    _mm256_storeu_si256((__m256i*)(o + 96), a880_bswap8(_mm256_castps_si256(_mm256_shuffle_ps(u1, u3, _MM_SHUFFLE(3, 2, 3, 2)))));
+    const unsigned rm = (unsigned)_mm256_movemask_ps(_mm256_castsi256_ps(ruim));
+    static const unsigned char vert[8] = { 0, 2, 4, 6, 1, 3, 5, 7 };
+    unsigned maus = 0;
+    for (int f = 0; f < 8; f++) if ((rm >> f) & 1u) maus |= 1u << vert[f];
+    return maus;
+}
 #else
 #define A880_VETOR 0
 #endif
 
 /* GOWA_A880_STATS=1: chamadas e vetores refeitos pelo caminho exato */
-static int fn_0000A880_nativo(spu_context* ctx)
+static __attribute__((noinline)) int fn_0000A880_nativo(spu_context* ctx)
 {
-    if (!A880_VETOR || !gowa_edge_nativo_on()) return 0;   /* sem AVX-512 fica o vk (só o caminho exato perderia dele) */
+    /* só na build portátil (AVX2, SoA): em AVX-512 o caminho AoS empata com o vk (30/10), que fica */
+    if (A880_VETOR != 2 || !gowa_edge_nativo_on()) return 0;
     u128* r = ctx->gpr;
     const int32_t cont = (int32_t)r[83]._u32[0];
     if (cont <= 0 || cont > 0x4000 || r[52]._u32[0] != 0u || r[51]._u32[0] != 0u) return 0;
@@ -174,6 +281,9 @@ static int fn_0000A880_nativo(spu_context* ctx)
             const __mmask16 m = a880_quatro(ea + 64 * q, eb + 64 * q, o + 64 * q);
             for (int v = 0; v < 4; v++) bom[4 * q + v] = m == 0;
         }
+#elif A880_VETOR == 2
+        { const unsigned maus = a880_oito(ea, eb, o);
+          for (int v = 0; v < 8; v++) bom[v] = !((maus >> v) & 1u); }
 #endif
         for (int v = 0; v < 8; v++) {
             if (bom[v]) continue;

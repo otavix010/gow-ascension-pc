@@ -32,10 +32,10 @@ GANCHOS = [
     # F538 (transformação dos vértices pela matriz): o laço F620 inteiro; antes do vk dele, saltando para depois do laço
     dict(tipo='antes_vk', pasta='gowajm_0072DF80', fn='gowajm_0072DF80_spu_func_0000F538__b', cab='fn_0000F538.h',
          nat='fn_0000F538_nativo', vk='/*VK 0000F538/0000F620*/', destino='loc_0000F620_fim', fim='loc_0000F620'),
-    # A880 (normais: produto vetorial e normalização): port/edge/fn_0000A880.h é exato (300/300), mas empata com o vk
-    # na reprodução (30/10: 2,3–3,0% x 2,3% no cap. 16, no ruído); fica fora até medir ganho
-    # dict(tipo='antes_vk', pasta='gowajm_0072DF80', fn='gowajm_0072DF80_spu_func_0000A880__b', cab='fn_0000A880.h',
-    #      nat='fn_0000A880_nativo', vk='/*VK 0000A880/0000A950*/', destino='loc_0000A950_fim', fim='loc_0000A950'),
+    # A880 (normais: produto vetorial e normalização): o laço A950 inteiro, só na build portátil (AVX2 em SoA; em
+    # AVX-512 o AoS empatava com o vk, que fica)
+    dict(tipo='antes_vk', pasta='gowajm_0072DF80', fn='gowajm_0072DF80_spu_func_0000A880__b', cab='fn_0000A880.h',
+         nat='fn_0000A880_nativo', vk='/*VK 0000A880/0000A950*/', destino='loc_0000A950_fim', fim='loc_0000A950'),
 ]
 # laços de um bloco só com os registradores em variáveis locais (laco_local.py: o cabeçalho port/edge/ll_*.h é gerado
 # aqui, do próprio módulo): o núcleo faz o laço inteiro e salta para <rótulo>_fim, depois do desvio; vem antes do vk
