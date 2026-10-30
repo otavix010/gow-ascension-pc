@@ -4,6 +4,14 @@ O Otavix Launcher mostra este arquivo na página "Novidades" do jogo. Cada atual
 "## <data> · <versão>" e o texto em português (### pt), inglês (### en) e, quando houver, espanhol (### es).
 As mais novas ficam em cima.
 
+## 30/10/2026 · 964fdee
+### pt
+- **Tela preta com som depois da logo:** ainda não acontece em nenhum PC de teste (nem no renderizador de referência da Microsoft). Quando a imagem fica preta, o jogo agora registra no log cada desenho daquele momento e os programas que se carregaram dentro dele (sobreposições e filtros, como RivaTuner, Discord, ReShade ou filtros da placa). Se isso acontece com você, abra o jogo, espere uns 30 segundos com a tela preta, feche e mande um report com o log.
+### en
+- **Black screen with sound after the logo:** it still does not happen on any test PC (not even on Microsoft's reference renderer). When the picture goes black, the game now writes to the log every draw of that moment and the programs that loaded inside it (overlays and filters such as RivaTuner, Discord, ReShade or graphics card filters). If this happens to you, open the game, wait about 30 seconds on the black screen, close it and send a report with the log.
+### es
+- **Pantalla negra con sonido después del logo:** todavía no ocurre en ningún PC de prueba (ni en el renderizador de referencia de Microsoft). Cuando la imagen se pone negra, el juego ahora registra en el log cada dibujo de ese momento y los programas que se cargaron dentro de él (superposiciones y filtros como RivaTuner, Discord, ReShade o filtros de la tarjeta). Si te pasa, abre el juego, espera unos 30 segundos con la pantalla negra, ciérralo y manda un report con el log.
+
 ## 30/10/2026 · e8a5a83
 ### pt
 - **A geração parava em "2_jogo" com "A parameter cannot be found that matches parameter name 'File'":** acontecia quando o arquivo do jogo escolhido vinha sem a pasta no caminho. Corrigido.
