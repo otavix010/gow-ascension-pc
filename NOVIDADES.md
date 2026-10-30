@@ -4,6 +4,14 @@ O Otavix Launcher mostra este arquivo na página "Novidades" do jogo. Cada atual
 "## <data> · <versão>" e o texto em português (### pt), inglês (### en) e, quando houver, espanhol (### es).
 As mais novas ficam em cima.
 
+## 30/10/2026 · 9986152
+### pt
+- **Menos cortes no som em PCs lentos:** a tarefa que mixa o som do jogo agora tem prioridade no processador em PCs com 4 ou mais núcleos lógicos. Num notebook com i5-10300H, no capítulo mais pesado, os trechos de som que chegavam atrasados caíram um terço, sem perder fps.
+### en
+- **Fewer sound drops on slow PCs:** the task that mixes the game's sound now gets processor priority on PCs with 4 or more logical cores. On a notebook with an i5-10300H, in the heaviest chapter, the sound blocks that arrived late fell by a third, with no fps lost.
+### es
+- **Menos cortes de sonido en PC lentos:** la tarea que mezcla el sonido del juego ahora tiene prioridad en el procesador en PC con 4 o más núcleos lógicos. En un portátil con i5-10300H, en el capítulo más pesado, los bloques de sonido que llegaban tarde bajaron un tercio, sin perder fps.
+
 ## 29/10/2026 · ccd3641
 ### pt
 - **Tela preta e o jogo fecha sozinho, logo depois de abrir:** em alguns PCs faltava um arquivo do disco, ou ele estava cortado, depois de o jogo já ter sido gerado (pasta trocada, antivírus, OneDrive que deixou o arquivo só na nuvem). Agora o jogo confere a cópia do disco toda vez que abre e, se faltar algo, mostra quais arquivos estão com problema em vez da tela preta.
