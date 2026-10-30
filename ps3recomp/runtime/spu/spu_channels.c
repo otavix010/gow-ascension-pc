@@ -1217,10 +1217,14 @@ static int spu_mfc_getlist_lean(spu_context* ctx, uint32_t cmd)
  * thread runs at THREAD_PRIORITY_HIGHEST while that workload is the one in
  * its LS (ls[0x1DF]) -- a short task per block, so it cannot starve the
  * others -- and at its own priority again on the next workload.
- * OFF by default (GOWA_AUDIO_SPU_PRIO=1 turns it on): measured on 2 CPUs it
- * made the sound far worse (the writer's lead fell from ~6 blocks to ~1),
- * likely because the SPU keeps that workload id in its LS while it idles in
- * the kernel, and a spinning HIGHEST thread starves the rest. */
+ * Measured on 2 CPUs (before the wait on the published read index) it made
+ * the sound far worse (the writer's lead fell from ~6 blocks to ~1), likely
+ * because the SPU keeps that workload id in its LS while it idles in the
+ * kernel, and a spinning HIGHEST thread starves the rest. GOWA (30/10): with
+ * the wait it is neutral on 2 CPUs (596 x 822 late blocks, inside the noise)
+ * and on a slow 4-core/8-thread notebook (i5-10300H, chapter 16 at ~11 fps)
+ * it cut the late blocks by a third (2821/2907 -> 1885/2027) at the same fps:
+ * ON by default with 4 or more logical CPUs; GOWA_AUDIO_SPU_PRIO=0/1 forces. */
 static volatile int g_spu_audio_wid = -1;
 /* time between the game's PUTs into the cellAudio rings (read by cellAudio's [audio] line) */
 volatile long long g_audio_put_last_us, g_audio_put_gap_max_us;
@@ -1232,7 +1236,11 @@ static __attribute__((noinline)) void spu_audio_prio_switch(int w)
 {
 #ifdef _WIN32
     static int s_on = -1;
-    if (s_on < 0) { const char* e = getenv("GOWA_AUDIO_SPU_PRIO"); s_on = e && *e == '1'; }
+    if (s_on < 0) {
+        const char* e = getenv("GOWA_AUDIO_SPU_PRIO");
+        SYSTEM_INFO si; GetSystemInfo(&si);
+        s_on = e && *e ? *e == '1' : si.dwNumberOfProcessors >= 4;
+    }
     if (!s_on) return;
     const int audio = w == g_spu_audio_wid;
     if (audio && !t_audio_up) {
