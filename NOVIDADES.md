@@ -4,6 +4,14 @@ O Otavix Launcher mostra este arquivo na página "Novidades" do jogo. Cada atual
 "## <data> · <versão>" e o texto em português (### pt), inglês (### en) e, quando houver, espanhol (### es).
 As mais novas ficam em cima.
 
+## 29/10/2026 · 03e894e
+### pt
+- **A geração parava com "Visual Studio Build Tools com Clang não encontrado" ou "vcvars64.bat não é reconhecido":** acontecia em PCs com um Visual Studio sem as ferramentas de C++ completas (por exemplo, o 2026 Enterprise). Agora o gerador instala sozinho o Visual Studio 2022 Build Tools (o Windows pede a permissão de administrador) e continua. Gere de novo pelo launcher.
+### en
+- **Generation stopped with "Visual Studio Build Tools com Clang não encontrado" or "vcvars64.bat is not recognized":** it happened on PCs with a Visual Studio without the full C++ tools (for example, 2026 Enterprise). The generator now installs Visual Studio 2022 Build Tools by itself (Windows asks for administrator permission) and carries on. Generate again from the launcher.
+### es
+- **La generación se detenía con "Visual Studio Build Tools com Clang não encontrado" o "vcvars64.bat no se reconoce":** pasaba en PC con un Visual Studio sin las herramientas de C++ completas (por ejemplo, el 2026 Enterprise). Ahora el generador instala solo el Visual Studio 2022 Build Tools (Windows pide permiso de administrador) y sigue. Genera de nuevo desde el launcher.
+
 ## 29/10/2026 · d163758
 ### pt
 - **Áudio com engasgos ou cortes:** encontramos a causa. O som do jogo é mixado em rajadas por uma tarefa dos núcleos SPU do PS3, e num PC sem folga no processador essas rajadas atrasam (medimos até 40 ms entre elas, até em PCs rápidos), mais do que o jogo deixa guardado. Agora o port espera pelo jogo enquanto toca o que já tem guardado (o buffer de áudio do launcher, 100 ms por padrão). Nos nossos testes com o processador limitado a 2 núcleos, o tempo de som cortado caiu de 4 a 5 segundos para menos de 1 segundo. Parte da mixagem do som também rodava num modo lento (interpretada) e agora roda traduzida.

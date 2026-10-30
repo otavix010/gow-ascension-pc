@@ -275,7 +275,30 @@ Etapa '1_ferramentas' {
     }
 }
 $VS = Achar-VS
-if (-not $VS) { throw 'Visual Studio Build Tools com Clang não encontrado (rode de novo a etapa 1: -Refazer)' }
+# Reports 363, 366 e 378 (29/10): a etapa 1 estava marcada como feita, mas não havia nenhum Visual Studio com o C++
+# completo (no 366 só um VS 2026 Enterprise sem as ferramentas de C++, que a checagem do launcher aceitava; no 378
+# nenhum), e a geração parava pedindo "-Refazer", que o jogador não tem como dar. Agora a marca da etapa 1 sai e o
+# gerador instala ele mesmo o Build Tools 2022 com C++ e Clang pelo winget (o mesmo do botão do launcher; o Windows
+# pede a permissão de administrador), e procura de novo.
+if (-not $VS) {
+    Remove-Item -LiteralPath (Join-Path $OUT '1_ferramentas.ok') -Force -ErrorAction SilentlyContinue
+    $wg = Get-Command winget -ErrorAction SilentlyContinue
+    if ($wg) {
+        Msg 'nenhum Visual Studio com C++ e Clang completos: instalando o Visual Studio 2022 Build Tools (alguns GB; o Windows pede permissão)'
+        $null = SemExcecao { cmd /c ('winget install -e --id Microsoft.VisualStudio.2022.BuildTools --accept-package-agreements --accept-source-agreements ' +
+            '--override "--passive --wait --add Microsoft.VisualStudio.Workload.VCTools --add Microsoft.VisualStudio.Component.VC.Llvm.Clang ' +
+            "--add Microsoft.VisualStudio.Component.VC.CMake.Project --includeRecommended`" >> `"$(Join-Path $OUT 'vs_instala.log')`" 2>&1") }
+        $VS = Achar-VS
+    }
+    if (-not $VS) {
+        throw ('falta o Visual Studio 2022 Build Tools com C++ e "C++ Clang tools" (um Visual Studio 2026 ou Enterprise ' +
+               'sem as ferramentas de C++ não serve). No launcher, abra o God of War: Ascension e clique em Instalar no ' +
+               'item do Visual Studio, ou rode num terminal: winget install -e --id Microsoft.VisualStudio.2022.BuildTools ' +
+               '--override "--passive --wait --add Microsoft.VisualStudio.Workload.VCTools --add Microsoft.VisualStudio.Component.VC.Llvm.Clang ' +
+               '--add Microsoft.VisualStudio.Component.VC.CMake.Project --includeRecommended". Depois gere de novo.')
+    }
+    Msg "Visual Studio: $VS"
+}
 
 # O processador: o jogo é compilado no mínimo para x86-64-v3 (AVX2, FMA, BMI2). Report 40: um Xeon E3-1230 V2 (Ivy
 # Bridge, só AVX) gerou o jogo inteiro, e ele fechou ao abrir com 0xC000001D (instrução ilegal). Sem essas instruções,

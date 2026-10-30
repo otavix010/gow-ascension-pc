@@ -2993,6 +2993,74 @@ int main(int argc, char** argv)
                 ExitProcess(4);
             }
         }
+        /* GOWA (29/10, reports 379 e 389): tela preta e o jogo fecha sozinho, sem desenhar nada. Faltava um arquivo
+         * do disco (USRDIR/ARCHIVES num; no outro o CYN.PSARC abria e a leitura voltava 0 bytes). O gerador confere a
+         * cópia (dados/disco_bcus98232.tsv), mas o disco pode mudar depois: pasta trocada, arquivo apagado pelo
+         * antivírus, OneDrive que deixou só o atalho na nuvem. A mesma lista, conferida aqui a cada abertura: nome,
+         * tamanho e os 4 primeiros bytes dos .PSARC ("PSAR"). GOWA_SEM_CONFERIR_DISCO=1 pula. */
+        if (!getenv("GOWA_SEM_CONFERIR_DISCO")) {
+            char lista[MAX_PATH * 2] = {0};
+            {
+                char exe[MAX_PATH]; const DWORD ne = GetModuleFileNameA(NULL, exe, MAX_PATH);
+                char cand[2][MAX_PATH * 2]; int nc = 0;
+                if (ne && ne < MAX_PATH) {   /* <raiz>\port\build_*\gowa.exe */
+                    char* s = strrchr(exe, '\\'); if (s) *s = 0;
+                    s = strrchr(exe, '\\'); if (s) *s = 0;
+                    s = strrchr(exe, '\\'); if (s) *s = 0;
+                    snprintf(cand[nc++], sizeof cand[0], "%s\\dados\\disco_bcus98232.tsv", exe);
+                }
+                snprintf(cand[nc++], sizeof cand[0], "%s/../dados/disco_bcus98232.tsv", ppu_vfs_root);
+                for (int i = 0; i < nc && !lista[0]; i++)
+                    if (GetFileAttributesA(cand[i]) != INVALID_FILE_ATTRIBUTES) snprintf(lista, sizeof lista, "%s", cand[i]);
+            }
+            FILE* fl = lista[0] ? fopen(lista, "rb") : NULL;
+            if (fl) {
+                wchar_t ruins[1600] = {0}; size_t nr = 0; int nruins = 0;
+                char linha[512];
+                while (fgets(linha, sizeof linha, fl)) {
+                    char* tab = strchr(linha, '\t');
+                    if (!tab) continue;
+                    *tab = 0;
+                    const unsigned long long tam = _strtoui64(tab + 1, NULL, 10);
+                    char alvo[1400];
+                    snprintf(alvo, sizeof alvo, "%s/PS3_GAME/%s", ppu_vfs_root, linha);
+                    const wchar_t* motivo = NULL;
+                    WIN32_FILE_ATTRIBUTE_DATA ad;
+                    if (!GetFileAttributesExA(alvo, GetFileExInfoStandard, &ad)) motivo = L"falta / missing";
+                    else if ((((unsigned long long)ad.nFileSizeHigh << 32) | ad.nFileSizeLow) != tam) motivo = L"tamanho errado / wrong size";
+                    else if (ad.dwFileAttributes & (0x00400000 /* RECALL_ON_DATA_ACCESS */ | FILE_ATTRIBUTE_OFFLINE))
+                        motivo = L"só na nuvem (OneDrive) / cloud only";
+                    else if (strstr(linha, ".PSARC")) {
+                        unsigned char m4[4] = {0}; DWORD lidos = 0;
+                        HANDLE h = CreateFileA(alvo, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_EXISTING, 0, NULL);
+                        if (h == INVALID_HANDLE_VALUE || !ReadFile(h, m4, 4, &lidos, NULL) || lidos != 4)
+                            motivo = L"não se lê / unreadable";
+                        else if (memcmp(m4, "PSAR", 4)) motivo = L"conteúdo errado ou criptografado / wrong or encrypted content";
+                        if (h != INVALID_HANDLE_VALUE) CloseHandle(h);
+                    }
+                    if (!motivo) continue;
+                    fprintf(stderr, "[disco] %s: %ls\n", alvo, motivo);
+                    if (++nruins <= 6 && nr < sizeof ruins / sizeof ruins[0] - 200)
+                        nr += swprintf(ruins + nr, sizeof ruins / sizeof ruins[0] - nr, L"  %hs (%ls)\n", linha, motivo);
+                }
+                fclose(fl);
+                if (nruins) {
+                    fflush(stderr);
+                    wchar_t msg[3200];
+                    swprintf(msg, sizeof msg / sizeof msg[0],
+                             L"A cópia do disco do God of War: Ascension está incompleta (%d arquivo(s)):\n%ls%ls\n"
+                             L"Sem eles o jogo fica com a tela preta e fecha. Extraia ou copie o disco de novo (confira o "
+                             L"espaço livre, se o antivírus não apagou nada e, no OneDrive, use \"Sempre manter neste "
+                             L"dispositivo\") e, no Otavix Launcher, clique em \"Escolher o disco de novo\".\n\n"
+                             L"The God of War: Ascension disc copy is incomplete (files above). Without them the game "
+                             L"stays on a black screen and closes. Extract or copy the disc again and, in the Otavix "
+                             L"Launcher, click \"Pick the disc again\".\n\n(%hs/PS3_GAME)",
+                             nruins, ruins, nruins > 6 ? L"  ...\n" : L"", ppu_vfs_root);
+                    MessageBoxW(NULL, msg, L"God of War: Ascension", MB_ICONERROR | MB_OK | MB_SETFOREGROUND);
+                    ExitProcess(5);
+                }
+            }
+        }
 #endif
     }
 
