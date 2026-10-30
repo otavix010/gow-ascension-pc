@@ -114,19 +114,33 @@ static int d640_decide(const uint8_t* ls, uint32_t ib, uint32_t pb, uint32_t nt,
         for (uint32_t q = 0; q < 4 && t0 / 4u + q < ng; q++) mascara[t0 / 4u + q] = d640_inv4[(sai >> (4 * q)) & 15u];
     }
 #else
-    static SPU_THREAD_LOCAL uint32_t off[3][8192 + 32];
-    for (uint32_t t = 0; t < total + D640_L; t++)
-        for (int v = 0; v < 3; v++)
-            off[v][t] = t < nt ? ((pb + 16u * d640_be16(&ls[ib + 6u * t + 2u * v])) & SPU_LS_MASK & ~15u) : (pb & SPU_LS_MASK & ~15u);
-    const __m256i quatro = _mm256_set1_epi32(4), oito = _mm256_set1_epi32(8), zi = _mm256_setzero_si256();
+    /* 30/10: sem gather (lento nos Ryzen): os 3 vértices de cada triângulo por cargas de 16 bytes e transposição 4x4;
+     * os pares (t, t+4) em cada registro para as faixas saírem na ordem natural */
+    const __m256i bsw = _mm256_setr_epi8(3, 2, 1, 0, 7, 6, 5, 4, 11, 10, 9, 8, 15, 14, 13, 12,
+                                         3, 2, 1, 0, 7, 6, 5, 4, 11, 10, 9, 8, 15, 14, 13, 12);
+    const uint32_t vazio = pb & SPU_LS_MASK & ~15u;
+    const __m256i quatro = _mm256_set1_epi32(4), zi = _mm256_setzero_si256();
     const __m256i absm = _mm256_set1_epi32(0x7FFFFFFF), lim = _mm256_set1_epi32(0x4E7FFFFF);
     const __m256 meio = _mm256_set1_ps(0.5f);
     for (uint32_t t0 = 0; t0 < total; t0 += 8) {
-        const __m256i oa = _mm256_loadu_si256((const __m256i*)&off[0][t0]), ob = _mm256_loadu_si256((const __m256i*)&off[1][t0]),
-                      oc = _mm256_loadu_si256((const __m256i*)&off[2][t0]);
-        const __m256i xa = d640_ld(ls, oa), xb = d640_ld(ls, ob), xc = d640_ld(ls, oc);
-        const __m256i ya = d640_ld(ls, _mm256_add_epi32(oa, quatro)), yb = d640_ld(ls, _mm256_add_epi32(ob, quatro)), yc = d640_ld(ls, _mm256_add_epi32(oc, quatro));
-        const __m256i fa = d640_ld(ls, _mm256_add_epi32(oa, oito)), fb = d640_ld(ls, _mm256_add_epi32(ob, oito)), fc = d640_ld(ls, _mm256_add_epi32(oc, oito));
+        __m256i xv[3], yv[3], fv[3];
+        for (int v = 0; v < 3; v++) {
+            uint32_t ad[8];
+            for (int t = 0; t < 8; t++) {
+                const uint32_t tt = t0 + (uint32_t)t;
+                ad[t] = tt < nt ? ((pb + 16u * d640_be16(&ls[ib + 6u * tt + 2u * (uint32_t)v])) & SPU_LS_MASK & ~15u) : vazio;
+            }
+#define D640_PAR(a, b) _mm256_shuffle_epi8(_mm256_inserti128_si256(_mm256_castsi128_si256(_mm_loadu_si128((const __m128i*)(ls + ad[a]))), \
+                                                                   _mm_loadu_si128((const __m128i*)(ls + ad[b])), 1), bsw)
+            const __m256 A = _mm256_castsi256_ps(D640_PAR(0, 4)), B = _mm256_castsi256_ps(D640_PAR(1, 5));
+            const __m256 C = _mm256_castsi256_ps(D640_PAR(2, 6)), D = _mm256_castsi256_ps(D640_PAR(3, 7));
+#undef D640_PAR
+            const __m256 u0 = _mm256_unpacklo_ps(A, B), u1 = _mm256_unpackhi_ps(A, B), u2 = _mm256_unpacklo_ps(C, D), u3 = _mm256_unpackhi_ps(C, D);
+            xv[v] = _mm256_castps_si256(_mm256_shuffle_ps(u0, u2, _MM_SHUFFLE(1, 0, 1, 0)));
+            yv[v] = _mm256_castps_si256(_mm256_shuffle_ps(u0, u2, _MM_SHUFFLE(3, 2, 3, 2)));
+            fv[v] = _mm256_castps_si256(_mm256_shuffle_ps(u1, u3, _MM_SHUFFLE(1, 0, 1, 0)));
+        }
+        const __m256i xa = xv[0], xb = xv[1], xc = xv[2], ya = yv[0], yb = yv[1], yc = yv[2], fa = fv[0], fb = fv[1], fc = fv[2];
         const __m256i r1 = _mm256_or_si256(_mm256_or_si256(_mm256_cmpgt_epi32(_mm256_and_si256(xa, absm), lim), _mm256_cmpgt_epi32(_mm256_and_si256(xb, absm), lim)),
                                            _mm256_or_si256(_mm256_cmpgt_epi32(_mm256_and_si256(xc, absm), lim), _mm256_cmpgt_epi32(_mm256_and_si256(ya, absm), lim)));
         const __m256i r2 = _mm256_or_si256(r1, _mm256_or_si256(_mm256_cmpgt_epi32(_mm256_and_si256(yb, absm), lim), _mm256_cmpgt_epi32(_mm256_and_si256(yc, absm), lim)));
