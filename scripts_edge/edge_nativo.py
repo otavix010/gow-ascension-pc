@@ -26,10 +26,10 @@ GANCHOS = [
     # E550 (skinning): o laço EC08 menos a última volta; entra antes do núcleo vk dele e salta para o laço
     dict(tipo='antes_vk', pasta='gowajm_0072DF80', fn='gowajm_0072DF80_spu_func_0000E550__b', cab='fn_0000E550_ec08.h',
          nat='fn_0000E550_ec08_nativo', vk='/*VK 0000E550/0000EC08*/', destino='loc_0000EC08'),
-    # DCC0/E3C4: fn_0000DCC0_e3c4.h é exato (300/300, ordem de leitura do original com a saída no lugar do fluxo),
-    # mas escalar: um desvio imprevisível por triângulo o deixa mais lento (4,2%) que o laço local (~2-3,5%); fora
-    # dict(tipo='antes', pasta='gowajm_0072DF80', fn='gowajm_0072DF80_spu_func_0000DCC0__b', cab='fn_0000DCC0_e3c4.h',
-    #      nat='fn_0000DCC0_e3c4_nativo', rotulo='loc_0000E3C4', destino='loc_0000E3C4_fim', fim='loc_0000E3C4'),
+    # DCC0/E3C4 (reconstrução dos triângulos): o laço inteiro em SIMD com as tabelas do jogo (o escalar perdia do laço
+    # local por um desvio imprevisível por triângulo); saltando para depois do laço
+    dict(tipo='antes', pasta='gowajm_0072DF80', fn='gowajm_0072DF80_spu_func_0000DCC0__b', cab='fn_0000DCC0_e3c4.h',
+         nat='fn_0000DCC0_e3c4_nativo', rotulo='loc_0000E3C4', destino='loc_0000E3C4_fim', fim='loc_0000E3C4'),
     # D250 (projeção dos vértices, viewport e códigos de recorte): o laço D4DC inteiro, antes do vk dele
     dict(tipo='antes_vk', pasta='gowajm_0072DF80', fn='gowajm_0072DF80_spu_func_0000D250__b', cab='fn_0000D250.h',
          nat='fn_0000D250_nativo', vk='/*VK 0000D250/0000D4DC*/', destino='loc_0000D4DC_fim', fim='loc_0000D4DC'),
@@ -44,7 +44,6 @@ GANCHOS = [
 # laços de um bloco só com os registradores em variáveis locais (laco_local.py: o cabeçalho port/edge/ll_*.h é gerado
 # aqui, do próprio módulo): o núcleo faz o laço inteiro e salta para <rótulo>_fim, depois do desvio; vem antes do vk
 LACOS_LOCAIS = [
-    ('gowajm_0072DF80', 'gowajm_0072DF80_spu_func_0000DCC0__b', 'loc_0000E3C4'),   # DCC0: reconstrução dos triângulos
     # 30/10: os outros laços de um bloco (8 linhas ou mais) sem vk na função; as funções que começam no próprio rótulo
     # (entrada direta) também
     ('gowajm_0072DF80', 'gowajm_0072DF80_spu_func_0000A950__b', 'loc_0000A950'),

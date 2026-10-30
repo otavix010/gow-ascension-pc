@@ -13,6 +13,7 @@
 #define GOWA_FN_0000DCC0_E3C4_H
 #include <stdlib.h>
 #include <string.h>
+#include <immintrin.h>
 
 #ifndef GOWA_EDGE_NATIVO_ON_DEF
 #define GOWA_EDGE_NATIVO_ON_DEF
@@ -42,6 +43,47 @@ static __attribute__((noinline)) int fn_0000DCC0_e3c4_nativo(spu_context* ctx)
     uint8_t jan[2][80];
     uint32_t cw[2], desl[2];
     uint32_t p0 = 0, p1 = 0, p2 = 0, pos = fluxo;
+#if defined(__SSSE3__) || defined(__AVX2__)
+    /* SIMD (30/10): as tabelas do próprio jogo, em bytes na ordem da SPU (sem troca de ordem). Por nibble (2
+     * triângulos): resultado = shufb(P, N, T23[c]), com P = os 2 triângulos anteriores (o último nos bytes 6-11) e N =
+     * o fluxo na posição atual; o fluxo anda T26[c][0] bytes (T26 são deslocamentos: conferido abaixo). */
+    const uint32_t t23 = r[23]._u32[0], t26 = r[26]._u32[0];
+    if ((t23 & 15u) || (t26 & 15u) || t23 + 256u > SPU_LS_SIZE || t26 + 256u > SPU_LS_SIZE) return 0;
+    __m128i T[16];
+    uint32_t adv[16];
+    for (int c = 0; c < 16; c++) {
+        T[c] = _mm_loadu_si128((const __m128i*)(ls + t23 + 16u * (uint32_t)c));
+        const uint8_t* d = ls + t26 + 16u * (uint32_t)c;
+        adv[c] = d[0];
+        for (int b = 0; b < 16; b++) if (d[b] != (uint8_t)(d[0] + b)) return 0;
+        for (int b = 0; b < 16; b++) if (ls[t23 + 16u * (uint32_t)c + (uint32_t)b] >= 0x20u) return 0;
+    }
+    __m128i P = _mm_setzero_si128();
+    for (uint32_t v = 0; v < n; v++) {
+        const int cur = (int)(v & 1u);
+        cw[cur] = e3c4_u16(ls + ctl + 2u * v);
+        const uint32_t al = pos & ~15u;
+        memcpy(jan[cur], ls + al, 80);
+        desl[cur] = pos - al;
+        const uint32_t c = cw[cur], n3 = (uint32_t)__builtin_popcount(c & (c << 1) & 0xAAAAu);
+        pos += 16u + 4u * n3;
+        if (v == 0) continue;
+        const int ant = cur ^ 1;
+        uint32_t qo = desl[ant];
+        uint8_t tmp[64];
+        for (int j = 0; j < 4; j++) {
+            const uint32_t k = (cw[ant] >> (12 - 4 * j)) & 15u;
+            const __m128i N = _mm_loadu_si128((const __m128i*)(jan[ant] + qo));
+            P = _mm_blendv_epi8(_mm_shuffle_epi8(P, T[k]), _mm_shuffle_epi8(N, T[k]), _mm_slli_epi16(T[k], 3));
+            _mm_storeu_si128((__m128i*)(tmp + 12 * j), P);
+            qo += adv[k];
+        }
+        memcpy(ls + out + 48u * (v - 1u), tmp, 48);
+    }
+    (void)p0; (void)p1; (void)p2;
+    for (int i = 0; i < 4; i++) r[17]._u32[i] += 48u * blocos;
+    return 1;
+#endif
     for (uint32_t v = 0; v < n; v++) {
         const int cur = (int)(v & 1u);
         cw[cur] = e3c4_u16(ls + ctl + 2u * v);
