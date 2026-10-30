@@ -155,7 +155,7 @@ static int d640_decide(const uint8_t* ls, uint32_t ib, uint32_t pb, uint32_t nt,
 }
 #endif
 
-static int fn_0000D640_laco_nativo(spu_context* ctx)
+static __attribute__((noinline)) int fn_0000D640_laco_nativo(spu_context* ctx)
 {
     if (!D640_VETOR || !gowa_edge_nativo_on()) return 0;
 #if D640_VETOR

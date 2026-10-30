@@ -113,7 +113,7 @@ static inline int f538_dois(uint8_t* ls, uint32_t in, uint32_t out, __m256 A, __
 #endif
 
 /* GOWA_F538_STATS=1: grupos feitos e refeitos pelo caminho exato */
-static int fn_0000F538_nativo(spu_context* ctx)
+static __attribute__((noinline)) int fn_0000F538_nativo(spu_context* ctx)
 {
     if (!gowa_edge_nativo_on()) return 0;
     u128* r = ctx->gpr;

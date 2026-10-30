@@ -275,7 +275,7 @@ static inline void ec08_vivos(spu_context* ctx, uint32_t s, uint32_t pos)
     r[40] = spu_shufb(v19, r[81], r[95]); r[38] = spu_shufb(v19, r[81], r[94]);
 }
 
-static int fn_0000E550_ec08_feito(spu_context* ctx);
+static __attribute__((noinline)) int fn_0000E550_ec08_feito(spu_context* ctx);
 /* GOWA_EC08_STATS=1: a cada 4096 chamadas, quantas o nativo fez */
 static int fn_0000E550_ec08_nativo(spu_context* ctx)
 {
@@ -286,7 +286,7 @@ static int fn_0000E550_ec08_nativo(spu_context* ctx)
     if (est) { const long c = ++nch; if (ok) nok++; if ((c & 4095) == 0 || c == 64) fprintf(stderr, "[ec08] %ld chamadas, %ld nativas\n", c, nok); }
     return ok;
 }
-static int fn_0000E550_ec08_feito(spu_context* ctx)
+static __attribute__((noinline)) int fn_0000E550_ec08_feito(spu_context* ctx)
 {
     u128* r = ctx->gpr;
     const uint32_t cont = r[48]._u32[0];
