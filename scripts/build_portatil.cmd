@@ -16,8 +16,10 @@ set "RZ=OFF"
 if /i "%~2"=="rz" set "RZ=ON"
 if /i "%~2"=="rz" set "DIR=%DIR%rz"
 rem PGO só se houver perfil (port\pgo\gowa.profdata: gerado por quem roda o jogo com GOWA_PGO=gen)
-set "PGO=-DGOWA_PGO="
-if exist "%RAIZ%\port\pgo\gowa.profdata" set "PGO=-DGOWA_PGO=use -DGOWA_PGO_PROFILE=%RAIZ_F%/port/pgo/gowa.profdata"
+set "PGO_MODO=-DGOWA_PGO="
+set "PGO_PERFIL=-DGOWA_PGO_PROFILE="
+if exist "%RAIZ%\port\pgo\gowa.profdata" set "PGO_MODO=-DGOWA_PGO=use"
+if exist "%RAIZ%\port\pgo\gowa.profdata" set "PGO_PERFIL=-DGOWA_PGO_PROFILE=%RAIZ_F%/port/pgo/gowa.profdata"
 rem FFmpeg 9 (shared, LGPL): FFMPEG_DIR = pasta com include\ e bin\ (padrão: dl\ffmpeg9\...)
 if "%FFMPEG_DIR%"=="" set "FFMPEG_DIR=%RAIZ%\dl\ffmpeg9\ffmpeg-n9.0-latest-win64-lgpl-shared-9.0"
 set "FFMPEG_F=%FFMPEG_DIR:\=/%"
@@ -50,17 +52,20 @@ rem programa ou estar quebrado (report 332: 'ninja --version' terminou com 0xc00
 set "NINJA=%GOWA_VS%\Common7\IDE\CommonExtensions\Microsoft\CMake\Ninja\ninja.exe"
 if not exist "%NINJA%" set "NINJA=ninja"
 set "NINJA_F=%NINJA:\=/%"
-if not exist "%DIR%\build.ninja" (
-  "%CMAKE%" -S "%RAIZ%\port" -B "%DIR%" -G Ninja ^
-    "-DCMAKE_MAKE_PROGRAM=%NINJA_F%" ^
-    -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_COMPILER=clang-cl -DCMAKE_CXX_COMPILER=clang-cl ^
-    %PGO% ^
-    -DGOWA_PPU_MARCH=x86-64-v3 -DGOWA_SPU_X86_V3=ON -DGOWA_SPU_MARCH=%MARCH% -DGOWA_HOST_FMA=ON ^
-    -DGOWA_RUNTIME_FAST=ON -DGOWA_SPU_DAZ=ON -DGOWA_SPU_RZ=%RZ% ^
-    -DPS3RECOMP_DIR=%RAIZ_F%/ps3recomp -DPS3RECOMP_FFMPEG_RUNTIME=ON -DPS3RECOMP_BUILD_TESTS=OFF ^
-    -DPS3RECOMP_FFMPEG_INCLUDE_DIR=%FFMPEG_F%/include
-  if errorlevel 1 goto fim
-)
+rem Report 427 (30/10): uma pasta com parênteses ("GodofWarAscension(USA)") fechava o bloco "if (...)" no meio do
+rem comando do cmake ("...ps3recomp foi inesperado neste momento"). Sem bloco, com goto, e os caminhos entre aspas
+rem (uma pasta com espaço partia o argumento em dois).
+if exist "%DIR%\build.ninja" goto compila
+"%CMAKE%" -S "%RAIZ%\port" -B "%DIR%" -G Ninja ^
+  "-DCMAKE_MAKE_PROGRAM=%NINJA_F%" ^
+  -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_COMPILER=clang-cl -DCMAKE_CXX_COMPILER=clang-cl ^
+  "%PGO_MODO%" "%PGO_PERFIL%" ^
+  -DGOWA_PPU_MARCH=x86-64-v3 -DGOWA_SPU_X86_V3=ON "-DGOWA_SPU_MARCH=%MARCH%" -DGOWA_HOST_FMA=ON ^
+  -DGOWA_RUNTIME_FAST=ON -DGOWA_SPU_DAZ=ON "-DGOWA_SPU_RZ=%RZ%" ^
+  "-DPS3RECOMP_DIR=%RAIZ_F%/ps3recomp" -DPS3RECOMP_FFMPEG_RUNTIME=ON -DPS3RECOMP_BUILD_TESTS=OFF ^
+  "-DPS3RECOMP_FFMPEG_INCLUDE_DIR=%FFMPEG_F%/include"
+if errorlevel 1 goto fim
+:compila
 cd /d "%DIR%"
 if "%GOWA_JOBS%"=="" ("%NINJA%" gowa.exe) else ("%NINJA%" -j %GOWA_JOBS% gowa.exe)
 :fim
