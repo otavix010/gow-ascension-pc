@@ -4,6 +4,20 @@ O Otavix Launcher mostra este arquivo na página "Novidades" do jogo. Cada atual
 "## <data> · <versão>" e o texto em português (### pt), inglês (### en) e, quando houver, espanhol (### es).
 As mais novas ficam em cima.
 
+## 30/10/2026 · e316534
+### pt
+- **A geração parava em "6_compilar" com "o gowa.exe não foi gerado":** em alguns PCs o ambiente do Visual Studio não era montado ("'cmake' não é reconhecido", "A sintaxe do nome do arquivo... está incorreta") ou faltava o Windows SDK ("could not open 'kernel32.lib'"). Agora o gerador monta esse ambiente sem depender do PATH do seu Windows, instala sozinho o Windows 11 SDK quando ele falta (o Windows pede a permissão de administrador) e, se a compilação parar no meio, continua com menos arquivos ao mesmo tempo (usa menos memória). Gere de novo pelo launcher.
+- **Erros da compilação mais fáceis de achar:** o log da compilação ficou bem menor e as linhas de erro vão para o fim dele, que é a parte que o launcher envia nos reports.
+- **Tela preta com som depois da logo da Santa Monica:** ainda não reproduz nos PCs de teste. Quando a imagem fica preta, o jogo agora registra no log em qual etapa do desenho ela se perde. Se isso acontece com você, mande um report com o log depois desta atualização.
+### en
+- **Generation stopped at "6_compilar" with "gowa.exe was not made":** on some PCs the Visual Studio environment was not set up ("'cmake' is not recognized", "The filename, directory name, or volume label syntax is incorrect") or the Windows SDK was missing ("could not open 'kernel32.lib'"). The generator now sets up that environment without depending on your Windows PATH, installs the Windows 11 SDK by itself when it is missing (Windows asks for administrator permission) and, if the build stops halfway, carries on with fewer files at a time (less memory). Generate again from the launcher.
+- **Build errors easier to find:** the build log is much smaller and the error lines go to its end, which is the part the launcher sends with reports.
+- **Black screen with sound after the Santa Monica logo:** it still does not happen on the test PCs. When the picture goes black, the game now writes to the log at which drawing step it gets lost. If this happens to you, send a report with the log after this update.
+### es
+- **La generación se detenía en "6_compilar" con "no se generó el gowa.exe":** en algunos PC el entorno de Visual Studio no se montaba ("'cmake' no se reconoce", "La sintaxis del nombre de archivo... no es correcta") o faltaba el Windows SDK ("could not open 'kernel32.lib'"). Ahora el generador monta ese entorno sin depender del PATH de tu Windows, instala solo el Windows 11 SDK cuando falta (Windows pide permiso de administrador) y, si la compilación se detiene a mitad, sigue con menos archivos a la vez (usa menos memoria). Genera de nuevo desde el launcher.
+- **Errores de compilación más fáciles de encontrar:** el log de la compilación es mucho más pequeño y las líneas de error van al final, que es la parte que el launcher envía en los reports.
+- **Pantalla negra con sonido después del logo de Santa Monica:** todavía no ocurre en los PC de prueba. Cuando la imagen se pone negra, el juego ahora registra en el log en qué paso del dibujo se pierde. Si te pasa, manda un report con el log después de esta actualización.
+
 ## 29/10/2026 · ccd3641
 ### pt
 - **Tela preta e o jogo fecha sozinho, logo depois de abrir:** em alguns PCs faltava um arquivo do disco, ou ele estava cortado, depois de o jogo já ter sido gerado (pasta trocada, antivírus, OneDrive que deixou o arquivo só na nuvem). Agora o jogo confere a cópia do disco toda vez que abre e, se faltar algo, mostra quais arquivos estão com problema em vez da tela preta.
