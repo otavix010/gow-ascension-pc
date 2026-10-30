@@ -311,8 +311,15 @@ endif()
 # Compiler flags
 # ---------------------------------------------------------------------------
 if(CMAKE_C_COMPILER_ID MATCHES "Clang|GNU")
+    # clang-cl: -Wall there means -Weverything (report 415: milhares de avisos do rsx_live_draw.c, e o erro real
+    # sumia do fim do log que o launcher manda). /W3 como no port.
+    if(MSVC)
+        set(_ps3r_warn /W3 -Wno-unused-parameter -Wno-deprecated-declarations -Wno-unknown-argument)
+    else()
+        set(_ps3r_warn -Wall -Wextra -Wno-unused-parameter)
+    endif()
     target_compile_options(ps3recomp_runtime PRIVATE
-        -Wall -Wextra -Wno-unused-parameter
+        ${_ps3r_warn}
         -fno-strict-aliasing
         # No spontaneous fused multiply-add. MSVC never contracts, and x86-64
         # without -mfma has nothing to contract into, so every validated
