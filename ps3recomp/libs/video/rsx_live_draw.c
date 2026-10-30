@@ -12288,7 +12288,8 @@ static void ld_tela_medir(ld_tela_rb* t, char* out, size_t n)
 {
     const int bgra = t->fmt == DXGI_FORMAT_B8G8R8A8_UNORM || t->fmt == DXGI_FORMAT_B8G8R8A8_UNORM_SRGB;
     const int rgba = t->fmt == DXGI_FORMAT_R8G8B8A8_UNORM || t->fmt == DXGI_FORMAT_R8G8B8A8_UNORM_SRGB;
-    if (!t->busy || !t->pitch || !(bgra || rgba)) {
+    const int half = t->fmt == DXGI_FORMAT_R16G16B16A16_FLOAT;
+    if (!t->busy || !t->pitch || !(bgra || rgba || half)) {
         snprintf(out, n, "%ux%u fmt %d (não medido)", t->w, t->h, (int)t->fmt); t->busy = 0; return;
     }
     u8* m = NULL; D3D12_RANGE r0 = {0, (SIZE_T)t->size};
@@ -12297,9 +12298,22 @@ static void ld_tela_medir(ld_tela_rb* t, char* out, size_t n)
     const u32 passo = t->w >= 1920 ? 8 : 4;
     for (u32 y = 0; y < t->h; y += passo)
         for (u32 x = 0; x < t->w; x += passo) {
-            const u8* p = m + t->offset + (size_t)y * t->pitch + (size_t)x * 4u;
-            const u32 r = bgra ? p[2] : p[0], gg = p[1], bl = bgra ? p[0] : p[2];
-            const u32 l = (r * 30 + gg * 59 + bl * 11) / 100;
+            u32 l;
+            if (half) {   /* 30/10: superfícies em float16 no diagnóstico [tela-alvos] */
+                const u16* q = (const u16*)(m + t->offset + (size_t)y * t->pitch + (size_t)x * 8u);
+                float c[3];
+                for (int k = 0; k < 3; k++) {
+                    const u32 hv = q[k], e = (hv >> 10) & 31u, f = hv & 1023u;
+                    float v = e == 0 ? (float)f / 16777216.0f : e == 31 ? 65504.0f : ldexpf(1.0f + (float)f / 1024.0f, (int)e - 15);
+                    if (hv & 0x8000u) v = 0.0f;
+                    c[k] = v > 1.0f ? 1.0f : v;
+                }
+                l = (u32)((c[0] * 0.30f + c[1] * 0.59f + c[2] * 0.11f) * 255.0f);
+            } else {
+                const u8* p = m + t->offset + (size_t)y * t->pitch + (size_t)x * 4u;
+                const u32 r = bgra ? p[2] : p[0], gg = p[1], bl = bgra ? p[0] : p[2];
+                l = (r * 30 + gg * 59 + bl * 11) / 100;
+            }
             sum += l; claros += l > 8; total++;
         }
     D3D12_RANGE w0 = {0, 0}; t->rb->lpVtbl->Unmap(t->rb, 0, &w0);
@@ -12328,15 +12342,56 @@ static void ld_tela_saida(void)
     fprintf(stderr, "[tela-saida] swap chain %ux%u fmt %d, %u buffers, flags 0x%X, vsync %d, tearing %d; %s\n",
             sd.Width, sd.Height, (int)sd.Format, sd.BufferCount, sd.Flags, g_ld_present_sync, g_ld_present_tearing, mon);
 }
+/* GOWA (30/10, reports 397, 399, 409): a logo aparece, mas do menu em diante a surface mostrada fica preta (brilho
+ * 0,0) com o jogo desenhando normalmente (30-48 fps, milhões de pacotes), em GPUs da NVIDIA e da AMD; aqui não
+ * reproduz nem com o cache frio e os shaders do pacote. Depois de 3 medidas seguidas de "[tela]" com o jogo todo
+ * preto (passados 30 s), copia uma vez cada surface viva e escreve "[tela-alvos]" com o endereço, tamanho, formato
+ * e brilho de cada uma: mostra em qual passo do desenho a imagem se perde. No máximo 2 vezes por execução. */
+static ld_tela_rb s_alvos[MAX_SURFACES];
+static u32 s_alvos_loc[MAX_SURFACES], s_alvos_off[MAX_SURFACES];
+static int s_alvos_pend = 0, s_alvos_vezes = 0;
+static void ld_tela_alvos_copiar(ID3D12Resource* mostrada)
+{
+    UINT64 total = 0;
+    for (u32 i = 0; i < MAX_SURFACES; i++) {
+        surface_t* s = &g.surfaces[i];
+        s_alvos[i].busy = 0;
+        if (!s->tex || s->tex == mostrada) continue;   /* a mostrada pode estar em outro estado; já sai no [tela] */
+        const UINT64 bytes = (UINT64)s->w * s->h * 8u;
+        if (total + bytes > 384ull * 1024 * 1024) continue;   /* teto da memória de leitura */
+        total += bytes;
+        s_alvos_loc[i] = s->location; s_alvos_off[i] = s->offset;
+        ld_tela_copia(&s_alvos[i], s->tex, D3D12_RESOURCE_STATE_RENDER_TARGET);
+    }
+    s_alvos_pend = 1;
+}
+static void ld_tela_alvos_medir(void)
+{
+    const u64 done = g.fence->lpVtbl->GetCompletedValue(g.fence);
+    for (u32 i = 0; i < MAX_SURFACES; i++)
+        if (s_alvos[i].busy && s_alvos[i].fence > done) return;
+    fprintf(stderr, "[tela-alvos] quadro %u: surfaces vivas (a mostrada é a de \"[tela]\")\n", g_ld_frames);
+    for (u32 i = 0; i < MAX_SURFACES; i++) {
+        if (!s_alvos[i].busy) continue;
+        char a[96];
+        ld_tela_medir(&s_alvos[i], a, sizeof a);
+        fprintf(stderr, "[tela-alvos]   %2u loc %u off 0x%08X fmt %d: %s\n", i, s_alvos_loc[i], s_alvos_off[i],
+                (int)s_alvos[i].fmt, a);
+        if (s_alvos[i].rb) { s_alvos[i].rb->lpVtbl->Release(s_alvos[i].rb); s_alvos[i].rb = NULL; s_alvos[i].size = 0; }
+    }
+    fflush(stderr);
+    s_alvos_pend = 0;
+}
 static void ld_tela_diag(ID3D12Resource* src, D3D12_RESOURCE_STATES src_state, ID3D12Resource* bb, D3D12_RESOURCE_STATES bb_state)
 {
-    static int on = -1; static ULONGLONG t0, next;
+    static int on = -1; static ULONGLONG t0, next; static int pretos = 0;
     if (on < 0) {
         const char* e = getenv("GOWA_TELA_DIAG"); on = !(e && *e == '0');
         t0 = GetTickCount64(); next = t0 + 2000;
         if (on) ld_tela_saida();
     }
     if (!on) return;
+    if (s_alvos_pend) { ld_tela_alvos_medir(); return; }
     if (s_tela[0].busy || s_tela[1].busy) {
         const u64 done = g.fence->lpVtbl->GetCompletedValue(g.fence);
         if ((s_tela[0].busy && s_tela[0].fence > done) || (s_tela[1].busy && s_tela[1].fence > done)) return;
@@ -12347,6 +12402,13 @@ static void ld_tela_diag(ID3D12Resource* src, D3D12_RESOURCE_STATES src_state, I
         fprintf(stderr, "[tela] quadro %u, %.0f s: jogo %s | final %s | janela %ux%u%s%s\n", frame,
                 (GetTickCount64() - t0) / 1000.0, a, b, g.width, g.height, w && IsIconic(w) ? " (minimizada)" : "",
                 rsx_live_draw_framegen_on() ? " (geração de quadros)" : "");
+        static int forca = -1;   /* GOWA_TELA_ALVOS=1: registra as surfaces mesmo sem tela preta (teste) */
+        if (forca < 0) { const char* e = getenv("GOWA_TELA_ALVOS"); forca = e && *e == '1'; }
+        pretos = (strstr(a, "brilho 0.0, 0% não preto") || forca) ? pretos + 1 : 0;
+        if (pretos >= 3 && GetTickCount64() - t0 > 30000 && s_alvos_vezes < 2) {
+            s_alvos_vezes++; pretos = -60;   /* a 2ª vez, se ainda preto, uns 2 min depois */
+            ld_tela_alvos_copiar(src);
+        }
         return;
     }
     const ULONGLONG now = GetTickCount64();
