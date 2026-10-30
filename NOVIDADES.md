@@ -4,6 +4,20 @@ O Otavix Launcher mostra este arquivo na página "Novidades" do jogo. Cada atual
 "## <data> · <versão>" e o texto em português (### pt), inglês (### en) e, quando houver, espanhol (### es).
 As mais novas ficam em cima.
 
+## 30/10/2026 · cf4be45
+### pt
+- **A geração parava em "6_compilar" com "'cmake' não é reconhecido":** acontecia quando o Visual Studio estava sem o componente "C++ CMake tools". Agora o gerador usa outro CMake instalado no PC ou instala o componente sozinho (o Windows pede permissão). Gere de novo pelo launcher.
+- **A geração parava ao baixar o update com "Falha na execução do programa 'curl.exe': Acesso negado":** quando o antivírus ou o Windows não deixa o curl rodar, o download agora é feito pelo próprio PowerShell.
+- **Memória de vídeo cheia, travadinhas e o jogo fechando em placas de 12 GB ou menos:** o jogo agora acompanha quanta memória de vídeo o Windows reserva para ele e, perto do limite, troca as texturas menos usadas em vez de continuar carregando novas.
+### en
+- **Generation stopped at "6_compilar" with "'cmake' is not recognized":** it happened when Visual Studio lacked the "C++ CMake tools" component. The generator now uses another CMake installed on the PC or installs the component by itself (Windows asks for permission). Generate again from the launcher.
+- **Generation stopped while downloading the update with "Program 'curl.exe' failed to run: Access is denied":** when the antivirus or Windows does not let curl run, the download is now done by PowerShell itself.
+- **Video memory full, stutters and the game closing on 12 GB cards or smaller:** the game now follows how much video memory Windows reserves for it and, near the limit, swaps out the least used textures instead of loading more.
+### es
+- **La generación se detenía en "6_compilar" con "'cmake' no se reconoce":** pasaba cuando Visual Studio no tenía el componente "C++ CMake tools". Ahora el generador usa otro CMake instalado en el PC o instala el componente solo (Windows pide permiso). Genera de nuevo desde el launcher.
+- **La generación se detenía al descargar el update con "Error al ejecutar el programa 'curl.exe': Acceso denegado":** cuando el antivirus o Windows no deja ejecutar curl, la descarga ahora la hace el propio PowerShell.
+- **Memoria de vídeo llena, tirones y el juego cerrándose en tarjetas de 12 GB o menos:** el juego ahora sigue cuánta memoria de vídeo le reserva Windows y, cerca del límite, cambia las texturas menos usadas en lugar de seguir cargando nuevas.
+
 ## 30/10/2026 · 964fdee
 ### pt
 - **Tela preta com som depois da logo:** ainda não acontece em nenhum PC de teste (nem no renderizador de referência da Microsoft). Quando a imagem fica preta, o jogo agora registra no log cada desenho daquele momento e os programas que se carregaram dentro dele (sobreposições e filtros, como RivaTuner, Discord, ReShade ou filtros da placa). Se isso acontece com você, abra o jogo, espere uns 30 segundos com a tela preta, feche e mande um report com o log.
