@@ -34,6 +34,9 @@ GANCHOS = [
     # de pshufb; antes do vk dele, saltando para depois do laço
     dict(tipo='antes_vk', pasta='gowajm_0072DF80', fn='gowajm_0072DF80_spu_func_0000DCC0__b', cab='fn_0000DCC0_e210.h',
          nat='fn_0000DCC0_e210_nativo', vk='/*VK 0000DCC0/0000E210*/', destino='loc_0000E210_fim', fim='loc_0000E210'),
+    # CC98/CE60 (a faixa da LS sobe 4 bytes, em blocos de 128 de cima para baixo): um memmove
+    dict(tipo='antes', pasta='gowajm_0072DF80', fn='gowajm_0072DF80_spu_func_0000CC98__b', cab='fn_0000CC98_ce60.h',
+         nat='fn_0000CC98_ce60_nativo', rotulo='loc_0000CE60', destino='loc_0000CE60_fim'),   # o rótulo do fim vem do laço local
     # D250 (projeção dos vértices, viewport e códigos de recorte): o laço D4DC inteiro, antes do vk dele
     dict(tipo='antes_vk', pasta='gowajm_0072DF80', fn='gowajm_0072DF80_spu_func_0000D250__b', cab='fn_0000D250.h',
          nat='fn_0000D250_nativo', vk='/*VK 0000D250/0000D4DC*/', destino='loc_0000D4DC_fim', fim='loc_0000D4DC'),
