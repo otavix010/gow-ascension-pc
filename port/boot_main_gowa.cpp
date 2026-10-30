@@ -2635,6 +2635,17 @@ int main(int argc, char** argv)
      * que deixa subir a resolução interna depois. =0 volta ao MLAA. */
     if (!GetEnvironmentVariableA("GOWA_MLAA_BYPASS", NULL, 0))
         SetEnvironmentVariableA("GOWA_MLAA_BYPASS", "1");
+    /* GOWA_MLAA_SKIP (30/10): com o bypass, ninguém lê o que as tarefas do MLAA das SPUs (taskset ELF 0x6C8500)
+     * calculam, mas elas seguiam processando o quadro inteiro: ~9% do tempo das SPUs no jogo (fase 1 com 8 threads
+     * lógicas). Agora, com o bypass ligado, elas recebem uma imagem de 80 linhas (o mesmo protocolo, quase nada de
+     * trabalho; ver GOWA_MLAA_SKIP no laço do vblank): SPUs de 63-89% para 48-79% de um núcleo, fase 1 +3% neste PC
+     * (2 pares). GOWA_MLAA_SKIP=0 volta ao quadro inteiro; com GOWA_MLAA_BYPASS=0 (MLAA de volta) não liga. */
+    {
+        char b[8] = {0};
+        if (!GetEnvironmentVariableA("GOWA_MLAA_SKIP", NULL, 0) &&
+            GetEnvironmentVariableA("GOWA_MLAA_BYPASS", b, sizeof b) && b[0] == '1')
+            SetEnvironmentVariableA("GOWA_MLAA_SKIP", "1");
+    }
     /* SPU_DMA_REPEAT_LIMIT=0: sem o detector que para uma SPU após N DMAs
      * idênticos seguidos. O kernel do SPURS consulta um label da RSX
      * (0x20000530) em laço enquanto espera a GPU; com as SPUs mais rápidas e as
