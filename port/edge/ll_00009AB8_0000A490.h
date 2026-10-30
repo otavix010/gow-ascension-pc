@@ -1,0 +1,39 @@
+/* GOWA: gowajm_0072DF80_spu_func_00009AB8__b loc_0000A490 com registradores locais (gerado por scripts_edge/laco_local.py; não editar).
+ * Mesmas operações e ordem do código traduzido: idêntico bit a bit. Faz o laço inteiro e devolve 1 (o
+ * gancho salta para loc_0000A490_fim, depois do desvio); 0 = nada feito (desligado). */
+#ifndef GOWA_LL_00009AB8_0000A490_H
+#define GOWA_LL_00009AB8_0000A490_H
+#ifndef GOWA_LACO_LOCAL_ON_DEF
+#define GOWA_LACO_LOCAL_ON_DEF
+#include <stdlib.h>
+static int gowa_laco_local_on(void)   /* GOWA_LACO_LOCAL=0 desliga todos (A/B) */
+{
+    static int on = -1;
+    if (on < 0) { const char* e = getenv("GOWA_LACO_LOCAL"); on = !(e && *e == '0'); }
+    return on;
+}
+#endif
+static int ll_00009AB8_0000A490(spu_context* ctx)
+{
+    if (!gowa_laco_local_on()) return 0;
+    u128 g7 = ctx->gpr[7], g8 = ctx->gpr[8], g9 = ctx->gpr[9], g11 = ctx->gpr[11], g55 = ctx->gpr[55], g56 = ctx->gpr[56], g57 = ctx->gpr[57], g58 = ctx->gpr[58];
+    do {
+        g8 = spu_ai(g8, -16);
+        g57 = spu_ls_read128(ctx, g7._u32[0] + 0x0);
+        g7 = spu_ai(g7, 16);
+        g55 = spu_clgti(g8, 15);
+        g58 = spu_ls_read128(ctx, g7._u32[0] + 0x0);
+        g56 = spu_shufb(g57, g58, g9);
+        spu_ls_write128(ctx, g11._u32[0] + 0x0, g56);
+        g11 = spu_ai(g11, 16);
+    } while (g55._u32[0] != 0);
+    ctx->gpr[8] = g8;
+    ctx->gpr[57] = g57;
+    ctx->gpr[7] = g7;
+    ctx->gpr[55] = g55;
+    ctx->gpr[58] = g58;
+    ctx->gpr[56] = g56;
+    ctx->gpr[11] = g11;
+    return 1;
+}
+#endif
