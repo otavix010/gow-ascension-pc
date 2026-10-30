@@ -393,7 +393,15 @@ function Achar-Disco([string]$d) {
     # reports 66/72: um .iso escolhido que não é arquivo nenhum (movido, renomeado, download por terminar, sem acesso):
     # com um só arquivo de disco na mesma pasta, é ele; senão, diz o que o Windows respondeu
     if ($d -match '\.(7z|zip|rar|iso)$' -and -not (Test-Path -LiteralPath $d -PathType Container)) {
-        $outro = @(Get-ChildItem -LiteralPath (Split-Path $d) -File -ErrorAction SilentlyContinue | Where-Object { $_.Name -match '\.(7z|zip|rar|iso)$' })
+        # report 435: um nome sem pasta deixava o Split-Path vazio e o Get-ChildItem parava com "A parameter cannot be
+        # found that matches parameter name 'File'" (sem caminho ele não sabe que é uma pasta do disco)
+        $pai = Split-Path $d
+        if (-not $pai) { $pai = (Get-Location).ProviderPath }
+        $outro = @()
+        if ($pai -and [IO.Directory]::Exists($pai)) {
+            $outro = @(try { [IO.Directory]::GetFiles($pai) | Where-Object { $_ -match '\.(7z|zip|rar|iso)$' } |
+                             ForEach-Object { [IO.FileInfo]::new($_) } } catch { })
+        }
         if ($outro.Count -eq 1) {
             Msg "o arquivo $d não existe; usando $($outro[0].FullName), o arquivo do jogo dessa pasta"
             return (Achar-Disco $outro[0].FullName)
