@@ -59,6 +59,13 @@ def fw(x):
 def fop(f):
     return lambda *v: [fw(f(*(fx(x[i]) for x in v))) for i in range(4)]
 
+def cuflt(a, i8):
+    """inteiro sem sinal -> float, vezes 2^-(155 - i8), arredondando para zero (spu_cuflt_ref)"""
+    return [fw(Fraction(w) / Fraction(2) ** (155 - i8)) if w else 0 for w in a]
+
+def csflt(a, i8):
+    return [fw(Fraction(sx(w, 32)) / Fraction(2) ** (155 - i8)) if w else 0 for w in a]
+
 def cflts(a, i8):
     out = []
     for w in a:
@@ -246,6 +253,8 @@ OPS = {
     'fnms': fop(lambda x, y, z: z - x * y),
     'fcgt': fcmp_gt,
     'cflts': cflts,
+    'cuflt': cuflt,
+    'csflt': csflt,
 }
 
 # ---------------------------------------------------------------- parser das linhas

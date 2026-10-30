@@ -9,6 +9,7 @@ $p = Start-Process -FilePath "$R\port\build_native\gowa.exe" -ArgumentList "`"$R
     -RedirectStandardError "$T\$Nome.log" -RedirectStandardOutput "$T\${Nome}_out.log" -PassThru
 if ($Cpus) { Start-Sleep -Milliseconds 300; try { $p.ProcessorAffinity = [IntPtr]$Cpus } catch { "afinidade falhou: $_" } }
 Start-Sleep -Seconds $Segundos
-Get-Process gowa -ErrorAction SilentlyContinue | Where-Object { $_.Path -eq "$R\port\build_native\gowa.exe" } | Stop-Process -Force
+Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
+if (-not $p.WaitForExit(10000)) { "AVISO: o jogo (PID $($p.Id)) não fechou" }
 "fim $Nome"
 

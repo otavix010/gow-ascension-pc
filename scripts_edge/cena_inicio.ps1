@@ -62,7 +62,8 @@ if ($Mov -match '^(\d+)-(\d+)$') {
 }
 $resta = $Segundos - ((Get-Date) - $t0).TotalSeconds
 if ($resta -gt 0) { Start-Sleep -Milliseconds ([int]($resta * 1000)) }
-Get-Process gowa -ErrorAction SilentlyContinue | Where-Object { $_.Path -eq "$R\port\build_native\gowa.exe" } | Stop-Process -Force
+Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
+if (-not $p.WaitForExit(10000)) { "AVISO: o jogo (PID $($p.Id)) não fechou" }
 foreach ($k in $envs.Keys) { Remove-Item "env:$k" -ErrorAction SilentlyContinue }
 $go = Select-String -Path "$T\$Nome.log", "$T\${Nome}_out.log" -Pattern 'go to playing' | Select-Object -First 1
 "fim $Nome; go to playing: $(if ($go) { 'sim' } else { 'NÃƒO' })"

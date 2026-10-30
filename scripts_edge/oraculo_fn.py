@@ -21,7 +21,7 @@ corpo = s[i:s.index('\n}\n', i)]
 linhas = []
 for l in corpo.split('\n'):
     t = l.strip()
-    if t.startswith('/*VK'):
+    if t.startswith('/*VK') or 'HALT-ASSERT' in t:   # as asserções de halt (heqi...) não disparam num job normal
         continue
     if t.startswith('SPU_TAILX('):
         linhas.append('SPU_RET(ctx);'); continue
