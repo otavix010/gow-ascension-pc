@@ -19,6 +19,9 @@ GANCHOS = [
     # D640 do job 0x72DF80: o laço de descarte de triângulos
     dict(tipo='antes', pasta='gowajm_0072DF80', fn='gowajm_0072DF80_spu_func_0000D640__b', cab='fn_0000D640.h',
          nat='fn_0000D640_laco_nativo', rotulo='loc_0000D92C', destino='loc_0000DB70'),
+    # E550 (skinning): o laço EC08 menos a última volta; entra antes do núcleo vk dele e salta para o laço
+    dict(tipo='antes_vk', pasta='gowajm_0072DF80', fn='gowajm_0072DF80_spu_func_0000E550__b', cab='fn_0000E550_ec08.h',
+         nat='fn_0000E550_ec08_nativo', vk='/*VK 0000E550/0000EC08*/', destino='loc_0000EC08'),
 ]
 MARCA = '/* GOWA_EDGE_NATIVO */'
 INC = '#include "../../runtime/spu/spu_helpers.h"\n'
@@ -67,6 +70,13 @@ def main():
             if corpo[j:j + len(gancho)] == gancho:
                 print(f'{g["fn"]}: já aplicado'); continue
             corpo = corpo[:j] + gancho + corpo[j:]
+        elif g['tipo'] == 'antes_vk':
+            k = corpo.index(g['vk'])
+            k = corpo.rindex('\n', 0, k) + 1
+            gancho = f'        if ({g["nat"]}(ctx)) goto {g["destino"]}; {MARCA}\n'
+            if gancho in corpo:
+                print(f'{g["fn"]} antes do vk: já aplicado'); continue
+            corpo = corpo[:k] + gancho + corpo[k:]
         else:
             rot = f'{g["rotulo"]}:\n'
             assert corpo.count(rot) == 1, (g['fn'], g['rotulo'])
