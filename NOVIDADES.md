@@ -4,6 +4,20 @@ O Otavix Launcher mostra este arquivo na página "Novidades" do jogo. Cada atual
 "## <data> · <versão>" e o texto em português (### pt), inglês (### en) e, quando houver, espanhol (### es).
 As mais novas ficam em cima.
 
+## 30/10/2026 · dc55a5c
+### pt
+- **Escolha da versão do executável:** a nova opção "Versão do executável" do launcher escolhe entre Automático (o padrão: o gerador escolhe pelo seu processador), Portátil (AVX2, a que quase todos usam) e Nativa (compilada para o seu processador). Trocar de versão gera de novo só a compilação. Se a Nativa não compilar no seu PC, o gerador faz a Portátil no lugar e avisa.
+- **O jogo fechava ao abrir com o erro 0xC000001D num processador sem nome comercial ("Genuine Intel CPU 0000", amostra de engenharia):** esse processador anunciava instruções que não executa, e a versão Nativa era compilada com elas. No Automático, ele agora fica com a versão Portátil. Gere de novo pelo launcher.
+- **Tela preta ou branca:** o report só leva o fim do log, e as medidas da tela não chegavam nele. Agora, ao fechar o jogo pela janela, o fim do log traz um resumo dessas medidas. Se a sua imagem fica preta ou branca, abra o jogo, espere a tela ficar assim, feche pela janela (não pelo Gerenciador de Tarefas) e mande um report.
+### en
+- **Choosing the executable version:** the launcher's new "Executable version" option picks between Automatic (the default: the generator picks by your processor), Portable (AVX2, the one almost everyone uses) and Native (built for your processor). Switching versions only redoes the build step. If Native does not build on your PC, the generator makes the Portable one instead and says so.
+- **The game closed on start with error 0xC000001D on a processor without a retail name ("Genuine Intel CPU 0000", an engineering sample):** that processor advertised instructions it does not run, and the Native version was built with them. On Automatic it now gets the Portable version. Generate again from the launcher.
+- **Black or white screen:** the report only carries the end of the log, and the screen measurements did not reach it. Now, when you close the game through its window, the end of the log has a summary of those measurements. If your picture goes black or white, open the game, wait until the screen looks like that, close it through the window (not through Task Manager) and send a report.
+### es
+- **Elegir la versión del ejecutable:** la nueva opción "Versión del ejecutable" del launcher elige entre Automático (el predeterminado: el generador elige según tu procesador), Portátil (AVX2, la que usa casi todo el mundo) y Nativa (compilada para tu procesador). Cambiar de versión solo rehace la compilación. Si la Nativa no compila en tu PC, el generador hace la Portátil en su lugar y lo avisa.
+- **El juego se cerraba al abrir con el error 0xC000001D en un procesador sin nombre comercial ("Genuine Intel CPU 0000", muestra de ingeniería):** ese procesador anunciaba instrucciones que no ejecuta, y la versión Nativa se compilaba con ellas. En Automático ahora queda con la versión Portátil. Genera de nuevo desde el launcher.
+- **Pantalla negra o blanca:** el report solo lleva el final del log, y las medidas de la pantalla no llegaban a él. Ahora, al cerrar el juego desde la ventana, el final del log trae un resumen de esas medidas. Si tu imagen se pone negra o blanca, abre el juego, espera a que la pantalla quede así, ciérralo desde la ventana (no desde el Administrador de tareas) y manda un report.
+
 ## 30/10/2026 · cf4be45
 ### pt
 - **A geração parava em "6_compilar" com "'cmake' não é reconhecido":** acontecia quando o Visual Studio estava sem o componente "C++ CMake tools". Agora o gerador usa outro CMake instalado no PC ou instala o componente sozinho (o Windows pede permissão). Gere de novo pelo launcher.
