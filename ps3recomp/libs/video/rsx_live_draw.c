@@ -11545,7 +11545,16 @@ int rsx_live_draw_init(void* hwnd, u32 width, u32 height,
      * in use goes to the log. */
     IDXGIAdapter1* gpu = NULL;
     { const char* e = getenv("GOWA_GPU");
-      const int pref = !e || !_stricmp(e, "high") ? 2 : !_stricmp(e, "low") ? 1 : 0;
+      /* GOWA_GPU=warp (30/10): o renderizador de software da Microsoft (WARP), a referência do D3D12, para
+       * conferir defeitos que só aparecem com o driver de alguns jogadores (tela preta 397/425/431) */
+      if (e && !_stricmp(e, "warp")) {
+          IDXGIFactory4* f4 = NULL;
+          if (SUCCEEDED(factory->lpVtbl->QueryInterface(factory, &IID_IDXGIFactory4, (void**)&f4))) {
+              f4->lpVtbl->EnumWarpAdapter(f4, &IID_IDXGIAdapter1, (void**)&gpu);
+              f4->lpVtbl->Release(f4);
+          }
+      }
+      const int pref = gpu ? 0 : !e || !_stricmp(e, "high") ? 2 : !_stricmp(e, "low") ? 1 : 0;
       IDXGIFactory6* f6 = NULL;
       if (pref && SUCCEEDED(factory->lpVtbl->QueryInterface(factory, &IID_IDXGIFactory6, (void**)&f6))) {
           f6->lpVtbl->EnumAdapterByGpuPreference(f6, 0, pref == 2 ? DXGI_GPU_PREFERENCE_HIGH_PERFORMANCE
