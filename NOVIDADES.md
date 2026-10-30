@@ -4,6 +4,23 @@ O Otavix Launcher mostra este arquivo na página "Novidades" do jogo. Cada atual
 "## <data> · <versão>" e o texto em português (### pt), inglês (### en) e, quando houver, espanhol (### es).
 As mais novas ficam em cima.
 
+## 30/10/2026 · e8a5a83
+### pt
+- **A geração parava em "2_jogo" com "A parameter cannot be found that matches parameter name 'File'":** acontecia quando o arquivo do jogo escolhido vinha sem a pasta no caminho. Corrigido.
+- **A geração parava em "6_compilar" com "...ps3recomp foi inesperado neste momento":** acontecia quando a pasta do jogo tinha parênteses no nome, como "GodofWarAscension(USA)", ou espaços. Corrigido; gere de novo pelo launcher.
+- **Menos trabalho jogado fora nas SPUs:** o antisserrilhado que o jogo calcula nas SPUs (MLAA) já não aparecia na imagem, mas continuava processando o quadro inteiro. Agora ele quase não trabalha, e sobra processador para o resto do jogo, o que ajuda mais em PCs de 4 núcleos.
+- **Controle não reconhecido:** o log agora diz quais controles o jogo encontrou e se cada um é suportado. São suportados os controles XInput (Xbox e compatíveis), o DualShock 4 e o DualSense. Um controle genérico precisa do modo XInput dele, do Steam Input ou do DS4Windows. Se o seu não funcionar, mande um report com o log.
+### en
+- **Generation stopped at "2_jogo" with "A parameter cannot be found that matches parameter name 'File'":** it happened when the picked game file came without its folder in the path. Fixed.
+- **Generation stopped at "6_compilar" with "...ps3recomp was unexpected at this time":** it happened when the game folder had parentheses in its name, like "GodofWarAscension(USA)", or spaces. Fixed; generate again from the launcher.
+- **Less wasted work on the SPUs:** the anti-aliasing the game computes on the SPUs (MLAA) no longer showed in the picture but still processed the whole frame. It now does almost nothing, leaving processor time for the rest of the game, which helps most on 4-core PCs.
+- **Controller not recognized:** the log now says which controllers the game found and whether each is supported. Supported are XInput controllers (Xbox and compatible), the DualShock 4 and the DualSense. A generic controller needs its XInput mode, Steam Input or DS4Windows. If yours does not work, send a report with the log.
+### es
+- **La generación se detenía en "2_jogo" con "A parameter cannot be found that matches parameter name 'File'":** pasaba cuando el archivo del juego elegido venía sin la carpeta en la ruta. Corregido.
+- **La generación se detenía en "6_compilar" con "...ps3recomp no se esperaba en este momento":** pasaba cuando la carpeta del juego tenía paréntesis en el nombre, como "GodofWarAscension(USA)", o espacios. Corregido; genera de nuevo desde el launcher.
+- **Menos trabajo desperdiciado en las SPU:** el antialiasing que el juego calcula en las SPU (MLAA) ya no aparecía en la imagen, pero seguía procesando el cuadro entero. Ahora casi no trabaja y queda procesador para el resto del juego, lo que ayuda más en PC de 4 núcleos.
+- **Mando no reconocido:** el log ahora dice qué mandos encontró el juego y si cada uno es compatible. Son compatibles los mandos XInput (Xbox y compatibles), el DualShock 4 y el DualSense. Un mando genérico necesita su modo XInput, Steam Input o DS4Windows. Si el tuyo no funciona, manda un report con el log.
+
 ## 30/10/2026 · e316534
 ### pt
 - **A geração parava em "6_compilar" com "o gowa.exe não foi gerado":** em alguns PCs o ambiente do Visual Studio não era montado ("'cmake' não é reconhecido", "A sintaxe do nome do arquivo... está incorreta") ou faltava o Windows SDK ("could not open 'kernel32.lib'"). Agora o gerador monta esse ambiente sem depender do PATH do seu Windows, instala sozinho o Windows 11 SDK quando ele falta (o Windows pede a permissão de administrador) e, se a compilação parar no meio, continua com menos arquivos ao mesmo tempo (usa menos memória). Gere de novo pelo launcher.
