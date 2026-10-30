@@ -797,7 +797,26 @@ if ($Disco -and (Test-Path (Join-Path $OUT '2_jogo.ok'))) {
     $pgReal = Pasta-Do-Disco $pg   # o modo direto (report 340): o disco fica no outro drive
     $quebrado = -not (Test-Path -LiteralPath (Join-Path $pgReal 'USRDIR') -PathType Container)
     $idLigado = if ($quebrado) { '' } else { Id-Disco $pgReal }
-    if ($quebrado -or ($idLigado -and $idLigado -ne 'BCUS98232')) {
+    # reports 379 e 389 (29/10): com o jogo gerado, "Escolher o disco de novo" também religa quando a cópia ligada
+    # tem arquivo faltando ou cortado, ou quando a pasta escolhida é outra (só com junção ou modo direto: o espelho
+    # de links físicos e a cópia ficam, salvo arquivo ruim). Um arquivo compactado não entra na comparação (seria
+    # extraído de novo); ele religa só nos casos de antes.
+    $ruim = $false; $outro = $false
+    if (-not $quebrado) {
+        try { Conferir-Arquivos $pgReal } catch { $ruim = $true; Msg "a cópia do disco ligada tem problema ($($_.Exception.Message)); ligando o disco escolhido" }
+    }
+    $itPg = Get-Item -LiteralPath $pg -Force -ErrorAction SilentlyContinue
+    if (-not $quebrado -and -not $ruim -and (($itPg -and $itPg.LinkType) -or (Disco-Direto)) -and
+        (Test-Path -LiteralPath $Disco -PathType Container)) {
+        $f = Achar-PS3Game $Disco
+        $atual = Destino-Real $pgReal
+        $esc = if ($f) { Destino-Real (Join-Path $f 'PS3_GAME') } else { $null }
+        if ($esc -and $atual -and [IO.Path]::GetFullPath($esc).TrimEnd('\') -ine [IO.Path]::GetFullPath($atual).TrimEnd('\')) {
+            $outro = $true
+            Msg "disco escolhido em outra pasta ($esc; o ligado era $atual)"
+        }
+    }
+    if ($quebrado -or $ruim -or $outro -or ($idLigado -and $idLigado -ne 'BCUS98232')) {
         $Disco = Achar-Disco $Disco
         $alvo = Join-Path $Disco 'PS3_GAME'
         $real = Destino-Real $alvo
