@@ -274,6 +274,8 @@ OPS = {
     'fms': fop(lambda x, y, z: x * y - z),
     'fnms': fop(lambda x, y, z: z - x * y),
     'fcgt': fcmp_gt,
+    'rotqmbi': lambda a, b: w4((int.from_bytes(b16(a), 'big') >> ((-sx(b[0], 32)) & 7)).to_bytes(16, 'big')),
+    'rotqmbybi': lambda a, b: shr_bytes(a, (-(sx(b[0], 32) >> 3)) & 0x1F),
     'fnms_r': fop(lambda x, y, z: z - x * y),
     'frest': frest,
     'gbh': gbh,

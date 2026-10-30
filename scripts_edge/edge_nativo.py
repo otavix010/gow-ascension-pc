@@ -16,6 +16,8 @@ GANCHOS = [
     dict(tipo='entrada', pasta='gowapl_0074C580', fn='gowapl_0074C580_spu_func_00030020', cab='pl_0074C580.h', nat='pl_0074C580_nativo'),
     # plugin 0x752710 (descompressão de posição e vetores): a partir da entrada do laço, depois da preparação
     dict(tipo='entrada', pasta='gowapl_00752710', fn='gowapl_00752710_spu_func_000302E8', cab='pl_00752710.h', nat='pl_00752710_nativo'),
+    # plugin 0x755540 (posições comprimidas em u16 -> float4): o laço inteiro, na entrada da função dele
+    dict(tipo='entrada', pasta='gowapl_00755540', fn='gowapl_00755540_spu_func_00030310', cab='pl_00755540.h', nat='pl_00755540_nativo'),
     # D640 do job 0x72DF80: o laço de descarte de triângulos
     dict(tipo='antes', pasta='gowajm_0072DF80', fn='gowajm_0072DF80_spu_func_0000D640__b', cab='fn_0000D640.h',
          nat='fn_0000D640_laco_nativo', rotulo='loc_0000D92C', destino='loc_0000DB70'),
