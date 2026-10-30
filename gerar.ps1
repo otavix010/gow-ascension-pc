@@ -1052,6 +1052,14 @@ if ($alvo -eq 'auto') {
     $def = (cmd /c "echo.| `"$llvm\clang.exe`" -march=native -dM -E -x c - 2>nul") -join "`n"
     if ($def -match '__AVX512F__' -and $def -match '__AVX512BW__' -and $def -match '__AVX512VL__' -and $def -match '__AVX512DQ__') { $alvo = 'avx512' }
     else { $alvo = 'portatil' }
+    # reports 461/462: "Genuine Intel(R) CPU 0000 @ 2.60GHz" (amostra de engenharia, não se identifica) anuncia AVX-512
+    # e o -march=native liga o que a CPUID diz; o jogo fechou com 0xC000001D (instrução ilegal) logo que as SPUs
+    # começaram. Processador que não diz o nome comercial fica com a build portátil (AVX2), a que todos os outros usam.
+    $nomeCpu = "$((Get-CimInstance Win32_Processor -ErrorAction SilentlyContinue | Select-Object -First 1).Name)".Trim()
+    if ($alvo -eq 'avx512' -and $nomeCpu -match '^Genuine Intel\(R\) CPU|\b0000 @') {
+        Msg "processador sem nome comercial ($nomeCpu, amostra de engenharia): build portátil (AVX2) em vez da AVX-512"
+        $alvo = 'portatil'
+    }
 }
 # sem AVX-512: x86-64-v3 (AVX2), a build testada nos PCs de teste, e não -march=native: tira uma variável dos
 # defeitos gráficos vistos num Ryzen 5 5600X (cores de vértice e texturas erradas) enquanto a causa é investigada
@@ -1094,6 +1102,13 @@ Etapa '6_compilar' {
                  Select-Object -First 30 | ForEach-Object { $_.Line.Substring(0, [Math]::Min(300, $_.Line.Length)) })
         Anotar $LOG ("`r`n=== erros da compilação (primeiras linhas)`r`n" + ($err -join "`r`n"))
         throw ("o gowa.exe não foi gerado (veja $LOG)" + $(if ($err) { "`r`n" + (($err | Select-Object -First 8) -join "`r`n") } else { '' }))
+    }
+    # o launcher abre o primeiro exe que existir (build_native antes da build_v3rz): uma build_native de uma geração
+    # anterior (reports 461/462) ganharia da portátil nova. Fica renomeada.
+    $velho = Join-Path $R 'port\build_native\gowa.exe'
+    if ($bdir -ne 'build_native' -and (Test-Path $velho)) {
+        Move-Item -LiteralPath $velho -Destination "$velho.antigo" -Force -ErrorAction SilentlyContinue
+        Msg "a build_native antiga ficou como gowa.exe.antigo (o launcher abre a $bdir)"
     }
 }
 
