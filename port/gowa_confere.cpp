@@ -266,8 +266,20 @@ void restaura(spu_context* ctx, const uint8_t* snap)
 struct Amostrador {
     HANDLE alvo = nullptr, th = nullptr;
     volatile LONG parar = 0, dentro = 0;   /* só amostra com dentro = 1 (o job rodando) */
-    std::unordered_map<uint32_t, uint32_t> hist;
+    /* 30/10: tabela de tamanho fixo, alocada antes de amostrar. Era um unordered_map, que aloca ao ver um endereço
+     * novo -- com a thread do job suspensa; se ela estava com o lock do heap, a reprodução travava para sempre
+     * (2 em ~25 rodadas com GOWA_CONF_PERF=1). Chave 0 = vazio (o RVA 0 vira 0xFFFFFFFE). */
+    enum { TAB = 1 << 20 };
+    std::vector<uint32_t> chave, conta;
     uintptr_t base = 0;
+    void nota(uint32_t k)
+    {
+        if (!k) k = 0xFFFFFFFEu;
+        for (uint32_t i = (k * 2654435761u) >> 12, n = 0; n < TAB; i = (i + 1) & (TAB - 1), n++) {
+            if (chave[i] == k) { conta[i]++; return; }
+            if (!chave[i]) { chave[i] = k; conta[i] = 1; return; }
+        }
+    }
     static DWORD WINAPI laco(LPVOID a)
     {
         Amostrador* m = (Amostrador*)a;
@@ -276,7 +288,7 @@ struct Amostrador {
             if (m->dentro && SuspendThread(m->alvo) != (DWORD)-1) {
                 CONTEXT c; c.ContextFlags = CONTEXT_CONTROL;
                 if (m->dentro && GetThreadContext(m->alvo, &c))   /* fora do exe (memcpy do CRT, ntdll): 0xFFFFFFFF */
-                    m->hist[c.Rip - m->base < 0x10000000u ? (uint32_t)(c.Rip - m->base) : 0xFFFFFFFFu]++;
+                    m->nota(c.Rip - m->base < 0x10000000u ? (uint32_t)(c.Rip - m->base) : 0xFFFFFFFFu);
                 ResumeThread(m->alvo);
             }
             QueryPerformanceCounter(&t);
@@ -287,6 +299,7 @@ struct Amostrador {
     void liga()
     {
         base = (uintptr_t)GetModuleHandleA(nullptr);
+        chave.assign(TAB, 0); conta.assign(TAB, 0);
         DuplicateHandle(GetCurrentProcess(), GetCurrentThread(), GetCurrentProcess(), &alvo, 0, FALSE, DUPLICATE_SAME_ACCESS);
         th = CreateThread(nullptr, 0, laco, this, 0, nullptr);
     }
@@ -295,7 +308,8 @@ struct Amostrador {
         parar = 1;
         WaitForSingleObject(th, INFINITE);
         if (FILE* f = fopen(path.c_str(), "w")) {
-            for (const auto& kv : hist) fprintf(f, "%X %u\n", kv.first, kv.second);
+            for (uint32_t i = 0; i < TAB; i++)
+                if (chave[i]) fprintf(f, "%X %u\n", chave[i] == 0xFFFFFFFEu ? 0u : chave[i], conta[i]);
             fclose(f);
         }
     }
