@@ -170,6 +170,83 @@ static inline int ec08_dois(spu_context* ctx, uint32_t s, uint32_t m_out, uint32
     _mm512_storeu_si512(ls + p_out, ec08_bswap(_mm512_castps_si512(t)));
     return 1;
 }
+#elif defined(SPU_SX_RZ) && defined(__AVX2__) && defined(__FMA__)
+#define EC08_VETOR 2
+/* build portátil: o MXCSR das threads de SPU já arredonda para zero (SPU_SX_RZ), então mul/fmadd comuns são as
+ * contas RZ; um par (2 vértices) em 8 faixas, com o mesmo tratamento de expoente 0 e de |r| >= 0x7F7FFFFF */
+static inline __m256 ec08_z8(__m256 x)
+{
+    const __m256i i = _mm256_castps_si256(x);
+    const __m256i nz = _mm256_cmpeq_epi32(_mm256_and_si256(i, _mm256_set1_epi32(0x7F800000)), _mm256_setzero_si256());
+    return _mm256_castsi256_ps(_mm256_andnot_si256(nz, i));
+}
+static inline __m256i ec08_ruim8(__m256 r)
+{
+    return _mm256_cmpgt_epi32(_mm256_and_si256(_mm256_castps_si256(r), _mm256_set1_epi32(0x7FFFFFFF)), _mm256_set1_epi32(0x7F7FFFFE));
+}
+static inline __m256i ec08_bswap8(__m256i v)
+{
+    const __m256i m = _mm256_setr_epi8(3, 2, 1, 0, 7, 6, 5, 4, 11, 10, 9, 8, 15, 14, 13, 12, 3, 2, 1, 0, 7, 6, 5, 4, 11, 10, 9, 8, 15, 14, 13, 12);
+    return _mm256_shuffle_epi8(v, m);
+}
+static inline int ec08_um(spu_context* ctx, uint32_t s, uint32_t m_out, uint32_t p_out, const uint32_t base[3],
+                          u128 k91, u128 k84, u128 k97)
+{
+    uint8_t* ls = SPU_LS_BASE(ctx);
+    if ((p_out & 15u) || p_out + 32u > SPU_LS_SIZE) return 0;
+    uint32_t wv[8], kv[8], off[4][2];
+    for (int v = 0; v < 2; v++) {
+        const uint8_t* q = ls + ((s + 8u * (uint32_t)v) & SPU_LS_MASK);
+        for (int b = 0; b < 4; b++) { wv[4 * v + b] = q[2 * b]; kv[4 * v + b] = k91._u32[b]; off[b][v] = (uint32_t)q[2 * b + 1] * 48u; }
+    }
+    __m256i ruim = _mm256_setzero_si256();
+    __m256 W = _mm256_mul_ps(_mm256_cvtepi32_ps(_mm256_loadu_si256((const __m256i*)wv)), ec08_z8(_mm256_castsi256_ps(_mm256_loadu_si256((const __m256i*)kv))));
+    ruim = _mm256_or_si256(ruim, ec08_ruim8(W)); W = ec08_z8(W);
+    __m256 L[3];
+    for (int l = 0; l < 3; l++) {
+        __m256 acc = _mm256_setzero_ps();
+        for (int b = 0; b < 4; b++) {
+            const __m256 Wb = _mm256_permutevar8x32_ps(W, _mm256_setr_epi32(b, b, b, b, 4 + b, 4 + b, 4 + b, 4 + b));
+            const __m128i lo = _mm_loadu_si128((const __m128i*)(ls + ((base[l] + off[b][0]) & (SPU_LS_MASK & ~0xFu))));
+            const __m128i hi = _mm_loadu_si128((const __m128i*)(ls + ((base[l] + off[b][1]) & (SPU_LS_MASK & ~0xFu))));
+            const __m256 M = ec08_z8(_mm256_castsi256_ps(ec08_bswap8(_mm256_inserti128_si256(_mm256_castsi128_si256(lo), hi, 1))));
+            acc = b == 0 ? _mm256_mul_ps(Wb, M) : _mm256_fmadd_ps(Wb, M, ec08_z8(acc));
+            ruim = _mm256_or_si256(ruim, ec08_ruim8(acc));
+        }
+        L[l] = ec08_z8(acc);
+    }
+    const __m256i k84v = _mm256_broadcastsi128_si256(_mm_loadu_si128((const __m128i*)k84._u32));
+    const __m256i k97v = _mm256_broadcastsi128_si256(_mm_loadu_si128((const __m128i*)k97._u32));
+    const __m256 g0 = _mm256_castsi256_ps(_mm256_or_si256(_mm256_andnot_si256(k84v, k97v), _mm256_and_si256(_mm256_castps_si256(L[0]), k84v)));
+    const __m256 g1 = _mm256_castsi256_ps(_mm256_and_si256(_mm256_castps_si256(L[1]), k84v));
+    const __m256 g2 = _mm256_castsi256_ps(_mm256_and_si256(_mm256_castps_si256(L[2]), k84v));
+    const __m256i i3 = _mm256_setr_epi32(3, 3, 3, 3, 7, 7, 7, 7);
+    __m256 T = _mm256_blend_ps(_mm256_permutevar8x32_ps(L[0], i3), _mm256_permutevar8x32_ps(L[1], i3), 0x22);
+    T = _mm256_blend_ps(T, _mm256_permutevar8x32_ps(L[2], i3), 0x44);
+    T = _mm256_blend_ps(T, _mm256_setzero_ps(), 0x88);
+    const __m256 P = ec08_z8(_mm256_castsi256_ps(ec08_bswap8(_mm256_loadu_si256((const __m256i*)(ls + p_out)))));
+    const __m256 P1 = _mm256_permutevar8x32_ps(P, _mm256_setr_epi32(1, 2, 0, 3, 5, 6, 4, 7));
+    const __m256 P2 = _mm256_permutevar8x32_ps(P, _mm256_setr_epi32(2, 0, 1, 3, 6, 4, 5, 7));
+    __m256 t = _mm256_fmadd_ps(P, ec08_z8(g0), ec08_z8(T));
+    ruim = _mm256_or_si256(ruim, ec08_ruim8(t));
+    t = _mm256_fmadd_ps(P1, ec08_z8(g1), ec08_z8(t));
+    ruim = _mm256_or_si256(ruim, ec08_ruim8(t)); t = ec08_z8(t);
+    t = _mm256_fmadd_ps(P2, ec08_z8(g2), t);
+    ruim = _mm256_or_si256(ruim, ec08_ruim8(t)); t = ec08_z8(t);
+    if (!_mm256_testz_si256(ruim, ruim)) return 0;
+    const __m256i G0 = ec08_bswap8(_mm256_castps_si256(g0)), G1 = ec08_bswap8(_mm256_castps_si256(g1)), G2 = ec08_bswap8(_mm256_castps_si256(g2));
+    for (int v = 0; v < 2; v++) {
+        const uint32_t m = m_out + 48u * (uint32_t)v;
+        const __m128i x0 = v ? _mm256_extracti128_si256(G0, 1) : _mm256_castsi256_si128(G0);
+        const __m128i x1 = v ? _mm256_extracti128_si256(G1, 1) : _mm256_castsi256_si128(G1);
+        const __m128i x2 = v ? _mm256_extracti128_si256(G2, 1) : _mm256_castsi256_si128(G2);
+        _mm_storeu_si128((__m128i*)(ls + ((m + 0x00) & (SPU_LS_MASK & ~0xFu))), x0);
+        _mm_storeu_si128((__m128i*)(ls + ((m + 0x10) & (SPU_LS_MASK & ~0xFu))), x1);
+        _mm_storeu_si128((__m128i*)(ls + ((m + 0x20) & (SPU_LS_MASK & ~0xFu))), x2);
+    }
+    _mm256_storeu_si256((__m256i*)(ls + p_out), ec08_bswap8(_mm256_castps_si256(t)));
+    return 1;
+}
 #else
 #define EC08_VETOR 0
 #endif
@@ -232,7 +309,14 @@ static int fn_0000E550_ec08_feito(spu_context* ctx)
     const uint32_t base[3] = { r[37]._u32[0], r[35]._u32[0], r[34]._u32[0] };
     const u128 k91 = r[91], k84 = r[84], k97 = r[97];
     uint32_t j0 = 0;
-#if EC08_VETOR
+#if EC08_VETOR == 2
+    static int vet2 = -1;
+    if (vet2 < 0) { const char* e = getenv("GOWA_EC08_VETOR"); vet2 = !(e && *e == '0'); }
+    if (vet2)
+        for (; j0 + 1 < n; j0++)
+            if (!ec08_um(ctx, s0 + 16u * j0, m0 + 96u * j0, p0 + 32u * j0, base, k91, k84, k97))
+                ec08_par(ctx, s0 + 16u * j0, m0 + 96u * j0, p0 + 32u * j0, base, k91, k84, k97);
+#elif EC08_VETOR
     static int vet = -1;
     if (vet < 0) { const char* e = getenv("GOWA_EC08_VETOR"); vet = !(e && *e == '0'); }
     if (vet)
