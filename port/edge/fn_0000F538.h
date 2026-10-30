@@ -29,9 +29,9 @@ static int gowa_edge_nativo_on(void)
 #endif
 
 /* um grupo de 8 vértices pelas primitivas do runtime, como o original (fm_r nos vértices 0, 1 e 5) */
-static inline void f538_exato(spu_context* ctx, uint32_t in, uint32_t out, u128 a, u128 b, u128 c, u128 d)
+static inline void f538_exato(spu_context* ctx, uint32_t in, uint32_t out, int v0, int n, u128 a, u128 b, u128 c, u128 d)
 {
-    for (int v = 0; v < 8; v++) {
+    for (int v = v0; v < v0 + n; v++) {
         const u128 x = spu_ls_read128(ctx, in + 16u * (uint32_t)v);
         u128 m = (v == 0 || v == 1 || v == 5) ? spu_fm_r(x, a) : spu_fm(x, a);
         m = spu_fma(spu_rotqbyi(x, 4), b, m);
@@ -136,25 +136,40 @@ static int fn_0000F538_nativo(spu_context* ctx)
 #endif
     for (uint32_t j = 0; j < g; j++) {
         const uint32_t pi = in + 128u * j, po = out + 128u * j;
-        int ok = 0;
+        /* conta numa cópia do grupo e grava os 128 bytes juntos (serve também no lugar, out == in); um bloco com valor
+         * fora do alcance é refeito pelo caminho exato (lido da LS antes da gravação do grupo): na prática só o
+         * último grupo, com o lixo além do fim dos vértices (0xFFFFFFFF etc.), que o original também grava */
+        uint8_t tmp[128];
+        memcpy(tmp, ls + pi, 128);
 #if F538_VETOR == 1
-        /* conta numa cópia do grupo e grava os 128 bytes juntos (serve também no lugar, out == in) */
-        uint8_t tmp[128];
-        memcpy(tmp, ls + pi, 128);
-        ok = f538_quatro(tmp, 0, 0, A, B, C, D) && f538_quatro(tmp, 64, 64, A, B, C, D);
-        if (ok) memcpy(ls + po, tmp, 128);
+        const int nb = 2, vb = 4;
+        int ok[2] = { f538_quatro(tmp, 0, 0, A, B, C, D), f538_quatro(tmp, 64, 64, A, B, C, D) };
 #elif F538_VETOR == 2
-        uint8_t tmp[128];
-        memcpy(tmp, ls + pi, 128);
-        ok = f538_dois(tmp, 0, 0, A, B, C, D) && f538_dois(tmp, 32, 32, A, B, C, D) &&
-             f538_dois(tmp, 64, 64, A, B, C, D) && f538_dois(tmp, 96, 96, A, B, C, D);
-        if (ok) memcpy(ls + po, tmp, 128);
+        const int nb = 4, vb = 2;
+        int ok[4] = { f538_dois(tmp, 0, 0, A, B, C, D), f538_dois(tmp, 32, 32, A, B, C, D),
+                      f538_dois(tmp, 64, 64, A, B, C, D), f538_dois(tmp, 96, 96, A, B, C, D) };
+#else
+        const int nb = 1, vb = 8;
+        int ok[1] = { 0 };
 #endif
-        if (!ok) { f538_exato(ctx, pi, po, a, b, c, d); refeitos++; }
+        int todos = 1;
+        for (int k = 0; k < nb; k++) todos &= ok[k];
+        if (todos) { memcpy(ls + po, tmp, 128); continue; }
+        /* algum bloco ruim: os bons vão da cópia; os ruins, do caminho exato com a entrada original */
+        uint8_t ent[128];
+        memcpy(ent, ls + pi, 128);
+        for (int k = 0; k < nb; k++) {
+            if (ok[k]) continue;
+            memcpy(ls + po + (uint32_t)(k * vb * 16), ent + k * vb * 16, (size_t)vb * 16);   /* entrada no lugar da saída */
+            f538_exato(ctx, po, po, k * vb, vb, a, b, c, d);
+            memcpy(tmp + k * vb * 16, ls + po + (uint32_t)(k * vb * 16), (size_t)vb * 16);
+            refeitos++;
+        }
+        memcpy(ls + po, tmp, 128);
     }
     static int est = -1; static volatile long nch, nref;
     if (est < 0) est = getenv("GOWA_F538_STATS") ? 1 : 0;
-    if (est) { const long n = ++nch; nref += refeitos; if ((n & (n - 1)) == 0) fprintf(stderr, "[f538] %ld chamadas, %ld grupos refeitos\n", n, nref); }
+    if (est) { const long n = ++nch; nref += refeitos; if ((n & (n - 1)) == 0) fprintf(stderr, "[f538] %ld chamadas, %ld blocos refeitos\n", n, nref); }
     return 1;   /* só temporários mudariam depois do laço */
 }
 #endif
