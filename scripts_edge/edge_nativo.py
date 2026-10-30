@@ -2,6 +2,8 @@
 
 O código traduzido é gerado a cada geração, então os ganchos são aplicados depois dela. Dois tipos:
 - 'entrada': na entrada da função, `if (<nativo>(ctx)) { SPU_RET(ctx); }`;
+- 'entrada_segue': na entrada da função, `if (<nativo>(ctx)) { RELOAD; }` (o nativo faz parte do laço, ajusta os
+  registradores em ctx->gpr e o traduzido segue com eles);
 - 'antes': logo antes de um rótulo (roda uma vez, antes do laço), `if (<nativo>(ctx)) goto <destino>;`.
 O nativo devolve 0 quando o caso não é coberto, e o código traduzido segue como antes.
 
@@ -20,6 +22,8 @@ GANCHOS = [
     dict(tipo='entrada', pasta='gowapl_00755540', fn='gowapl_00755540_spu_func_00030310', cab='pl_00755540.h', nat='pl_00755540_nativo'),
     # plugin 0x74EF90 (posição u16 + 2 vetores comprimidos, os dois anteriores juntos): o laço inteiro e o epílogo
     dict(tipo='entrada', pasta='gowapl_0074EF90', fn='gowapl_0074EF90_spu_func_000304A0', cab='pl_0074EF90.h', nat='pl_0074EF90_nativo'),
+    # plugin 0x75C570 (float4 -> float3 empacotado): as voltas 0..n-2; a última fica com o laço traduzido
+    dict(tipo='entrada_segue', pasta='gowapl_0075C570', fn='gowapl_0075C570_spu_func_000300D0', cab='pl_0075C570.h', nat='pl_0075C570_nativo'),
     # D640 do job 0x72DF80: o laço de descarte de triângulos
     dict(tipo='antes', pasta='gowajm_0072DF80', fn='gowajm_0072DF80_spu_func_0000D640__b', cab='fn_0000D640.h',
          nat='fn_0000D640_laco_nativo', rotulo='loc_0000D92C', destino='loc_0000DB70'),
@@ -162,9 +166,13 @@ def main():
                 s = s.replace(inc2, inc2 + linha_inc, 1)
         i, fim = corpo_da_funcao(s, g['fn'])
         corpo = s[i:fim]
-        if g['tipo'] == 'entrada':
+        if g['tipo'] in ('entrada', 'entrada_segue'):
             j = corpo.index('RELOAD;\n') + len('RELOAD;\n') if 'RELOAD;\n' in corpo else 0
-            gancho = f'        if ({g["nat"]}(ctx)) {{ SPU_RET(ctx); }} {MARCA}\n'
+            if g['tipo'] == 'entrada':
+                gancho = f'        if ({g["nat"]}(ctx)) {{ SPU_RET(ctx); }} {MARCA}\n'
+            else:
+                assert j, (g['fn'], 'sem RELOAD')
+                gancho = f'        if ({g["nat"]}(ctx)) {{ RELOAD; }} {MARCA}\n'
             if corpo[j:j + len(gancho)] == gancho:
                 print(f'{g["fn"]}: já aplicado'); continue
             corpo = corpo[:j] + gancho + corpo[j:]
