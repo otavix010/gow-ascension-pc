@@ -170,7 +170,15 @@ static inline __m256 d250_rec8(__m256 w)
     const __m256i ui = _mm256_castps_si256(w);
     const __m256i e = _mm256_and_si256(_mm256_srli_epi32(ui, 23), _mm256_set1_epi32(0xFF));
     const __m256i idx = _mm256_and_si256(_mm256_srli_epi32(ui, 18), _mm256_set1_epi32(0x1F));
-    const __m256i fr = _mm256_i32gather_epi32((const int*)d250_frest_lut, idx, 4);
+    /* a tabela de 32 em 4 registros (o gather é lento nos Ryzen): bit 3 e bit 4 do índice escolhem o registro */
+    const __m256i t0 = _mm256_permutevar8x32_epi32(_mm256_loadu_si256((const __m256i*)&d250_frest_lut[0]), idx);
+    const __m256i t1 = _mm256_permutevar8x32_epi32(_mm256_loadu_si256((const __m256i*)&d250_frest_lut[8]), idx);
+    const __m256i t2 = _mm256_permutevar8x32_epi32(_mm256_loadu_si256((const __m256i*)&d250_frest_lut[16]), idx);
+    const __m256i t3 = _mm256_permutevar8x32_epi32(_mm256_loadu_si256((const __m256i*)&d250_frest_lut[24]), idx);
+    const __m256i b3 = _mm256_slli_epi32(idx, 28), b4 = _mm256_slli_epi32(idx, 27);   /* bit 3 e bit 4 no bit de sinal */
+    const __m256i lo = _mm256_castps_si256(_mm256_blendv_ps(_mm256_castsi256_ps(t0), _mm256_castsi256_ps(t1), _mm256_castsi256_ps(b3)));
+    const __m256i hi = _mm256_castps_si256(_mm256_blendv_ps(_mm256_castsi256_ps(t2), _mm256_castsi256_ps(t3), _mm256_castsi256_ps(b3)));
+    const __m256i fr = _mm256_castps_si256(_mm256_blendv_ps(_mm256_castsi256_ps(lo), _mm256_castsi256_ps(hi), _mm256_castsi256_ps(b4)));
     __m256i rexp = _mm256_sub_epi32(_mm256_set1_epi32(253), e);
     rexp = _mm256_andnot_si256(_mm256_cmpgt_epi32(e, _mm256_set1_epi32(252)), rexp);
     rexp = _mm256_blendv_epi8(rexp, _mm256_set1_epi32(255), _mm256_cmpeq_epi32(e, _mm256_setzero_si256()));
@@ -228,6 +236,64 @@ static inline unsigned d250_dois(const uint8_t* in, uint8_t* out, __m256 CX, __m
     }
     return maus;
 }
+/* 8 vértices (2 grupos) em SoA, como o original faz com 4: cada faixa é um vértice, na ordem v0 v2 v4 v6 | v1 v3 v5 v7
+ * (a da transposição). Grava os 8 e devolve a máscara (bit = vértice) dos que precisam do caminho exato. */
+static inline unsigned d250_oito(const uint8_t* in, uint8_t* out, const d250_k* k)
+{
+    const __m256 A = d250_z8(_mm256_castsi256_ps(d250_bswap8(_mm256_loadu_si256((const __m256i*)(in)))));
+    const __m256 B = d250_z8(_mm256_castsi256_ps(d250_bswap8(_mm256_loadu_si256((const __m256i*)(in + 32)))));
+    const __m256 C = d250_z8(_mm256_castsi256_ps(d250_bswap8(_mm256_loadu_si256((const __m256i*)(in + 64)))));
+    const __m256 D = d250_z8(_mm256_castsi256_ps(d250_bswap8(_mm256_loadu_si256((const __m256i*)(in + 96)))));
+    const __m256 t0 = _mm256_unpacklo_ps(A, B), t1 = _mm256_unpackhi_ps(A, B), t2 = _mm256_unpacklo_ps(C, D), t3 = _mm256_unpackhi_ps(C, D);
+    const __m256 X = _mm256_shuffle_ps(t0, t2, _MM_SHUFFLE(1, 0, 1, 0)), Y = _mm256_shuffle_ps(t0, t2, _MM_SHUFFLE(3, 2, 3, 2));
+    const __m256 Z = _mm256_shuffle_ps(t1, t3, _MM_SHUFFLE(1, 0, 1, 0));
+#define D250_S(w) d250_z8(_mm256_castsi256_ps(_mm256_set1_epi32((int)(w))))
+    __m256i ruim = _mm256_setzero_si256();
+    __m256 c[4];
+    for (int i = 0; i < 4; i++) {
+        __m256 v = _mm256_fmadd_ps(X, D250_S(k->cx[i]), D250_S(k->cw[i]));
+        ruim = _mm256_or_si256(ruim, d250_ruim8(v));
+        v = d250_z8(_mm256_fmadd_ps(Y, D250_S(k->cy[i]), d250_z8(v))); ruim = _mm256_or_si256(ruim, d250_ruim8(v));
+        v = d250_z8(_mm256_fmadd_ps(Z, D250_S(k->cz[i]), v)); ruim = _mm256_or_si256(ruim, d250_ruim8(v));
+        c[i] = v;
+    }
+    const __m256 W = c[3];
+    const __m256 y0 = d250_z8(d250_rec8(W));
+    ruim = _mm256_or_si256(ruim, d250_ruim8(y0));
+    const __m256 t = d250_z8(_mm256_fnmadd_ps(y0, W, _mm256_set1_ps(1.0f)));
+    ruim = _mm256_or_si256(ruim, d250_ruim8(t));
+    const __m256 inv = d250_z8(_mm256_fmadd_ps(t, y0, y0));
+    ruim = _mm256_or_si256(ruim, d250_ruim8(inv));
+    const __m256 sg = _mm256_castsi256_ps(_mm256_and_si256(_mm256_castps_si256(W), _mm256_set1_epi32((int)0x80000000u)));
+    __m256 s[3];
+    __m256i cod = _mm256_and_si256(_mm256_castps_si256(_mm256_cmp_ps(W, _mm256_setzero_ps(), _CMP_GT_OQ)), _mm256_set1_epi32(2));
+    for (int i = 0; i < 3; i++) {
+        __m256 n = d250_z8(_mm256_mul_ps(c[i], inv));
+        ruim = _mm256_or_si256(ruim, d250_ruim8(n));
+        n = _mm256_xor_ps(n, sg);
+        s[i] = d250_z8(_mm256_fmadd_ps(n, D250_S(k->esc[i]), D250_S(k->des[i])));
+        ruim = _mm256_or_si256(ruim, d250_ruim8(s[i]));
+        const __m256i gx = _mm256_castps_si256(_mm256_cmp_ps(s[i], D250_S(k->max[i]), _CMP_GT_OQ));
+        const __m256i nx = _mm256_castps_si256(_mm256_cmp_ps(D250_S(k->min[i]), s[i], _CMP_GT_OQ));
+        cod = _mm256_or_si256(cod, _mm256_and_si256(gx, _mm256_set1_epi32((int)(0x80u >> (2 * i)))));
+        cod = _mm256_or_si256(cod, _mm256_and_si256(nx, _mm256_set1_epi32((int)(0x40u >> (2 * i)))));
+    }
+#undef D250_S
+    /* de volta a um vértice por 16 bytes: (sx, sy, código, 0) */
+    const __m256 C4 = _mm256_castsi256_ps(cod), Z0 = _mm256_setzero_ps();
+    const __m256 u0 = _mm256_unpacklo_ps(s[0], s[1]), u1 = _mm256_unpackhi_ps(s[0], s[1]);
+    const __m256 u2 = _mm256_unpacklo_ps(C4, Z0), u3 = _mm256_unpackhi_ps(C4, Z0);
+    _mm256_storeu_si256((__m256i*)(out), d250_bswap8(_mm256_castps_si256(_mm256_shuffle_ps(u0, u2, _MM_SHUFFLE(1, 0, 1, 0)))));
+    _mm256_storeu_si256((__m256i*)(out + 32), d250_bswap8(_mm256_castps_si256(_mm256_shuffle_ps(u0, u2, _MM_SHUFFLE(3, 2, 3, 2)))));
+    _mm256_storeu_si256((__m256i*)(out + 64), d250_bswap8(_mm256_castps_si256(_mm256_shuffle_ps(u1, u3, _MM_SHUFFLE(1, 0, 1, 0)))));
+    _mm256_storeu_si256((__m256i*)(out + 96), d250_bswap8(_mm256_castps_si256(_mm256_shuffle_ps(u1, u3, _MM_SHUFFLE(3, 2, 3, 2)))));
+    const unsigned rm = (unsigned)_mm256_movemask_ps(_mm256_castsi256_ps(ruim));
+    /* faixa -> vértice: v0 v2 v4 v6 | v1 v3 v5 v7 */
+    static const unsigned char vert[8] = { 0, 2, 4, 6, 1, 3, 5, 7 };
+    unsigned maus = 0;
+    for (int f = 0; f < 8; f++) if ((rm >> f) & 1u) maus |= 1u << vert[f];
+    return maus;
+}
 #else
 #define D250_VETOR 0
 #endif
@@ -272,11 +338,15 @@ static __attribute__((noinline)) int fn_0000D250_nativo(spu_context* ctx)
     for (uint32_t j = 0; j < g; j++) {
 #if D250_VETOR == 1
         const unsigned maus = d250_grupo(ls + in + 64u * j, ls + out + 64u * j, &k, CX, CY, CZ, CW, ESC, DES, MAX, MIN);
+        const int nq = 4;
 #else
-        const unsigned maus = d250_dois(ls + in + 64u * j, ls + out + 64u * j, CX, CY, CZ, CW, ESC, DES, MAX, MIN) |
-                              d250_dois(ls + in + 64u * j + 32u, ls + out + 64u * j + 32u, CX, CY, CZ, CW, ESC, DES, MAX, MIN) << 2;
+        unsigned maus;
+        int nq = 4;
+        if (j + 1u < g) { maus = d250_oito(ls + in + 64u * j, ls + out + 64u * j, &k); nq = 8; }
+        else maus = d250_dois(ls + in + 64u * j, ls + out + 64u * j, CX, CY, CZ, CW, ESC, DES, MAX, MIN) |
+                    d250_dois(ls + in + 64u * j + 32u, ls + out + 64u * j + 32u, CX, CY, CZ, CW, ESC, DES, MAX, MIN) << 2;
 #endif
-        for (int q = 0; q < 4; q++) {
+        for (int q = 0; q < nq; q++) {
             if (!((maus >> q) & 1u)) continue;
             const uint8_t* p = ls + in + 64u * j + 16u * (uint32_t)q;
             uint32_t w3[3], o[4];
@@ -286,6 +356,7 @@ static __attribute__((noinline)) int fn_0000D250_nativo(spu_context* ctx)
             memcpy(ls + out + 64u * j + 16u * (uint32_t)q, o, 16);
             refeitos++;
         }
+        if (nq == 8) j++;   /* o SoA fez dois grupos */
     }
 #endif
     static int est = -1; static volatile long nch, nref;
