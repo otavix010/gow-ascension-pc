@@ -86,6 +86,7 @@ static volatile long g_ld_ps1_vram_ready = 0;
 #include <immintrin.h>
 #include <math.h>
 #include <stdio.h>
+#include <stdarg.h>   /* ld_res_linha */
 #include <stdlib.h>
 #include <stddef.h>   /* offsetof (GOWA pipeline library) */
 #include <wchar.h>    /* swprintf */
@@ -12298,6 +12299,50 @@ static int ld_blit_pipeline(void)
  * do Present (driver, HDR, monitor). Uma vez no começo, "[tela-saida]" diz o formato do swap chain, o monitor e o
  * HDR. GOWA_TELA_DIAG=0 desliga. */
 int rsx_live_draw_framegen_on(void);
+/* GOWA (30/10, reports 455-460): o relatório anexa só o fim do jogo.log (~8 KB); depois dos 3 primeiros minutos o
+ * "[tela]" sai a cada 30 s e o "[tgt]" automático enche o fim, então nenhum aparecia. As linhas do diagnóstico
+ * ficam guardadas (a saída, os 2 primeiros e os 6 últimos "[tela]", os "[tela-alvos]" e os "[modulos]") e
+ * rsx_live_draw_resumo_tela() reimprime tudo ao fechar o jogo, como "[resumo-tela]". */
+#define LD_RES_LIN 176
+static char s_res_saida[LD_RES_LIN], s_res_ini[2][LD_RES_LIN], s_res_ult[6][LD_RES_LIN], s_res_alvos[16][LD_RES_LIN], s_res_mods[12][LD_RES_LIN];
+static unsigned s_res_n_tela, s_res_n_alvos, s_res_n_mods;
+static void ld_res_copia(char* d, const char* s)
+{
+    size_t n = strlen(s);
+    while (n && (s[n - 1] == '\n' || s[n - 1] == '\r')) n--;
+    if (n >= LD_RES_LIN) n = LD_RES_LIN - 1;
+    memcpy(d, s, n); d[n] = 0;
+}
+/* cat: 0 saída, 1 tela, 2 alvos (novo=1 recomeça a lista), 3 módulos (novo=1 recomeça) */
+static void ld_res_linha(int cat, int novo, const char* fmt, ...)
+{
+    char b[512];
+    va_list ap; va_start(ap, fmt); vsnprintf(b, sizeof b, fmt, ap); va_end(ap);
+    fputs(b, stderr);
+    switch (cat) {
+    case 0: ld_res_copia(s_res_saida, b); break;
+    case 1:
+        if (s_res_n_tela < 2) ld_res_copia(s_res_ini[s_res_n_tela], b);
+        else ld_res_copia(s_res_ult[(s_res_n_tela - 2) % 6], b);
+        s_res_n_tela++;
+        break;
+    case 2: if (novo) s_res_n_alvos = 0; if (s_res_n_alvos < 16) ld_res_copia(s_res_alvos[s_res_n_alvos++], b); break;
+    default: if (novo) s_res_n_mods = 0; if (s_res_n_mods < 12) ld_res_copia(s_res_mods[s_res_n_mods++], b); break;
+    }
+}
+void rsx_live_draw_resumo_tela(void)
+{
+    fprintf(stderr, "[resumo-tela] diagnóstico da tela (%u medidas):\n", s_res_n_tela);
+    if (s_res_saida[0]) fprintf(stderr, "[resumo-tela] %s\n", s_res_saida);
+    for (unsigned i = 0; i < 2 && i < s_res_n_tela; i++) fprintf(stderr, "[resumo-tela] %s\n", s_res_ini[i]);
+    if (s_res_n_tela > 8) fprintf(stderr, "[resumo-tela] ... (%u medidas no meio)\n", s_res_n_tela - 8);
+    if (s_res_n_tela > 2) {
+        const unsigned u = s_res_n_tela - 2 < 6 ? s_res_n_tela - 2 : 6;
+        for (unsigned k = s_res_n_tela - 2 - u; k < s_res_n_tela - 2; k++) fprintf(stderr, "[resumo-tela] %s\n", s_res_ult[k % 6]);
+    }
+    for (unsigned i = 0; i < s_res_n_alvos; i++) fprintf(stderr, "[resumo-tela] %s\n", s_res_alvos[i]);
+    for (unsigned i = 0; i < s_res_n_mods; i++) fprintf(stderr, "[resumo-tela] %s\n", s_res_mods[i]);
+}
 typedef struct { ID3D12Resource* rb; UINT64 size, offset; u64 fence; u32 frame, w, h, pitch; DXGI_FORMAT fmt; int busy; } ld_tela_rb;
 static ld_tela_rb s_tela[2];   /* 0 = a surface do jogo, 1 = o backbuffer */
 static void ld_tela_copia(ld_tela_rb* t, ID3D12Resource* res, D3D12_RESOURCE_STATES state)
@@ -12391,7 +12436,7 @@ static void ld_tela_saida(void)
         }
         o->lpVtbl->Release(o);
     }
-    fprintf(stderr, "[tela-saida] swap chain %ux%u fmt %d, %u buffers, flags 0x%X, vsync %d, tearing %d; %s\n",
+    ld_res_linha(0, 0, "[tela-saida] swap chain %ux%u fmt %d, %u buffers, flags 0x%X, vsync %d, tearing %d; %s\n",
             sd.Width, sd.Height, (int)sd.Format, sd.BufferCount, sd.Flags, g_ld_present_sync, g_ld_present_tearing, mon);
 }
 /* GOWA (30/10, reports 397, 399, 409): a logo aparece, mas do menu em diante a surface mostrada fica preta (brilho
@@ -12422,12 +12467,12 @@ static void ld_tela_alvos_medir(void)
     const u64 done = g.fence->lpVtbl->GetCompletedValue(g.fence);
     for (u32 i = 0; i < MAX_SURFACES; i++)
         if (s_alvos[i].busy && s_alvos[i].fence > done) return;
-    fprintf(stderr, "[tela-alvos] quadro %u: surfaces vivas (a mostrada é a de \"[tela]\")\n", g_ld_frames);
+    ld_res_linha(2, 1, "[tela-alvos] quadro %u: surfaces vivas (a mostrada é a de \"[tela]\")\n", g_ld_frames);
     for (u32 i = 0; i < MAX_SURFACES; i++) {
         if (!s_alvos[i].busy) continue;
         char a[96];
         ld_tela_medir(&s_alvos[i], a, sizeof a);
-        fprintf(stderr, "[tela-alvos]   %2u loc %u off 0x%08X fmt %d: %s\n", i, s_alvos_loc[i], s_alvos_off[i],
+        ld_res_linha(2, 0, "[tela-alvos]   %2u loc %u off 0x%08X fmt %d: %s\n", i, s_alvos_loc[i], s_alvos_off[i],
                 (int)s_alvos[i].fmt, a);
         if (s_alvos[i].rb) { s_alvos[i].rb->lpVtbl->Release(s_alvos[i].rb); s_alvos[i].rb = NULL; s_alvos[i].size = 0; }
     }
@@ -12447,10 +12492,10 @@ static void ld_log_modulos(const char* quando)
         char cam[MAX_PATH];
         if (!K32GetModuleFileNameExA(GetCurrentProcess(), mods[k], cam, sizeof cam)) continue;
         if (lw && !_strnicmp(cam, win, lw)) continue;   /* do Windows */
-        fprintf(stderr, "[modulos] %s: %s\n", quando, cam);
+        ld_res_linha(3, n == 0, "[modulos] %s: %s\n", quando, cam);
         n++;
     }
-    fprintf(stderr, "[modulos] %s: %d DLLs fora do Windows\n", quando, n);
+    ld_res_linha(3, n == 0, "[modulos] %s: %d DLLs fora do Windows\n", quando, n);
 }
 static void ld_tela_diag(ID3D12Resource* src, D3D12_RESOURCE_STATES src_state, ID3D12Resource* bb, D3D12_RESOURCE_STATES bb_state)
 {
@@ -12469,7 +12514,7 @@ static void ld_tela_diag(ID3D12Resource* src, D3D12_RESOURCE_STATES src_state, I
         const u32 frame = s_tela[0].frame;
         ld_tela_medir(&s_tela[0], a, sizeof a); ld_tela_medir(&s_tela[1], b, sizeof b);
         HWND w = NULL; g.swap->lpVtbl->GetHwnd(g.swap, &w);
-        fprintf(stderr, "[tela] quadro %u, %.0f s: jogo %s | final %s | janela %ux%u%s%s\n", frame,
+        ld_res_linha(1, 0, "[tela] quadro %u, %.0f s: jogo %s | final %s | janela %ux%u%s%s\n", frame,
                 (GetTickCount64() - t0) / 1000.0, a, b, g.width, g.height, w && IsIconic(w) ? " (minimizada)" : "",
                 rsx_live_draw_framegen_on() ? " (geração de quadros)" : "");
         static int forca = -1;   /* GOWA_TELA_ALVOS=1: registra as surfaces mesmo sem tela preta (teste) */
