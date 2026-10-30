@@ -43,6 +43,10 @@ def main():
             escritos.append(int(mm.group(1)))
         assert mm or t.startswith('spu_ls_write128(') or t is cond or t == '/* branch hint (ignored) */;', \
             'linha não reconhecida: ' + t
+        # o ctx só pode ir para a LS (um helper que lesse ctx->gpr por dentro veria os registradores velhos)
+        sem_gpr = re.sub(r'ctx->gpr\[\d+\]', 'G', t)
+        assert all(sem_gpr[:k.start()].endswith(('spu_ls_read128(', 'spu_ls_write128(', 'spu_ls_const128('))
+                   for k in re.finditer(r'\bctx\b', sem_gpr)), 'ctx fora da LS: ' + t
     todos = sorted(set(lidos) | set(escritos))
     loc = lambda t: re.sub(r'ctx->gpr\[(\d+)\]', r'g\1', t)
     guarda = 'GOWA_' + re.sub(r'\W', '_', nome).upper() + '_H'
