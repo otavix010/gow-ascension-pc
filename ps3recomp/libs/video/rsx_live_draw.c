@@ -3713,6 +3713,49 @@ static void ld_tex_dump(const rsx_dsp_texture* t)
  * 16384 with 8 GB of VRAM or more (henry: same fps as 8192), 8192 below that (the 4 GB
  * cards). GOWA_TEX_CAP=<n> picks it (256..MAX_TEXTURES). */
 extern unsigned g_ld_gpu_vram_mb;
+/* GOWA (30/10, reports 434/450: 12 GB cheios, travadinhas e o jogo fechando): o limite também segue a VRAM. Uma vez
+ * a cada 60 quadros, o uso da memória de vídeo do processo contra o orçamento que o Windows dá a ele
+ * (IDXGIAdapter3::QueryVideoMemoryInfo): acima de 90%, o limite cai para 7/8 das texturas carregadas e o LRU
+ * descarta as mais antigas; abaixo de 75%, volta a subir 1/8 por vez até o normal. GOWA_TEX_VRAM=0 desliga. */
+static u32 s_tex_cap_vram;   /* 0 = sem pressão */
+static void ld_tex_vram_olha(u32 cap)
+{
+    static int on = -1; static IDXGIAdapter3* ad; static u32 ult;
+    if (on < 0) {
+        const char* e = getenv("GOWA_TEX_VRAM"); on = !(e && *e == '0');
+        if (on && g.dev) {
+            IDXGIFactory4* f = NULL;
+            if (SUCCEEDED(CreateDXGIFactory1(&IID_IDXGIFactory4, (void**)&f)) && f) {
+                LUID luid = {0}; g.dev->lpVtbl->GetAdapterLuid(g.dev, &luid);
+                f->lpVtbl->EnumAdapterByLuid(f, luid, &IID_IDXGIAdapter3, (void**)&ad);
+                f->lpVtbl->Release(f);
+            }
+        }
+        if (!ad) on = 0;
+    }
+    if (!on || g_ld_frames - ult < 60u) return;
+    ult = g_ld_frames;
+    DXGI_QUERY_VIDEO_MEMORY_INFO mi;
+    if (FAILED(ad->lpVtbl->QueryVideoMemoryInfo(ad, 0, DXGI_MEMORY_SEGMENT_GROUP_LOCAL, &mi)) || !mi.Budget) return;
+    { static long teste = -1;   /* GOWA_TEX_VRAM_ORCAMENTO_MB=<MB>: simula um orçamento menor (teste) */
+      if (teste < 0) { const char* e = getenv("GOWA_TEX_VRAM_ORCAMENTO_MB"); teste = e ? atol(e) : 0; }
+      if (teste > 0) mi.Budget = (UINT64)teste << 20; }
+    const double uso = (double)mi.CurrentUsage / (double)mi.Budget;
+    if (uso > 0.90 && g.n_textures > 1024u) {
+        const u32 novo = g.n_textures - g.n_textures / 8u;
+        if (!s_tex_cap_vram || novo < s_tex_cap_vram) {
+            s_tex_cap_vram = novo < 1024u ? 1024u : novo;
+            static int ditos;
+            if (ditos++ < 20)
+                fprintf(stderr, "[texture-cache] VRAM em %llu de %llu MB (%.0f%%): limite de texturas cai para %u\n",
+                        (unsigned long long)(mi.CurrentUsage >> 20), (unsigned long long)(mi.Budget >> 20), uso * 100.0,
+                        s_tex_cap_vram);
+        }
+    } else if (uso < 0.75 && s_tex_cap_vram) {
+        s_tex_cap_vram += s_tex_cap_vram / 8u;
+        if (s_tex_cap_vram >= cap) s_tex_cap_vram = 0;
+    }
+}
 static u32 ld_tex_cap(void)
 {
     static u32 cap;
@@ -3723,7 +3766,8 @@ static u32 ld_tex_cap(void)
         if (cap > MAX_TEXTURES) cap = MAX_TEXTURES;
         fprintf(stderr, "[texture-cache] até %u texturas (%u MB de VRAM)\n", cap, g_ld_gpu_vram_mb);
     }
-    return cap;
+    ld_tex_vram_olha(cap);
+    return s_tex_cap_vram && s_tex_cap_vram < cap ? s_tex_cap_vram : cap;
 }
 
 static u32 texture_srv_slot(const rsx_dsp_texture* t)
