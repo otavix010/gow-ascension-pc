@@ -1041,8 +1041,35 @@ Etapa '6_compilar' {
     $env:GOWA_VS = $VS
     $env:FFMPEG_DIR = Join-Path $R "dl\ffmpeg9\$FFMPEG_NOME"
     $env:GOWA_JOBS = "$Jobs"
+    # reports 398/402 (30/10): o build_portatil.cmd roda o vcvars64 com o PATH só do Windows; o Python volta por aqui
+    $env:GOWA_PY_DIR = Split-Path -Parent $py
+    $exe = Join-Path $R "port\$bdir\gowa.exe"
     Exec $LOG "`"$R\scripts\build_portatil.cmd`" $bargs"
-    if (-not (Test-Path (Join-Path $R "port\$bdir\gowa.exe"))) { throw "o gowa.exe não foi gerado (veja $LOG)" }
+    # report 402: Visual Studio sem o Windows SDK (kernel32.lib). Pede ao instalador do VS o componente e tenta de novo.
+    if (-not (Test-Path $exe) -and (Select-String -LiteralPath $LOG -Pattern 'GOWA_ERRO_SDK' -SimpleMatch -Quiet)) {
+        $inst = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\setup.exe"
+        if (Test-Path $inst) {
+            Msg 'o Visual Studio está sem o Windows SDK: instalando o componente (alguns minutos; o Windows pede permissão)'
+            $null = SemExcecao { cmd /c ("`"$inst`" modify --installPath `"$VS`" --add Microsoft.VisualStudio.Component.Windows11SDK.22621 " +
+                                         "--passive --wait --norestart >> `"$(Join-Path $OUT 'vs_instala.log')`" 2>&1") }
+            Remove-Item -LiteralPath (Join-Path $R "port\$bdir") -Recurse -Force -ErrorAction SilentlyContinue
+            Exec $LOG "`"$R\scripts\build_portatil.cmd`" $bargs"
+        }
+    }
+    # report 415: o ninja parou no meio dos arquivos grandes da PPU (provável falta de memória com muitos clang em
+    # paralelo). A compilação continua de onde parou com 2 de cada vez.
+    if (-not (Test-Path $exe) -and (Test-Path (Join-Path $R "port\$bdir\build.ninja"))) {
+        Msg 'a compilação parou; tentando de novo com 2 arquivos por vez (menos memória)'
+        $env:GOWA_JOBS = '2'
+        Exec $LOG "`"$R\scripts\build_portatil.cmd`" $bargs"
+    }
+    if (-not (Test-Path $exe)) {
+        # o launcher só manda o fim do log: as linhas de erro vão para o fim e para a mensagem
+        $err = @(Select-String -LiteralPath $LOG -Pattern 'FAILED:|error:|fatal error|GOWA_ERRO_|LINK : |lld-link: error|reconhecido como|incorreta|CMake Error' |
+                 Select-Object -First 30 | ForEach-Object { $_.Line.Substring(0, [Math]::Min(300, $_.Line.Length)) })
+        Anotar $LOG ("`r`n=== erros da compilação (primeiras linhas)`r`n" + ($err -join "`r`n"))
+        throw ("o gowa.exe não foi gerado (veja $LOG)" + $(if ($err) { "`r`n" + (($err | Select-Object -First 8) -join "`r`n") } else { '' }))
+    }
 }
 
 # ---------------------------------------------------------------------------- jogar.cmd

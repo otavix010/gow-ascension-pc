@@ -26,15 +26,32 @@ if "%GOWA_VS%"=="" set "GOWA_VS=C:\Program Files (x86)\Microsoft Visual Studio\2
 rem Tira as aspas do PATH: entrada como "C:\Program Files (x86)\ZeroTier\One\" quebra o vcvars64.bat
 rem ("\ZeroTier\One\ was unexpected at this time"; reports 268, 273, 274, 283, 316, 318)
 set "PATH=%PATH:"=%"
-call "%GOWA_VS%\VC\Auxiliary\Build\vcvars64.bat" >nul
+rem Reports 398 e 402 (30/10): mesmo assim o vcvars64.bat falhava com o PATH de alguns jogadores ("A sintaxe do
+rem nome do arquivo... está incorreta" e depois "'cmake' não é reconhecido", ou "could not open 'kernel32.lib'").
+rem Agora ele roda com o PATH só do Windows (a compilação só usa do PATH do jogador o Python, que volta depois) e a
+rem saída dele fica no log em vez de ir para o nul.
+set "PATH_JOGADOR=%PATH%"
+set "PATH=%SystemRoot%\system32;%SystemRoot%;%SystemRoot%\System32\Wbem;%SystemRoot%\System32\WindowsPowerShell\v1.0;%ProgramFiles(x86)%\Microsoft Visual Studio\Installer"
+echo -- vcvars64: "%GOWA_VS%\VC\Auxiliary\Build\vcvars64.bat"
+call "%GOWA_VS%\VC\Auxiliary\Build\vcvars64.bat"
 set "PATH=%GOWA_VS%\VC\Tools\Llvm\x64\bin;%PATH%"
+if not "%GOWA_PY_DIR%"=="" set "PATH=%PATH%;%GOWA_PY_DIR%;%GOWA_PY_DIR%\Scripts"
+if "%GOWA_PY_DIR%"=="" set "PATH=%PATH%;%PATH_JOGADOR%"
+rem O cmake do próprio Visual Studio, pelo caminho completo (report 398: sem o vcvars ele nem estava no PATH)
+set "CMAKE=%GOWA_VS%\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\cmake.exe"
+if not exist "%CMAKE%" set "CMAKE=cmake"
+if not defined WindowsSdkDir (
+  echo GOWA_ERRO_SDK: o vcvars64.bat nao achou o Windows SDK ^(kernel32.lib^): falta o componente Windows 11 SDK no Visual Studio
+  cmd /c exit 2
+  goto fim
+)
 rem O ninja que vem com o Visual Studio, pelo caminho completo: o primeiro do PATH pode ser de outro
 rem programa ou estar quebrado (report 332: 'ninja --version' terminou com 0xc000003e)
 set "NINJA=%GOWA_VS%\Common7\IDE\CommonExtensions\Microsoft\CMake\Ninja\ninja.exe"
 if not exist "%NINJA%" set "NINJA=ninja"
 set "NINJA_F=%NINJA:\=/%"
 if not exist "%DIR%\build.ninja" (
-  cmake -S "%RAIZ%\port" -B "%DIR%" -G Ninja ^
+  "%CMAKE%" -S "%RAIZ%\port" -B "%DIR%" -G Ninja ^
     "-DCMAKE_MAKE_PROGRAM=%NINJA_F%" ^
     -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_COMPILER=clang-cl -DCMAKE_CXX_COMPILER=clang-cl ^
     %PGO% ^
