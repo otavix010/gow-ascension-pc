@@ -17,7 +17,7 @@
  *
  * Só cobre o caso medido em todas as chamadas: destino alinhado em 16, vértices múltiplos de 8 e
  * os 7 atributos presentes; o resto volta 0 e o código traduzido segue.
- * GOWA_EDGE_NATIVO=1 liga (padrão desligado enquanto é teste). Modelo e conferência em
+ * GOWA_EDGE_NATIVO=0 desliga (ligado por padrão desde 30/10). Modelo e conferência em
  * scripts_edge/pl_modelo.py; gancho aplicado por scripts_edge/edge_nativo.py. */
 #ifndef GOWA_PL_0074C580_H
 #define GOWA_PL_0074C580_H
@@ -27,7 +27,7 @@
 static int gowa_edge_nativo_on(void)
 {
     static int on = -1;
-    if (on < 0) { const char* e = getenv("GOWA_EDGE_NATIVO"); on = e && *e == '1'; }
+    if (on < 0) { const char* e = getenv("GOWA_EDGE_NATIVO"); on = !(e && *e == '0'); }   /* 30/10 (E7): ligado por padrão; =0 desliga */
     return on;
 }
 

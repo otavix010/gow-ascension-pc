@@ -132,6 +132,16 @@ def main():
     # só é reconhecido na forma já promovida, por isso vem por último (19 módulos)
     for m in jm + pl + [PM]:
         py('divide_pic.py', SPU / m, '--aplicar')
+    # 30/10 (EDGE nativo, marco E7): as partes do EDGE escritas para o PC (port/edge/*.h) entram no código traduzido
+    # pelos ganchos de scripts_edge/edge_nativo.py; GOWA_EDGE_NATIVO=0 no jogo volta ao código traduzido
+    en = RAIZ / 'scripts_edge' / 'edge_nativo.py'
+    if en.exists():
+        print('> edge_nativo.py aplicar', flush=True)
+        r = subprocess.run([sys.executable, str(en), 'aplicar', str(RAIZ)], cwd=str(RAIZ), capture_output=True, text=True,
+                           encoding='utf-8', errors='replace', env=AMB)
+        if r.returncode != 0:
+            print((r.stdout + r.stderr)[-3000:])
+            sys.exit('falhou: edge_nativo.py')
     py('guarda_avx512.py', 'aplicar')
     MARCA.write_text('otimizado\n', encoding='utf-8')
     print('pronto')

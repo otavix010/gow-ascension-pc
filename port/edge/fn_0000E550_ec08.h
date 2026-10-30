@@ -23,7 +23,7 @@
 static int gowa_edge_nativo_on(void)
 {
     static int on = -1;
-    if (on < 0) { const char* e = getenv("GOWA_EDGE_NATIVO"); on = e && *e == '1'; }
+    if (on < 0) { const char* e = getenv("GOWA_EDGE_NATIVO"); on = !(e && *e == '0'); }   /* 30/10 (E7): ligado por padrão; =0 desliga */
     return on;
 }
 #endif
