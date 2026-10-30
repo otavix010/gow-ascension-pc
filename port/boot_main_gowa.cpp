@@ -45,6 +45,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 
+extern "C" void gowa_watch_dump(void);   /* spu_channels.c: GOWA_WATCH_A03 */
 extern "C" {
 uint32_t ppu_load_elf(const char* path);
 void     ppu_recomp_register(void);
@@ -2029,6 +2030,7 @@ static void dump_threads(const char* label, HMODULE self)
         dbg_printf(" | 3BE0");
         for (uint32_t i = 0; i < 8; i++) dbg_printf(" %08X", be32(0xA03BE0u + 4u * i));
         dbg_printf("\n");
+        gowa_watch_dump();
     }
     dbg_printf("[WATCHDOG] guest threads, by guest lr:\n");
     if (!s_dbg_raw) ppu_report_guest_lrs();   /* fprintf(stderr) inside: in raw mode it runs last */

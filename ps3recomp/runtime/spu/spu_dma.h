@@ -179,6 +179,8 @@ static inline int mfc_do_transfer(spu_context* spu, uint32_t lsa, uint64_t ea,
 {
     if (__builtin_expect(g_gowa_dma_ea_log, 0)) gowa_dma_ea_note(ea, size, cmd);
     if (__builtin_expect(g_gowa_conf_on, 0)) gowa_conf_xfer(spu, lsa, ea, size, cmd);
+    { extern int g_gowa_watch; extern void gowa_watch_note(spu_context*, uint32_t, uint32_t, uint32_t, uint32_t, int);
+      if (__builtin_expect(g_gowa_watch != 0, 0) && mfc_is_put(cmd)) gowa_watch_note(spu, cmd, lsa, (uint32_t)ea, size, 0); }
     /* Upper16 command-channel bits carry replacement/transfer class IDs. */
     if ((cmd & 0xFFFFu) == MFC_SDCRZ_CMD) {
         /* CBEA 1.02 section 7.7.3: SDCRZ writes zeros in EA space, without an

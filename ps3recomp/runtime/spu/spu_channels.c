@@ -655,6 +655,53 @@ volatile unsigned g_spu_putllc_sync_hit = 0;
  * completion. Chosen above the context/descriptor we park near the top of LS. */
 #define SPU_JOB_RETURN_LS   0x3FF00u
 
+/* GOWA (30/10): GOWA_WATCH_A03=1 -- a trava rara da tela de carregamento espera os contadores u16 em
+ * 0xA03240 + 4i (zerados por um job da SPU). Cada escrita da SPU que toca 0xA03240..0xA0325F (PUT de DMA, e as
+ * atômicas da linha antes e depois) vai para um anel de 128 eventos com as 8 palavras antes e depois; o watchdog
+ * despeja o anel (gowa_watch_dump) junto da linha "espera 0x415914". */
+int g_gowa_watch = -1;
+typedef struct { unsigned long long t; uint32_t cmd, pc, ea, size; uint8_t spu, wid, fase, stat; uint32_t antes[8], depois[8]; } gowa_watch_ev;
+static gowa_watch_ev s_gw[128];
+static volatile long s_gwn;
+static unsigned long long s_gw_t0;
+static uint32_t gw_be32(const uint8_t* p) { return ((uint32_t)p[0] << 24) | ((uint32_t)p[1] << 16) | ((uint32_t)p[2] << 8) | p[3]; }
+int gowa_watch_init(void)
+{
+    if (g_gowa_watch < 0) { g_gowa_watch = getenv("GOWA_WATCH_A03") ? 1 : 0; s_gw_t0 = GetTickCount64(); }
+    return g_gowa_watch;
+}
+/* fase 0 = PUT de DMA (depois = memória com os bytes da LS por cima), 1/2 = atômica antes/depois */
+void gowa_watch_note(spu_context* c, uint32_t cmd, uint32_t lsa, uint32_t ea, uint32_t size, int fase)
+{
+    if (!gowa_watch_init() || !vm_base) return;
+    if (ea >= 0xA03260u || ea + size <= 0xA03240u) return;
+    gowa_watch_ev* e = &s_gw[(unsigned long)_InterlockedIncrement(&s_gwn) & 127u];
+    e->t = GetTickCount64() - s_gw_t0; e->cmd = cmd; e->pc = (uint32_t)c->pc & SPU_LS_MASK; e->ea = ea; e->size = size;
+    e->spu = (uint8_t)(c->spu_id & 0xFF); e->wid = c->ls[0x1DF]; e->fase = (uint8_t)fase; e->stat = (uint8_t)c->atomic_stat;
+    uint8_t m[32];
+    memcpy(m, vm_base + 0xA03240u, 32);
+    for (int i = 0; i < 8; i++) e->antes[i] = gw_be32(m + 4 * i);
+    if (fase == 0)
+        for (uint32_t a = 0xA03240u; a < 0xA03260u; a++)
+            if (a >= ea && a < ea + size) m[a - 0xA03240u] = c->ls[(lsa + (a - ea)) & SPU_LS_MASK];
+    for (int i = 0; i < 8; i++) e->depois[i] = gw_be32(m + 4 * i);
+}
+void gowa_watch_dump(void)
+{
+    if (g_gowa_watch <= 0) return;
+    const long n = s_gwn;
+    fprintf(stderr, "[watch-a03] %ld escritas da SPU nos contadores; as últimas:\n", n);
+    for (long k = n > 127 ? n - 127 : 1; k <= n; k++) {
+        const gowa_watch_ev* e = &s_gw[(unsigned long)k & 127u];
+        fprintf(stderr, "[watch-a03] %7llu ms spu%X wid=%u pc=0x%05X %s cmd=0x%02X ea=0x%08X n=%u stat=%u |",
+                e->t, e->spu, e->wid, e->pc, e->fase == 0 ? "PUT " : e->fase == 1 ? "AT-a" : "AT-d", e->cmd, e->ea, e->size, e->stat);
+        for (int i = 0; i < 4; i++) fprintf(stderr, " %08X", e->antes[i]);
+        fprintf(stderr, " ->");
+        for (int i = 0; i < 4; i++) fprintf(stderr, " %08X", e->depois[i]);
+        fprintf(stderr, "\n");
+    }
+}
+
 /* Returns 1 if `cmd` is an atomic line op and was handled here, else 0. */
 static int spu_mfc_atomic(spu_context* ctx, uint32_t cmd)
 {
@@ -673,6 +720,7 @@ static int spu_mfc_atomic(spu_context* ctx, uint32_t cmd)
     uint32_t lsa = ctx->mfc_lsa & SPU_LS_MASK;
     uint8_t* ls  = &ctx->ls[lsa];
     uint8_t* mem = vm_base + ea;
+    if (__builtin_expect(g_gowa_watch != 0, 0) && cmd != MFC_GETLLAR_CMD) gowa_watch_note(ctx, cmd, lsa, ea, MFC_ATOMIC_LINE, 1);
     { static int s_lst = -1;   /* GOWA_LOCKSTAT: the atomics by line/workload/pc (spu_coherency.c) */
       if (__builtin_expect(s_lst != 0, 0)) {
           extern int spu_lockstat_on(void); extern void spu_llstat_note(uint32_t, uint32_t, uint32_t, uint32_t);
@@ -1301,7 +1349,8 @@ int spu_mfc_cmd_lean(spu_context* ctx, uint32_t cmd)
     static int s_pm = -1;
     if (__builtin_expect(s_pm < 0, 0)) { const char* e = getenv("GOWA_MFC_LEAN_PM"); s_pm = !(e && *e == '0'); }
     extern int g_gowa_conf_on;
-    if ((ctx->policy_mode & !s_pm) | g_gowa_jobdma_on | g_gowa_conf_on | g_gowa_dma_ea_log | (int)g_barrier_sync_watch | ctx->mfc_eah)
+    if ((ctx->policy_mode & !s_pm) | g_gowa_jobdma_on | g_gowa_conf_on | g_gowa_dma_ea_log | (int)g_barrier_sync_watch | ctx->mfc_eah |
+        (g_gowa_watch != 0))   /* GOWA_WATCH_A03: os PUTs pelo caminho completo (mfc_do_transfer) */
         return 0;
     if (lista) {
         static int s_ll = -1;
@@ -1396,6 +1445,8 @@ void spu_wrch(spu_context* ctx, uint32_t channel, u128 value)
         /* Atomic line ops (GETLLAR/PUTLLC/...) need real reservation semantics,
          * not the plain GET/PUT the DMA engine would do. */
         if (channel == MFC_Cmd && spu_mfc_atomic(ctx, v)) {
+            if (__builtin_expect(g_gowa_watch != 0, 0) && v != MFC_GETLLAR_CMD)
+                gowa_watch_note(ctx, v, ctx->mfc_lsa & SPU_LS_MASK, ctx->mfc_eal & ~(uint32_t)(MFC_ATOMIC_LINE - 1), MFC_ATOMIC_LINE, 2);
             { extern int g_gowa_conf_on;   /* GOWA: job conformance (port/gowa_confere.cpp) */
               if (__builtin_expect(g_gowa_conf_on != 0, 0)) { extern void gowa_conf_atom(void*, uint32_t, int); gowa_conf_atom(ctx, v, 1); } }
             extern FILE* gowa_pmtrace_file(spu_context*);
@@ -3194,8 +3245,37 @@ full:;
 #endif
 }
 
+/* GOWA (30/10): GOWA_IBF_STATS=1 -- which targets reach the full resolver: a count per (image, pc) and, every
+ * 2^14 calls, the top 12 on stderr (to see what the fast path above still misses) */
+static void spu_ibf_stats(spu_context* ctx)
+{
+    static int on = -1;
+    if (on < 0) on = getenv("GOWA_IBF_STATS") ? 1 : 0;
+    if (!on) return;
+    enum { N = 4096 };
+    static volatile long cnt[N]; static volatile uint32_t key_pc[N]; static volatile int key_img[N]; static volatile long tot;
+    const uint32_t pc = ctx->pc & SPU_LS_MASK;
+    uint32_t h = (pc * 2654435761u ^ (uint32_t)ctx->image_id * 40503u) & (N - 1);
+    for (int i = 0; i < 16; i++, h = (h + 1) & (N - 1)) {
+        if (cnt[h] == 0) { key_pc[h] = pc; key_img[h] = ctx->image_id; }
+        if (key_pc[h] == pc && key_img[h] == ctx->image_id) { _InterlockedIncrement(&cnt[h]); break; }
+    }
+    if ((_InterlockedIncrement(&tot) & 0x3FFF) == 0) {
+        long best[12] = {0}; int bi[12];
+        for (int k = 0; k < N; k++) {
+            long c = cnt[k];
+            for (int j = 0; j < 12; j++)
+                if (c > best[j]) { for (int m = 11; m > j; m--) { best[m] = best[m - 1]; bi[m] = bi[m - 1]; } best[j] = c; bi[j] = k; break; }
+        }
+        fprintf(stderr, "[ibf] %ld chamadas ao resolvedor completo; maiores (imagem pc vezes):", tot);
+        for (int j = 0; j < 12 && best[j]; j++) fprintf(stderr, " %d:%05X:%ld", key_img[bi[j]], key_pc[bi[j]], best[j]);
+        fprintf(stderr, "\n");
+    }
+}
+
 static __attribute__((noinline)) void spu_indirect_branch_full(spu_context* ctx)
 {
+    spu_ibf_stats(ctx);
     /* Real SPU bi/bisl mask the target to the 256 KB local store; the high bits
      * of a computed pointer (e.g. a packed handle like 0x7a028803) are ignored.
      * Without this, any indirect branch through such a value fails the lookup
