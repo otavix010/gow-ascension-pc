@@ -1137,8 +1137,21 @@ s32 console_getc(void)
 
 s32 console_write(const void* buf, u32 len)
 {
-    if (buf && len > 0)
+    if (buf && len > 0) {
         fwrite(buf, 1, len, stderr);
+        /* GOWA (29/10, report 391): "edgezlib_inflate_queue.cpp:425 (0 == ret) -- assertion failed" chega por aqui,
+         * não pelo sys_tty_write, e saía sem a pilha que diz quem falhou (o mapa sumiu e o Kratos caiu). */
+        if (len < 4096) {
+            char tmp[512]; const u32 n = len < 511 ? len : 511;
+            memcpy(tmp, buf, n); tmp[n] = 0;
+            static int s_na = 0;
+            if (strstr(tmp, "assertion failed") && s_na++ < 4) {
+                extern void ppu_guest_callstack(const char*);
+                ppu_guest_callstack("assert");
+                fflush(stderr);
+            }
+        }
+    }
     return CELL_OK;
 }
 
