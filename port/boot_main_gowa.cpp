@@ -2588,7 +2588,15 @@ int main(int argc, char** argv)
      *  MeshProc), que saem das SPUs 0-3, as únicas do EDGE: A/Bs abtsaway e
      *  abtsaway2 (20/10), +2,5 FPS em 4 pares. Os jobs WWS continuam em 6 SPUs
      *  (o cabeçalho das listas de job só tem lugar para 6). GOWA_SPURS_NSPU=6
-     *  volta ao antigo. */
+     *  volta ao antigo.
+     *  30/10: só com mais de 8 CPUs lógicas. Num i5-10300H (4 núcleos / 8 lógicas) a 7a SPU disputa a CPU com a
+     *  PPU e a RSX: cap. 16 com 6 SPUs 11,0 / 10,4 / 10,2 x 7 SPUs 10,4 / 9,6 / 9,8 (+6%, 3 de 3 pares). */
+    { SYSTEM_INFO si_ns; GetSystemInfo(&si_ns);
+      if (!GetEnvironmentVariableA("GOWA_SPURS_NSPU", NULL, 0) && si_ns.dwNumberOfProcessors <= 8) {
+          SetEnvironmentVariableA("GOWA_SPURS_NSPU", "6");
+          fprintf(stderr, "[spurs] 6 SPUs (%lu CPUs lógicas; a 7a só com mais de 8; GOWA_SPURS_NSPU=7 força)\n",
+                  (unsigned long)si_ns.dwNumberOfProcessors);
+      } }
     if (!GetEnvironmentVariableA("GOWA_SPURS_NSPU", NULL, 0)) {
         SetEnvironmentVariableA("GOWA_SPURS_NSPU", "7");
         if (!GetEnvironmentVariableA("GOWA_SPURS_NSPU_WKL", NULL, 0))
