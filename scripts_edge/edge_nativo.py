@@ -22,6 +22,9 @@ GANCHOS = [
     # E550 (skinning): o laço EC08 menos a última volta; entra antes do núcleo vk dele e salta para o laço
     dict(tipo='antes_vk', pasta='gowajm_0072DF80', fn='gowajm_0072DF80_spu_func_0000E550__b', cab='fn_0000E550_ec08.h',
          nat='fn_0000E550_ec08_nativo', vk='/*VK 0000E550/0000EC08*/', destino='loc_0000EC08'),
+    # F538 (transformação dos vértices pela matriz): o laço F620 inteiro; antes do vk dele, saltando para depois do laço
+    dict(tipo='antes_vk', pasta='gowajm_0072DF80', fn='gowajm_0072DF80_spu_func_0000F538__b', cab='fn_0000F538.h',
+         nat='fn_0000F538_nativo', vk='/*VK 0000F538/0000F620*/', destino='loc_0000F620_fim', fim='loc_0000F620'),
 ]
 # laços de um bloco só com os registradores em variáveis locais (laco_local.py: o cabeçalho port/edge/ll_*.h é gerado
 # aqui, do próprio módulo): o núcleo faz o laço inteiro e salta para <rótulo>_fim, depois do desvio; vem antes do vk
@@ -151,6 +154,10 @@ def main():
             if gancho in corpo:
                 print(f'{g["fn"]} antes do vk: já aplicado'); continue
             corpo = corpo[:k] + gancho + corpo[k:]
+            if g.get('fim'):   # rótulo depois do desvio do laço, para o nativo que faz o laço inteiro
+                d = corpo.index(f'goto {g["fim"]};', k + len(gancho))
+                d = corpo.index('\n', d) + 1
+                corpo = corpo[:d] + f'{g["fim"]}_fim: {MARCA}\n' + corpo[d:]
         elif g['tipo'] == 'laco_local':
             rot = f'{g["rotulo"]}:\n'
             assert corpo.count(rot) == 1, (g['fn'], g['rotulo'])
