@@ -247,6 +247,110 @@ static inline int ec08_um(spu_context* ctx, uint32_t s, uint32_t m_out, uint32_t
     _mm256_storeu_si256((__m256i*)(ls + p_out), ec08_bswap8(_mm256_castps_si256(t)));
     return 1;
 }
+
+/* 30/10: caminho rápido. A paleta de ossos da chamada é conferida e copiada uma vez (bytes invertidos, linha l do
+ * osso b em pal[l][b]); se todo M for ±0 ou tiver |M| em [2^-40, 2^41) e o k91 estiver em [2^-12, 2^4), os pesos
+ * ficam em [2^-12, 2^12] (ou 0) com grão >= 2^-35 e os produtos e somas da mistura são múltiplos de 2^-98: nenhum
+ * resultado intermediário cai no expoente 0 (fora o zero exato) nem passa de 2^54. Aí as 12 contas por vértice
+ * dispensam o achatamento e a conferência de estouro; o único desvio possível é o sinal do zero (-0 do host contra
+ * +0 da SPU), que só muda um resultado também zero, e o ec08_z8 final de cada linha conserta. A transformação da
+ * posição continua com as conferências de antes. */
+typedef struct { float l[3][256][4]; } ec08_paleta;
+static int ec08_prep(spu_context* ctx, uint32_t s0, uint32_t nv, const uint32_t base[3], u128 k91, ec08_paleta* pal)
+{
+    const uint8_t* ls = SPU_LS_BASE(ctx);
+    for (int i = 0; i < 4; i++) {
+        const uint32_t a = k91._u32[i] & 0x7FFFFFFFu;
+        if (a < 0x39800000u || a >= 0x41800000u) return 0;
+    }
+    uint32_t maxb = 0, v = 0;
+    if ((s0 & SPU_LS_MASK) + 8u * nv <= SPU_LS_SIZE) {   /* 4 vértices (32 bytes) por vez: máximo dos bytes ímpares */
+        __m256i mx = _mm256_setzero_si256();
+        const __m256i imp = _mm256_set1_epi16((short)0xFF00);
+        for (; v + 4u <= nv; v += 4u)
+            mx = _mm256_max_epu8(mx, _mm256_and_si256(_mm256_loadu_si256((const __m256i*)(ls + (s0 & SPU_LS_MASK) + 8u * v)), imp));
+        __m128i m = _mm_max_epu8(_mm256_castsi256_si128(mx), _mm256_extracti128_si256(mx, 1));
+        m = _mm_max_epu16(m, _mm_srli_si128(m, 8)); m = _mm_max_epu16(m, _mm_srli_si128(m, 4)); m = _mm_max_epu16(m, _mm_srli_si128(m, 2));
+        maxb = (uint32_t)_mm_extract_epi16(m, 0) >> 8;
+    }
+    for (; v < nv; v++) {
+        const uint8_t* q = ls + ((s0 + 8u * v) & SPU_LS_MASK);
+        const uint32_t m01 = q[1] > q[3] ? q[1] : q[3], m23 = q[5] > q[7] ? q[5] : q[7];
+        const uint32_t m = m01 > m23 ? m01 : m23;
+        if (m > maxb) maxb = m;
+    }
+    if (maxb + 1u > 2u * nv) return 0;   /* paleta grande para poucos vértices: o caminho de antes sai mais barato */
+    const __m128i msk = _mm_set1_epi32(0x7FFFFFFF), lo = _mm_set1_epi32(0x2B800000), R = _mm_set1_epi32(0x287FFFFF);
+    const __m128i bs = _mm_setr_epi8(3, 2, 1, 0, 7, 6, 5, 4, 11, 10, 9, 8, 15, 14, 13, 12);
+    __m128i ok = _mm_set1_epi32(-1);
+    for (int l = 0; l < 3; l++)
+        for (uint32_t b = 0; b <= maxb; b++) {
+            __m128i x = _mm_shuffle_epi8(_mm_loadu_si128((const __m128i*)(ls + ((base[l] + 48u * b) & (SPU_LS_MASK & ~0xFu)))), bs);
+            const __m128i a = _mm_and_si128(x, msk), t = _mm_sub_epi32(a, lo);
+            const __m128i z = _mm_cmpeq_epi32(a, _mm_setzero_si128());
+            ok = _mm_and_si128(ok, _mm_or_si128(_mm_cmpeq_epi32(_mm_min_epu32(t, R), t), z));
+            x = _mm_andnot_si128(z, x);   /* -0 vira +0 */
+            _mm_store_si128((__m128i*)pal->l[l][b], x);
+        }
+    return _mm_movemask_epi8(ok) == 0xFFFF;
+}
+/* np (1 ou 2) pares a partir de s/m_out/p_out: todas as cargas e contas antes de qualquer gravação, para os dois
+ * pares correrem juntos (as gravações na LS impedem o compilador de adiantar as cargas do par seguinte) */
+static inline int ec08_rapido(spu_context* ctx, uint32_t s, uint32_t m_out, uint32_t p_out, const ec08_paleta* pal,
+                              const __m256 k91v, const __m256i k84v, const __m256i k97v, const int np)
+{
+    uint8_t* ls = SPU_LS_BASE(ctx);
+    if ((p_out & 15u) || p_out + 32u * (uint32_t)np > SPU_LS_SIZE) return 0;
+    __m256 G0[2], G1[2], G2[2], t[2];
+    __m256i ruim = _mm256_setzero_si256();
+    for (int k = 0; k < np; k++) {
+        const uint8_t* q0 = ls + ((s + 16u * (uint32_t)k) & SPU_LS_MASK);
+        const uint8_t* q1 = ls + ((s + 16u * (uint32_t)k + 8u) & SPU_LS_MASK);
+        const __m256 W = _mm256_mul_ps(_mm256_cvtepi32_ps(_mm256_setr_epi32(q0[0], q0[2], q0[4], q0[6], q1[0], q1[2], q1[4], q1[6])), k91v);
+        __m256 Wb[4];
+        for (int b = 0; b < 4; b++) Wb[b] = _mm256_permutevar8x32_ps(W, _mm256_setr_epi32(b, b, b, b, 4 + b, 4 + b, 4 + b, 4 + b));
+        __m256 L[3];
+        for (int l = 0; l < 3; l++) {
+            __m256 acc = _mm256_mul_ps(Wb[0], _mm256_loadu2_m128(pal->l[l][q1[1]], pal->l[l][q0[1]]));
+            acc = _mm256_fmadd_ps(Wb[1], _mm256_loadu2_m128(pal->l[l][q1[3]], pal->l[l][q0[3]]), acc);
+            acc = _mm256_fmadd_ps(Wb[2], _mm256_loadu2_m128(pal->l[l][q1[5]], pal->l[l][q0[5]]), acc);
+            acc = _mm256_fmadd_ps(Wb[3], _mm256_loadu2_m128(pal->l[l][q1[7]], pal->l[l][q0[7]]), acc);
+            L[l] = ec08_z8(acc);
+        }
+        const __m256 g0 = _mm256_castsi256_ps(_mm256_or_si256(_mm256_andnot_si256(k84v, k97v), _mm256_and_si256(_mm256_castps_si256(L[0]), k84v)));
+        const __m256 g1 = _mm256_castsi256_ps(_mm256_and_si256(_mm256_castps_si256(L[1]), k84v));
+        const __m256 g2 = _mm256_castsi256_ps(_mm256_and_si256(_mm256_castps_si256(L[2]), k84v));
+        const __m256i i3 = _mm256_setr_epi32(3, 3, 3, 3, 7, 7, 7, 7);
+        __m256 T = _mm256_blend_ps(_mm256_permutevar8x32_ps(L[0], i3), _mm256_permutevar8x32_ps(L[1], i3), 0x22);
+        T = _mm256_blend_ps(T, _mm256_permutevar8x32_ps(L[2], i3), 0x44);
+        T = _mm256_blend_ps(T, _mm256_setzero_ps(), 0x88);
+        const __m256 P = ec08_z8(_mm256_castsi256_ps(ec08_bswap8(_mm256_loadu_si256((const __m256i*)(ls + p_out + 32u * (uint32_t)k)))));
+        const __m256 P1 = _mm256_permutevar8x32_ps(P, _mm256_setr_epi32(1, 2, 0, 3, 5, 6, 4, 7));
+        const __m256 P2 = _mm256_permutevar8x32_ps(P, _mm256_setr_epi32(2, 0, 1, 3, 6, 4, 5, 7));
+        __m256 u = _mm256_fmadd_ps(P, ec08_z8(g0), ec08_z8(T));
+        ruim = _mm256_or_si256(ruim, ec08_ruim8(u));
+        u = _mm256_fmadd_ps(P1, ec08_z8(g1), ec08_z8(u));
+        ruim = _mm256_or_si256(ruim, ec08_ruim8(u)); u = ec08_z8(u);
+        u = _mm256_fmadd_ps(P2, ec08_z8(g2), u);
+        ruim = _mm256_or_si256(ruim, ec08_ruim8(u));
+        t[k] = ec08_z8(u); G0[k] = g0; G1[k] = g1; G2[k] = g2;
+    }
+    if (!_mm256_testz_si256(ruim, ruim)) return 0;
+    for (int k = 0; k < np; k++) {
+        const __m256i X0 = ec08_bswap8(_mm256_castps_si256(G0[k])), X1 = ec08_bswap8(_mm256_castps_si256(G1[k])), X2 = ec08_bswap8(_mm256_castps_si256(G2[k]));
+        for (int v = 0; v < 2; v++) {
+            const uint32_t m = m_out + 96u * (uint32_t)k + 48u * (uint32_t)v;
+            const __m128i x0 = v ? _mm256_extracti128_si256(X0, 1) : _mm256_castsi256_si128(X0);
+            const __m128i x1 = v ? _mm256_extracti128_si256(X1, 1) : _mm256_castsi256_si128(X1);
+            const __m128i x2 = v ? _mm256_extracti128_si256(X2, 1) : _mm256_castsi256_si128(X2);
+            _mm_storeu_si128((__m128i*)(ls + ((m + 0x00) & (SPU_LS_MASK & ~0xFu))), x0);
+            _mm_storeu_si128((__m128i*)(ls + ((m + 0x10) & (SPU_LS_MASK & ~0xFu))), x1);
+            _mm_storeu_si128((__m128i*)(ls + ((m + 0x20) & (SPU_LS_MASK & ~0xFu))), x2);
+        }
+        _mm256_storeu_si256((__m256i*)(ls + p_out + 32u * (uint32_t)k), ec08_bswap8(_mm256_castps_si256(t[k])));
+    }
+    return 1;
+}
 #else
 #define EC08_VETOR 0
 #endif
@@ -312,6 +416,28 @@ static __attribute__((noinline)) int fn_0000E550_ec08_feito(spu_context* ctx)
 #if EC08_VETOR == 2
     static int vet2 = -1;
     if (vet2 < 0) { const char* e = getenv("GOWA_EC08_VETOR"); vet2 = !(e && *e == '0'); }
+    static int rap = -1;
+    if (rap < 0) { const char* e = getenv("GOWA_EC08_RAPIDO"); rap = !(e && *e == '0'); }
+    static _Thread_local ec08_paleta pal __attribute__((aligned(32)));
+    if (vet2 && rap && n >= 2) {
+        /* a saída (matrizes em r49, posições em r86) não pode cair na paleta que o prep copiou */
+        const uint32_t pb = base[0] < base[1] ? (base[0] < base[2] ? base[0] : base[2]) : (base[1] < base[2] ? base[1] : base[2]);
+        const uint32_t pe = (base[0] > base[1] ? (base[0] > base[2] ? base[0] : base[2]) : (base[1] > base[2] ? base[1] : base[2])) + 48u * 256u;
+        const uint32_t me = m0 + 96u * (n - 1u), pe2 = p0 + 32u * (n - 1u);
+        if ((me <= pb || m0 >= pe) && (pe2 <= pb || p0 >= pe) && pe <= SPU_LS_SIZE &&
+            ec08_prep(ctx, s0, 2u * (n - 1u), base, k91, &pal)) {
+            const __m256 k91v = _mm256_castsi256_ps(_mm256_broadcastsi128_si256(_mm_loadu_si128((const __m128i*)k91._u32)));
+            const __m256i k84v = _mm256_broadcastsi128_si256(_mm_loadu_si128((const __m128i*)k84._u32));
+            const __m256i k97v = _mm256_broadcastsi128_si256(_mm_loadu_si128((const __m128i*)k97._u32));
+            for (; j0 + 1 < n; j0 += 2) {   /* dois pares por vez; o último par fica com o laço traduzido */
+                const int np = j0 + 2 < n ? 2 : 1;
+                if (!ec08_rapido(ctx, s0 + 16u * j0, m0 + 96u * j0, p0 + 32u * j0, &pal, k91v, k84v, k97v, np))
+                    for (int k = 0; k < np; k++)
+                        ec08_par(ctx, s0 + 16u * (j0 + k), m0 + 96u * (j0 + k), p0 + 32u * (j0 + k), base, k91, k84, k97);
+            }
+            j0 = n - 1;
+        }
+    }
     if (vet2)
         for (; j0 + 1 < n; j0++)
             if (!ec08_um(ctx, s0 + 16u * j0, m0 + 96u * j0, p0 + 32u * j0, base, k91, k84, k97))
