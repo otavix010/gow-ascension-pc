@@ -4,6 +4,20 @@ O Otavix Launcher mostra este arquivo na página "Novidades" do jogo. Cada atual
 "## <data> · <versão>" e o texto em português (### pt), inglês (### en) e, quando houver, espanhol (### es).
 As mais novas ficam em cima.
 
+## 29/10/2026 · ccd3641
+### pt
+- **Tela preta e o jogo fecha sozinho, logo depois de abrir:** em alguns PCs faltava um arquivo do disco, ou ele estava cortado, depois de o jogo já ter sido gerado (pasta trocada, antivírus, OneDrive que deixou o arquivo só na nuvem). Agora o jogo confere a cópia do disco toda vez que abre e, se faltar algo, mostra quais arquivos estão com problema em vez da tela preta.
+- **"Escolher o disco de novo" com o jogo já gerado:** agora o disco escolhido sempre é ligado ao jogo quando é outra pasta ou quando a cópia antiga tem arquivo faltando, sem gerar tudo de novo.
+- **Escolheu a pasta de update/DLC do RPCS3 (dev_hdd0\game\BCUS98232):** o gerador agora acha sozinho o disco pela lista de jogos do RPCS3 (ou pelas pastas dele) e segue.
+### en
+- **Black screen and the game closes by itself right after opening:** on some PCs a disc file was missing or cut short after the game had been made (folder changed, antivirus, OneDrive keeping the file only in the cloud). The game now checks the disc copy every time it opens and, if something is missing, shows which files are the problem instead of a black screen.
+- **"Pick the disc again" with the game already made:** the picked disc is now always linked to the game when it is a different folder or when the old copy has a missing file, without making everything again.
+- **Picked RPCS3's update/DLC folder (dev_hdd0\game\BCUS98232):** the generator now finds the disc by itself through RPCS3's game list (or its folders) and carries on.
+### es
+- **Pantalla negra y el juego se cierra solo justo después de abrir:** en algunos PC faltaba un archivo del disco, o estaba cortado, después de haber generado el juego (carpeta cambiada, antivirus, OneDrive que dejó el archivo solo en la nube). Ahora el juego revisa la copia del disco cada vez que abre y, si falta algo, muestra qué archivos tienen problema en lugar de la pantalla negra.
+- **"Elegir el disco de nuevo" con el juego ya generado:** ahora el disco elegido siempre se vincula al juego cuando es otra carpeta o cuando la copia antigua tiene un archivo que falta, sin generar todo de nuevo.
+- **Elegiste la carpeta de update/DLC de RPCS3 (dev_hdd0\game\BCUS98232):** el generador ahora encuentra solo el disco por la lista de juegos de RPCS3 (o por sus carpetas) y sigue.
+
 ## 29/10/2026 · 03e894e
 ### pt
 - **A geração parava com "Visual Studio Build Tools com Clang não encontrado" ou "vcvars64.bat não é reconhecido":** acontecia em PCs com um Visual Studio sem as ferramentas de C++ completas (por exemplo, o 2026 Enterprise). Agora o gerador instala sozinho o Visual Studio 2022 Build Tools (o Windows pede a permissão de administrador) e continua. Gere de novo pelo launcher.
