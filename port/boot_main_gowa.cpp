@@ -2016,6 +2016,20 @@ static void dump_threads(const char* label, HMODULE self)
           dbg_printf("[WATCHDOG]   guest-tid %-3u in %s\n", t, n);
       }
       if (!any) dbg_printf("[WATCHDOG] no guest thread is inside an HLE\n"); }
+    /* 30/10: a trava rara da tela de carregamento (notebook, cap. 16): a thread principal fica no laço de
+     * sys_timer_usleep(30) da func_0041587C (0x415914) esperando o u16 em 0xA03240 + 4*i zerar. Os 8 contadores,
+     * os 8 bytes de estado em 0xA03C00 e as 8 palavras em 0xA03BE0, para saber qual trabalho não terminou. */
+    if (vm_base) {
+        const uint8_t* g = vm_base;
+        auto be32 = [g](uint32_t ea) { return ((uint32_t)g[ea] << 24) | ((uint32_t)g[ea + 1] << 16) | ((uint32_t)g[ea + 2] << 8) | g[ea + 3]; };
+        dbg_printf("[WATCHDOG] espera 0x415914: contadores");
+        for (uint32_t i = 0; i < 8; i++) dbg_printf(" %08X", be32(0xA03240u + 4u * i));
+        dbg_printf(" | estado");
+        for (uint32_t i = 0; i < 8; i++) dbg_printf(" %02X", g[0xA03C00u + i]);
+        dbg_printf(" | 3BE0");
+        for (uint32_t i = 0; i < 8; i++) dbg_printf(" %08X", be32(0xA03BE0u + 4u * i));
+        dbg_printf("\n");
+    }
     dbg_printf("[WATCHDOG] guest threads, by guest lr:\n");
     if (!s_dbg_raw) ppu_report_guest_lrs();   /* fprintf(stderr) inside: in raw mode it runs last */
     DWORD me = GetCurrentThreadId(), pid = GetCurrentProcessId();
