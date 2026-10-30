@@ -117,15 +117,27 @@ function Baixar([string]$url, [string]$destino) {
     $part = "$destino.part"
     Remove-Item $part -ErrorAction SilentlyContinue
     $curl = Get-Command curl.exe -ErrorAction SilentlyContinue
+    $erroCurl = $null
     if ($curl) {
-        SemExcecao { & $curl.Source -L --fail --retry 3 --silent --show-error -o $part $url }
-        # curl 35 (CRYPT_E_NO_REVOCATION_CHECK): a rede ou o antivírus do jogador não deixa o schannel consultar a
-        # revogação do certificado (report 47 do launcher, no Dante); de novo sem essa consulta, o certificado ainda conferido
-        if ($LASTEXITCODE -eq 35) { SemExcecao { & $curl.Source -L --fail --retry 3 --silent --show-error --ssl-no-revoke -o $part $url } }
-        if ($LASTEXITCODE -ne 0) { throw "falhou o download de $url (curl $LASTEXITCODE)" }
-    } else {
+        # report 453: o Windows (antivírus ou política) não deixava o curl.exe rodar ("Acesso negado"): o PowerShell
+        # parava a geração na hora. Agora isso cai no download pelo próprio PowerShell, abaixo.
+        try {
+            SemExcecao { & $curl.Source -L --fail --retry 3 --silent --show-error -o $part $url }
+            # curl 35 (CRYPT_E_NO_REVOCATION_CHECK): a rede ou o antivírus do jogador não deixa o schannel consultar a
+            # revogação do certificado (report 47 do launcher, no Dante); de novo sem essa consulta, o certificado ainda conferido
+            if ($LASTEXITCODE -eq 35) { SemExcecao { & $curl.Source -L --fail --retry 3 --silent --show-error --ssl-no-revoke -o $part $url } }
+            if ($LASTEXITCODE -ne 0) { $erroCurl = "curl $LASTEXITCODE" }
+        } catch {
+            $erroCurl = "o curl.exe não pôde rodar: $($_.Exception.Message)"
+        }
+    }
+    if (-not $curl -or $erroCurl) {
+        if ($erroCurl) { Msg "download pelo curl falhou ($erroCurl); tentando pelo PowerShell" }
+        Remove-Item $part -ErrorAction SilentlyContinue
         $ProgressPreference = 'SilentlyContinue'
-        Invoke-WebRequest -Uri $url -OutFile $part -UseBasicParsing
+        [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+        try { Invoke-WebRequest -Uri $url -OutFile $part -UseBasicParsing }
+        catch { throw "falhou o download de $url ($(if ($erroCurl) { "$erroCurl; " })PowerShell: $($_.Exception.Message))" }
     }
     Move-Item $part $destino -Force
 }
@@ -1053,12 +1065,17 @@ Etapa '6_compilar' {
     $env:GOWA_PY_DIR = Split-Path -Parent $py
     $exe = Join-Path $R "port\$bdir\gowa.exe"
     Exec $LOG "`"$R\scripts\build_portatil.cmd`" $bargs"
-    # report 402: Visual Studio sem o Windows SDK (kernel32.lib). Pede ao instalador do VS o componente e tenta de novo.
-    if (-not (Test-Path $exe) -and (Select-String -LiteralPath $LOG -Pattern 'GOWA_ERRO_SDK' -SimpleMatch -Quiet)) {
+    # report 402: Visual Studio sem o Windows SDK (kernel32.lib); report 452: sem o "C++ CMake tools" (o cmake/ninja).
+    # Pede ao instalador do VS o componente que falta e tenta de novo.
+    $faltaSdk = -not (Test-Path $exe) -and (Select-String -LiteralPath $LOG -Pattern 'GOWA_ERRO_SDK' -SimpleMatch -Quiet)
+    $faltaCmake = -not (Test-Path $exe) -and (Select-String -LiteralPath $LOG -Pattern 'GOWA_ERRO_CMAKE' -SimpleMatch -Quiet)
+    if ($faltaSdk -or $faltaCmake) {
         $inst = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\setup.exe"
         if (Test-Path $inst) {
-            Msg 'o Visual Studio está sem o Windows SDK: instalando o componente (alguns minutos; o Windows pede permissão)'
-            $null = SemExcecao { cmd /c ("`"$inst`" modify --installPath `"$VS`" --add Microsoft.VisualStudio.Component.Windows11SDK.22621 " +
+            $comp = if ($faltaSdk) { 'Microsoft.VisualStudio.Component.Windows11SDK.22621' } else { 'Microsoft.VisualStudio.Component.VC.CMake.Project' }
+            Msg ("o Visual Studio está sem o {0}: instalando o componente (alguns minutos; o Windows pede permissão)" -f
+                 $(if ($faltaSdk) { 'Windows SDK' } else { 'C++ CMake tools' }))
+            $null = SemExcecao { cmd /c ("`"$inst`" modify --installPath `"$VS`" --add $comp " +
                                          "--passive --wait --norestart >> `"$(Join-Path $OUT 'vs_instala.log')`" 2>&1") }
             Remove-Item -LiteralPath (Join-Path $R "port\$bdir") -Recurse -Force -ErrorAction SilentlyContinue
             Exec $LOG "`"$R\scripts\build_portatil.cmd`" $bargs"
