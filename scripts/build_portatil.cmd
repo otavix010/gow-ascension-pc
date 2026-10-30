@@ -41,7 +41,11 @@ if not "%GOWA_PY_DIR%"=="" set "PATH=%PATH%;%GOWA_PY_DIR%;%GOWA_PY_DIR%\Scripts"
 if "%GOWA_PY_DIR%"=="" set "PATH=%PATH%;%PATH_JOGADOR%"
 rem O cmake do próprio Visual Studio, pelo caminho completo (report 398: sem o vcvars ele nem estava no PATH)
 set "CMAKE=%GOWA_VS%\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\cmake.exe"
-if not exist "%CMAKE%" set "CMAKE=cmake"
+rem Report 452 (30/10): sem o componente "C++ CMake tools" no Visual Studio, o cmake vinha de outra instalação no PATH
+rem do jogador, que o PATH limpo acima tirou ("'cmake' não é reconhecido"). Procura no PATH dele e na pasta padrão.
+if not exist "%CMAKE%" for %%X in (cmake.exe) do set "CMAKE=%%~$PATH_JOGADOR:X"
+if "%CMAKE%"=="" if exist "%ProgramFiles%\CMake\bin\cmake.exe" set "CMAKE=%ProgramFiles%\CMake\bin\cmake.exe"
+if "%CMAKE%"=="" goto sem_cmake
 if not defined WindowsSdkDir (
   echo GOWA_ERRO_SDK: o vcvars64.bat nao achou o Windows SDK ^(kernel32.lib^): falta o componente Windows 11 SDK no Visual Studio
   cmd /c exit 2
@@ -50,7 +54,8 @@ if not defined WindowsSdkDir (
 rem O ninja que vem com o Visual Studio, pelo caminho completo: o primeiro do PATH pode ser de outro
 rem programa ou estar quebrado (report 332: 'ninja --version' terminou com 0xc000003e)
 set "NINJA=%GOWA_VS%\Common7\IDE\CommonExtensions\Microsoft\CMake\Ninja\ninja.exe"
-if not exist "%NINJA%" set "NINJA=ninja"
+if not exist "%NINJA%" for %%X in (ninja.exe) do set "NINJA=%%~$PATH_JOGADOR:X"
+if "%NINJA%"=="" goto sem_cmake
 set "NINJA_F=%NINJA:\=/%"
 rem Report 427 (30/10): uma pasta com parênteses ("GodofWarAscension(USA)") fechava o bloco "if (...)" no meio do
 rem comando do cmake ("...ps3recomp foi inesperado neste momento"). Sem bloco, com goto, e os caminhos entre aspas
@@ -68,5 +73,9 @@ if errorlevel 1 goto fim
 :compila
 cd /d "%DIR%"
 if "%GOWA_JOBS%"=="" ("%NINJA%" gowa.exe) else ("%NINJA%" -j %GOWA_JOBS% gowa.exe)
+goto fim
+:sem_cmake
+echo GOWA_ERRO_CMAKE: nem o cmake/ninja do Visual Studio nem outro no PATH: falta o componente C++ CMake tools no Visual Studio
+cmd /c exit 3
 :fim
 echo exit=%ERRORLEVEL%
