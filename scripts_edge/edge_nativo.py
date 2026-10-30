@@ -30,6 +30,10 @@ GANCHOS = [
     # local por um desvio imprevisível por triângulo); saltando para depois do laço
     dict(tipo='antes', pasta='gowajm_0072DF80', fn='gowajm_0072DF80_spu_func_0000DCC0__b', cab='fn_0000DCC0_e3c4.h',
          nat='fn_0000DCC0_e3c4_nativo', rotulo='loc_0000E3C4', destino='loc_0000E3C4_fim', fim='loc_0000E3C4'),
+    # DCC0/E210 (índices por máscara: explícito do fluxo ou o próximo sequencial): o laço inteiro em SIMD por tabelas
+    # de pshufb; antes do vk dele, saltando para depois do laço
+    dict(tipo='antes_vk', pasta='gowajm_0072DF80', fn='gowajm_0072DF80_spu_func_0000DCC0__b', cab='fn_0000DCC0_e210.h',
+         nat='fn_0000DCC0_e210_nativo', vk='/*VK 0000DCC0/0000E210*/', destino='loc_0000E210_fim', fim='loc_0000E210'),
     # D250 (projeção dos vértices, viewport e códigos de recorte): o laço D4DC inteiro, antes do vk dele
     dict(tipo='antes_vk', pasta='gowajm_0072DF80', fn='gowajm_0072DF80_spu_func_0000D250__b', cab='fn_0000D250.h',
          nat='fn_0000D250_nativo', vk='/*VK 0000D250/0000D4DC*/', destino='loc_0000D4DC_fim', fim='loc_0000D4DC'),
