@@ -643,7 +643,7 @@ extern "C" int gowa_conf_replay(const char* dir)
 #include <tlhelp32.h>
 #include <psapi.h>
 namespace {
-struct AmostraJogo { uint64_t rip; uint8_t papel; };   /* papel: 0 SPU, 1 PPU, 2 outras */
+struct AmostraJogo { uint64_t rip; uint8_t papel; uint16_t alvo; };   /* papel: 0 SPU, 1 PPU, 2 outras; alvo = índice da thread */
 DWORD WINAPI perf_jogo_laco(LPVOID arg)
 {
     const char* cfg = (const char*)arg;
@@ -688,7 +688,7 @@ DWORD WINAPI perf_jogo_laco(LPVOID arg)
             a.ciclos = cy;
             if (SuspendThread(a.h) == (DWORD)-1) continue;
             CONTEXT c; c.ContextFlags = CONTEXT_CONTROL;
-            if (GetThreadContext(a.h, &c)) am.push_back({c.Rip, a.papel});
+            if (GetThreadContext(a.h, &c)) am.push_back({c.Rip, a.papel, (uint16_t)(&a - alvos.data())});
             ResumeThread(a.h);
         }
         do { YieldProcessor(); QueryPerformanceCounter(&u); } while ((u.QuadPart - t.QuadPart) * 1000000 / f.QuadPart < 2000);
@@ -735,6 +735,22 @@ DWORD WINAPI perf_jogo_laco(LPVOID arg)
         std::sort(top.begin(), top.end(), [](const auto& x, const auto& y) { return x.first > y.first; });
         for (size_t k = 0; k < top.size() && k < 12; k++)
             fprintf(stderr, "[perf-jogo] dll %s %-40s %5.1f%%\n", nomes[p], top[k].second.c_str(), n ? 100.0 * top[k].first / n : 0.0);
+    }
+    /* 30/10: um arquivo por thread "outras" com 20% ou mais de um núcleo (a principal, o RSX-present), que no
+     * _outros.txt se misturam com as que só esperam: ../../out/perfil_jogo_t<tid>.txt */
+    for (const auto& x : uso) {
+        const Alvo* a = x.second;
+        if (a->papel != 2 || x.first < 20.0) continue;
+        const uint16_t ia = (uint16_t)(a - alvos.data());
+        std::unordered_map<uint32_t, uint32_t> hist; size_t n = 0;
+        for (const AmostraJogo& s : am) {
+            if (s.alvo != ia) continue;
+            n++;
+            hist[s.rip - base < 0x10000000u ? (uint32_t)(s.rip - base) : 0xFFFFFFFFu]++;
+        }
+        char cam[96]; snprintf(cam, sizeof cam, "../../out/perfil_jogo_t%lu.txt", (unsigned long)GetThreadId(a->h));
+        if (FILE* fo = fopen(cam, "w")) { for (const auto& kv : hist) fprintf(fo, "%X %u\n", kv.first, kv.second); fclose(fo); }
+        fprintf(stderr, "[perf-jogo] thread %s: %zu amostras -> %s\n", a->nome, n, cam);
     }
     for (const Alvo& a : alvos) CloseHandle(a.h);
     return 0;
