@@ -22,6 +22,10 @@ GANCHOS = [
     # E550 (skinning): o laço EC08 menos a última volta; entra antes do núcleo vk dele e salta para o laço
     dict(tipo='antes_vk', pasta='gowajm_0072DF80', fn='gowajm_0072DF80_spu_func_0000E550__b', cab='fn_0000E550_ec08.h',
          nat='fn_0000E550_ec08_nativo', vk='/*VK 0000E550/0000EC08*/', destino='loc_0000EC08'),
+    # DCC0/E3C4: fn_0000DCC0_e3c4.h é exato (300/300, ordem de leitura do original com a saída no lugar do fluxo),
+    # mas escalar: um desvio imprevisível por triângulo o deixa mais lento (4,2%) que o laço local (~2-3,5%); fora
+    # dict(tipo='antes', pasta='gowajm_0072DF80', fn='gowajm_0072DF80_spu_func_0000DCC0__b', cab='fn_0000DCC0_e3c4.h',
+    #      nat='fn_0000DCC0_e3c4_nativo', rotulo='loc_0000E3C4', destino='loc_0000E3C4_fim', fim='loc_0000E3C4'),
     # F538 (transformação dos vértices pela matriz): o laço F620 inteiro; antes do vk dele, saltando para depois do laço
     dict(tipo='antes_vk', pasta='gowajm_0072DF80', fn='gowajm_0072DF80_spu_func_0000F538__b', cab='fn_0000F538.h',
          nat='fn_0000F538_nativo', vk='/*VK 0000F538/0000F620*/', destino='loc_0000F620_fim', fim='loc_0000F620'),
@@ -182,7 +186,16 @@ def main():
             gancho = f'        if ({g["nat"]}(ctx)) goto {g["destino"]}; {MARCA}\n'
             if gancho in corpo:
                 print(f'{g["fn"]} antes de {g["rotulo"]}: já aplicado'); continue
-            corpo = corpo.replace(rot, gancho + rot)
+            k = corpo.index(rot)
+            if g.get('fim'):   # o nativo faz o laço inteiro: entra antes do vk (se houver) e sai depois do desvio
+                ant = corpo.rindex('\n', 0, k - 1) + 1
+                if '/*VK ' in corpo[ant:k]:
+                    k = ant
+            corpo = corpo[:k] + gancho + corpo[k:]
+            if g.get('fim'):
+                d = corpo.index(f'goto {g["fim"]};', k + len(gancho) + len(rot))
+                d = corpo.index('\n', d) + 1
+                corpo = corpo[:d] + f'{g["fim"]}_fim: {MARCA}\n' + corpo[d:]
         s = s[:i] + corpo + s[fim:]
         open(p, 'w', encoding='latin-1', newline='').write(s)
         print(f'{g["fn"]}: aplicado ({g["tipo"]})')
