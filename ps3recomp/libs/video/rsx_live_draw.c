@@ -103,6 +103,7 @@ static volatile long g_ld_ps1_vram_ready = 0;
 #define WIN32_LEAN_AND_MEAN
 #endif
 #include <windows.h>
+#include <psapi.h>   /* K32EnumProcessModules: [modulos] da tela preta */
 #include <initguid.h>
 #include <d3d12.h>
 #include <d3d12sdklayers.h>
@@ -9686,6 +9687,10 @@ static void write_topology_indices(u32 prim, u32* indices)
     }
 }
 
+/* GOWA (30/10, tela preta 397/399/409/425/431): quando o [tela] vê o jogo todo preto (o mesmo gatilho do
+ * [tela-alvos]), o registro [tgt] de cada desenho (shader, blend, máscara de cor, texturas, scissor) liga sozinho
+ * por 2 quadros, em qualquer alvo, até 1200 linhas: mostra o que o jogo desenha quando a imagem sai preta. */
+static u32 g_ld_tgt_auto_left, g_ld_tgt_auto_fim;
 static void sink_end_impl(void* user, const rsx_dispatch* r)
 {
     (void)user; (void)r;
@@ -10941,11 +10946,14 @@ static void sink_end_impl(void* user, const rsx_dispatch* r)
                                    /* "<n>s": seconds after the first draw instead of a frame */
                                    if (c && strchr(c + 1, 's') && (!c2 || strchr(c + 1, 's') < c2)) { tl_sec = atof(c + 1); tl_from = 0; } }
                           tl_t0 = GetTickCount64(); }
-          if (tl && tl_sec >= 0.0 && (double)(GetTickCount64() - tl_t0) < tl_sec * 1000.0) { }
-          else if (tl && tl_n < tl_max && (long)g_ld_frames >= tl_from) {
+          if (g_ld_tgt_auto_left && g_ld_frames > g_ld_tgt_auto_fim) g_ld_tgt_auto_left = 0;
+          const int tl_auto = g_ld_tgt_auto_left != 0;
+          if (!tl_auto && tl && tl_sec >= 0.0 && (double)(GetTickCount64() - tl_t0) < tl_sec * 1000.0) { }
+          else if (tl_auto || (tl && tl_n < tl_max && (long)g_ld_frames >= tl_from)) {
               rsx_dsp_surface st; rsx_dsp_get_surface(&g.rsx, &st);
-              if (st.color_offset[0] == tl_off || tl_off == 0xFFFFFFFFu) {   /* FFFFFFFF = any target */
-                  tl_n++;
+              if (tl_auto || st.color_offset[0] == tl_off || tl_off == 0xFFFFFFFFu) {   /* FFFFFFFF = any target */
+                  if (tl_auto) g_ld_tgt_auto_left--; else tl_n++;
+                  fprintf(stderr, "[tgt] alvo=%u:0x%X ", st.color_location[0], st.color_offset[0]);
                   fprintf(stderr, "[tgt] frame %u lk=%016llx pso=%016llx clip=%ux%u mrt=%u:%X,%X,%X fp=%u:0x%X n=%u blend=%u sf=0x%08X df=0x%08X eq=0x%08X cmask=0x%08X tex:",
                           g_ld_frames, (unsigned long long)live_legacy_pso_key(), (unsigned long long)g_ld_current_pso.key,
                           st.clip_w, st.clip_h, ld_rt_count(st.color_target), st.color_offset[1], st.color_offset[2], st.color_offset[3],
@@ -12382,6 +12390,24 @@ static void ld_tela_alvos_medir(void)
     fflush(stderr);
     s_alvos_pend = 0;
 }
+/* GOWA (30/10): as DLLs carregadas no processo que não são do Windows (System32/SysWOW64/WinSxS): é onde aparecem
+ * as sobreposições e filtros que se injetam no D3D12 (RivaTuner, Discord, Steam, ReShade, filtros da NVIDIA/AMD) */
+static void ld_log_modulos(const char* quando)
+{
+    HMODULE mods[1024]; DWORD nb = 0;
+    if (!K32EnumProcessModules(GetCurrentProcess(), mods, sizeof mods, &nb)) return;
+    char win[MAX_PATH] = {0}; GetWindowsDirectoryA(win, sizeof win);
+    const size_t lw = strlen(win);
+    int n = 0;
+    for (DWORD k = 0; k < nb / sizeof(HMODULE); k++) {
+        char cam[MAX_PATH];
+        if (!K32GetModuleFileNameExA(GetCurrentProcess(), mods[k], cam, sizeof cam)) continue;
+        if (lw && !_strnicmp(cam, win, lw)) continue;   /* do Windows */
+        fprintf(stderr, "[modulos] %s: %s\n", quando, cam);
+        n++;
+    }
+    fprintf(stderr, "[modulos] %s: %d DLLs fora do Windows\n", quando, n);
+}
 static void ld_tela_diag(ID3D12Resource* src, D3D12_RESOURCE_STATES src_state, ID3D12Resource* bb, D3D12_RESOURCE_STATES bb_state)
 {
     static int on = -1; static ULONGLONG t0, next; static int pretos = 0;
@@ -12408,7 +12434,11 @@ static void ld_tela_diag(ID3D12Resource* src, D3D12_RESOURCE_STATES src_state, I
         if (pretos >= 3 && GetTickCount64() - t0 > 30000 && s_alvos_vezes < 2) {
             s_alvos_vezes++; pretos = -60;   /* a 2ª vez, se ainda preto, uns 2 min depois */
             ld_tela_alvos_copiar(src);
+            g_ld_tgt_auto_left = 1200; g_ld_tgt_auto_fim = g_ld_frames + 2u;
+            fprintf(stderr, "[tgt] registro automático dos desenhos por 2 quadros (tela preta)\n");
+            ld_log_modulos("tela preta");
         }
+        { static int mods_ok; if (!mods_ok && GetTickCount64() - t0 > 10000) { mods_ok = 1; ld_log_modulos("10 s"); } }
         return;
     }
     const ULONGLONG now = GetTickCount64();
