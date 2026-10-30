@@ -38,7 +38,8 @@ GEN6 = 'gowajm_00727200'
 PM = 'gowapm_0079E500'
 PL_SEM_PROMO = {'gowapl_006E5830', 'gowapl_006E8130', 'gowapl_0070F630'}   # os do w11 (--naofolha)
 VK_EDGE = ['73E0:7BB4', '73E0:7ED8', 'F538:F620', 'A880:A950', 'D250:D4DC', 'E550:EC08', 'E550:EE28',
-           'E550:F24C', 'E550:E804', 'DCC0:E210', 'E550:EA7C', 'E550:F034', 'E550:F104', 'DCC0:DFF0']
+           'E550:F24C', 'E550:E804', 'DCC0:E210', 'E550:EA7C', 'E550:F034', 'E550:F104', 'DCC0:DFF0',
+           'DCC0:E3C4']   # 29/10: reconstrução dos triângulos da DCC0 (52% das instruções dela), 300/300
 VK_PL = {'gowapl_0074EF90': '304A0:304A0', 'gowapl_00755540': '30310:30310'}
 LUZGPU = ('/*LUZGPU*/ { extern int g_gowa_luz_gpu; extern int gowa_luz_gpu(spu_context*); '
           'if (g_gowa_luz_gpu && gowa_luz_gpu(ctx)) goto loc_00008210; }')
