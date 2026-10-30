@@ -326,6 +326,17 @@ function Achar-PS3Game([string]$raiz) {
     if ($nome -ieq 'USRDIR' -and (Split-Path -Leaf (Split-Path $raiz.TrimEnd('\'))) -ieq 'PS3_GAME') { return (Split-Path (Split-Path $raiz.TrimEnd('\'))) }
     # report 109: a pasta do RPCS3 (dev_hdd0, dev_bdvd, games...): o jogo de disco fica em games\<algo> ou em
     # dev_hdd0\disc\<id>, fundo demais para a busca geral; o BCUS98232 primeiro
+    # report 394: o RPCS3 guarda onde está cada jogo de disco no games.yml ("BCUS98232: Y:/Jogos/GoW/"), que pode
+    # ficar fora da pasta dele
+    foreach ($yml in @('config\games.yml', 'games.yml')) {
+        $arqYml = Join-Path $raiz $yml
+        if (-not (Test-Path -LiteralPath $arqYml -PathType Leaf)) { continue }
+        foreach ($l in [IO.File]::ReadAllLines($arqYml)) {
+            if ($l -notmatch '^\s*BCUS98232\s*:\s*(.+?)\s*$') { continue }
+            $dir = $Matches[1].Trim('"', "'") -replace '/', '\'
+            if ($dir -and (Test-Path -LiteralPath (Join-Path $dir 'PS3_GAME\USRDIR') -PathType Container)) { return $dir.TrimEnd('\') }
+        }
+    }
     foreach ($sub in @('games', 'dev_hdd0\disc', 'dev_bdvd')) {
         $base = Join-Path $raiz $sub
         if (-not (Test-Path -LiteralPath $base -PathType Container)) { continue }
@@ -412,6 +423,17 @@ function Achar-Disco([string]$d) {
             $como = (' (essa é a pasta do CÓDIGO do port, o gow-ascension-pc baixado do GitHub, não o jogo: o launcher ' +
                      'já baixa o port sozinho. Escolha aqui a sua cópia do God of War: Ascension do PS3, a pasta com ' +
                      'PS3_GAME ou o arquivo baixado dela)')
+        }
+        # report 394: a pasta escolhida é a do update/DLC no RPCS3 (dev_hdd0\game\BCUS98232), não o disco: o disco
+        # está na lista do RPCS3 (games.yml) ou nas pastas dele (games, dev_hdd0\disc)
+        elseif ($cheio -match '^(.+?)\\dev_hdd0\\game(\\|$)') {
+            $vizinho = Achar-PS3Game $Matches[1]
+            if ($vizinho) {
+                Msg "a pasta escolhida é a do update/DLC no RPCS3 (dev_hdd0\game), não o disco; usando o disco em $vizinho"
+                return $vizinho
+            }
+            $como = (' (essa é a pasta do update/DLC no RPCS3, dev_hdd0\game, não o disco: o disco é o que você abre no ' +
+                     'RPCS3 para jogar, a pasta com PS3_GAME ou o arquivo .iso/.7z/.zip/.rar dele)')
         }
         # reports 129 e 130: a pasta escolhida é a do update (o .pkg do 1.12), não a do disco; o disco costuma estar
         # ao lado, na pasta de cima
