@@ -1,9 +1,9 @@
 # EDGE nativo no notebook (i5-10300H, AVX2, exes portáteis v3rz). 1) conferência das 300 gravações da fase 1 com o
 # exe B; 2) A/B no capítulo 16 (roteiro lento do notebook) entre dois exes, alternados, com o nativo ligado nos dois.
-# 29/10 23h55: A = gowa_edge4.exe (plugins 0x74C580 e 0x752710, D640, E550/EC08), B = gowa_edge5.exe (o mesmo + vk
+# 30/10 00h10: A = gowa_edge4.exe (plugins 0x74C580 e 0x752710, D640, E550/EC08), B = gowa_edge6.exe (o mesmo + 58 laços com registradores locais; antes, edge5 = + vk
 # da DCC0/E3C4). Roda pela tarefa gowa_edge (sessão interativa). Resultado em out\edge_ab_not.txt; fim em
 # out\edge_not_pronto.txt.
-param([string]$ExeA = 'gowa_edge4.exe', [string]$ExeB = 'gowa_edge5.exe', [int]$Pares = 3)
+param([string]$ExeA = 'gowa_edge4.exe', [string]$ExeB = 'gowa_edge6.exe', [int]$Pares = 3)
 $R = 'C:\gowa-teste'
 $fim = Join-Path $R 'out\edge_not_pronto.txt'
 Remove-Item $fim -ErrorAction SilentlyContinue

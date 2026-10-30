@@ -560,6 +560,7 @@ static DWORD WINAPI pad_sony_leitor(LPVOID arg)
     return 0;
 }
 
+static int s_sony_buscas;   /* quantas buscas de HID já foram feitas (o log dos não suportados só na primeira) */
 static DWORD WINAPI pad_sony_busca(LPVOID arg)
 {
     (void)arg;
@@ -582,7 +583,27 @@ static DWORD WINAPI pad_sony_busca(LPVOID arg)
                     size_t i = 0;
                     for (; p[i] && i < 511; i++) baixo[i] = (WCHAR)towlower(p[i]);
                     baixo[i] = 0;
-                    if (!wcsstr(baixo, L"054c")) continue;
+                    if (!wcsstr(baixo, L"054c")) {
+                        /* 30/10 (reports 422/423): na primeira busca, os controles HID que não são da Sony (DirectInput:
+                         * 8BitDo em modo D, Switch Pro, genéricos USB) vão para o log como não suportados */
+                        if (s_sony_buscas == 0) {
+                            HANDLE g = CreateFileW(p, 0, FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_EXISTING, 0, NULL);
+                            if (g != INVALID_HANDLE_VALUE) {
+                                HIDD_ATTRIBUTES ga = { sizeof ga };
+                                PHIDP_PREPARSED_DATA gp = NULL;
+                                HIDP_CAPS gc;
+                                if (HidD_GetAttributes(g, &ga) && HidD_GetPreparsedData(g, &gp) &&
+                                    HidP_GetCaps(gp, &gc) == HIDP_STATUS_SUCCESS && gc.UsagePage == 0x01 &&
+                                    (gc.Usage == 0x04 || gc.Usage == 0x05))
+                                    fprintf(stderr, "[controle] HID %04X:%04X (%s) sem suporte direto: use o modo XInput do controle, "
+                                            "o Steam Input ou o DS4Windows\n", ga.VendorID, ga.ProductID,
+                                            gc.Usage == 0x05 ? "gamepad" : "joystick");
+                                if (gp) HidD_FreePreparsedData(gp);
+                                CloseHandle(g);
+                            }
+                        }
+                        continue;
+                    }
                 }
                 int aberto = 0;
                 for (int k = 0; k < PAD_SONY_MAX; k++) aberto |= s_sony[k].vivo && !_wcsicmp(s_sony[k].caminho, p);
@@ -599,7 +620,12 @@ static DWORD WINAPI pad_sony_busca(LPVOID arg)
                 if (!ok || at.VendorID != 0x054C || caps.UsagePage != 0x01 || (caps.Usage != 0x05 && caps.Usage != 0x04)) continue;
                 const int ds5 = at.ProductID == 0x0CE6 || at.ProductID == 0x0DF2;
                 const int ds4 = at.ProductID == 0x05C4 || at.ProductID == 0x09CC || at.ProductID == 0x0BA0;
-                if (!ds5 && !ds4) continue;
+                if (!ds5 && !ds4) {
+                    if (s_sony_buscas == 0)
+                        fprintf(stderr, "[controle] Sony %04X:%04X sem suporte (só DualShock 4 e DualSense)\n", at.VendorID, at.ProductID);
+                    continue;
+                }
+                fprintf(stderr, "[controle] %s por %s\n", ds5 ? "DualSense" : "DualShock 4", caps.InputReportByteLength != 64 ? "Bluetooth" : "USB");
                 for (int k = 0; k < PAD_SONY_MAX; k++) {
                     if (InterlockedCompareExchange(&s_sony[k].vivo, 1, 0) != 0) continue;
                     PadSony* s = &s_sony[k];
@@ -614,6 +640,7 @@ static DWORD WINAPI pad_sony_busca(LPVOID arg)
             }
             SetupDiDestroyDeviceInfoList(lista);
         }
+        s_sony_buscas++;
         Sleep(2000);
     }
     return 0;
@@ -686,6 +713,9 @@ static void pad_poll_xinput(void)
             continue;
         }
 
+        /* 30/10 (reports 422/423, "controle não reconhecido"): o log diz quais controles o jogo achou */
+        { static int visto[PAD_MAX_HOST_PORTS];
+          if (!visto[i]) { visto[i] = 1; fprintf(stderr, "[controle] XInput no slot %d (Xbox ou compatível)\n", i); } }
         s_host_state[i].connected = 1;
         XINPUT_GAMEPAD* gp = &state.Gamepad;
 
