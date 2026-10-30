@@ -149,6 +149,28 @@ def fi(a, b):     # spu_fi_ref do runtime
         out.append(sinal | (e << 23) | ((m >> 9) & 0x7FFFFF))
     return out
 
+
+FREST_LUT = [
+    0x7FFBE0, 0x7F87A6, 0x70EF72, 0x708B40, 0x638B12, 0x633AEA, 0x5792C4, 0x574AA0,
+    0x4CCA7E, 0x4C9262, 0x430A44, 0x42D62A, 0x3A2E12, 0x39FDFA, 0x3215E4, 0x31F1D2,
+    0x2AA9BE, 0x2A85AC, 0x23D59A, 0x23BD8E, 0x1D8576, 0x1D8576, 0x17AD5A, 0x17AD5A,
+    0x124543, 0x124543, 0x0D392D, 0x0D392D, 0x08851A, 0x08851A, 0x041D07, 0x041D07]
+
+def frest(a):     # spu_frest_ref do runtime
+    out = []
+    for w in a:
+        e = (w >> 23) & 0xFF
+        rexp = 255 if e == 0 else (0 if e >= 253 else 253 - e)
+        out.append(((w & 0x80000000) | (rexp << 23) | (FREST_LUT[(w >> 18) & 0x1F] & 0x7FFFFF)) & M32)
+    return out
+
+def gbh(a):       # bit 0 de cada meia palavra i da SPU -> bit (7-i)
+    h = halfs(a)
+    return [sum((h[i] & 1) << (7 - i) for i in range(8)), 0, 0, 0]
+
+def xswd(a):
+    return [M32 if a[1] >> 31 else 0, a[1], M32 if a[3] >> 31 else 0, a[3]]
+
 def ctl_insercao(pos, tam):
     c = bytearray(range(0x10, 0x20))
     for k in range(tam):
@@ -252,6 +274,12 @@ OPS = {
     'fms': fop(lambda x, y, z: x * y - z),
     'fnms': fop(lambda x, y, z: z - x * y),
     'fcgt': fcmp_gt,
+    'fnms_r': fop(lambda x, y, z: z - x * y),
+    'frest': frest,
+    'gbh': gbh,
+    'xswd': xswd,
+    'xorbi': lambda a, i: w4(bytes(x ^ (i & 0xFF) for x in b16(a))),
+    'rotmai': lambda a, n: [rotma(w, n) for w in a],
     'cflts': cflts,
     'cuflt': cuflt,
     'csflt': csflt,
