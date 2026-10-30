@@ -55,3 +55,4 @@ __pycache__/
 
 # gerado pelo gerar.ps1
 /jogar.cmd
+port/build.txt

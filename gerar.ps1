@@ -46,7 +46,7 @@ param(
     [string]$Update = '',
     [string]$Firmware = '',
     [string]$ChavesRpcs3 = '',
-    [ValidateSet('auto', 'avx512', 'portatil')][string]$Build = 'auto',
+    [ValidateSet('auto', 'avx512', 'nativa', 'portatil')][string]$Build = 'auto',
     [int]$Jobs = 0,
     [switch]$SemOtimizar,
     [int]$RefazerDe = 0,
@@ -1046,33 +1046,55 @@ Etapa '5_spu' {
 }
 
 # ---------------------------------------------------------------------------- compilar
+# A versão da build (30/10, pedido do usuário): GOWA_BUILD=auto|portatil|nativa (a opção do launcher; o -Build da
+# linha de comando, se dado, vale mais). auto = a detecção: AVX-512 -> nativa (-march=native), senão portátil
+# (x86-64-v3); processador sem nome comercial -> portátil. Trocar de versão recompila (as etapas 6 e 7 voltam).
+# Se a nativa não compilar, a geração cai para a portátil com aviso. O resultado vai para port\build.txt
+# (escolhida/usada/pasta/exe/motivo, uma chave=valor por linha): o launcher abre esse exe e manda no report.
 $llvm = Join-Path $VS 'VC\Tools\Llvm\x64\bin'
-$alvo = $Build
-if ($alvo -eq 'auto') {
+$escolha = if ($PSBoundParameters.ContainsKey('Build')) { $Build } elseif ($env:GOWA_BUILD) { $env:GOWA_BUILD.Trim().ToLower() } else { 'auto' }
+if ($escolha -eq 'avx512') { $escolha = 'nativa' }
+if ($escolha -notin @('auto', 'portatil', 'nativa')) { Msg "GOWA_BUILD='$escolha' não existe (auto, portatil, nativa): usando auto"; $escolha = 'auto' }
+$motivo = ''
+if ($escolha -eq 'auto') {
     $def = (cmd /c "echo.| `"$llvm\clang.exe`" -march=native -dM -E -x c - 2>nul") -join "`n"
-    if ($def -match '__AVX512F__' -and $def -match '__AVX512BW__' -and $def -match '__AVX512VL__' -and $def -match '__AVX512DQ__') { $alvo = 'avx512' }
-    else { $alvo = 'portatil' }
+    if ($def -match '__AVX512F__' -and $def -match '__AVX512BW__' -and $def -match '__AVX512VL__' -and $def -match '__AVX512DQ__') {
+        $alvo = 'nativa'; $motivo = 'automático: o processador tem AVX-512'
+    } else { $alvo = 'portatil'; $motivo = 'automático: sem AVX-512' }
     # reports 461/462: "Genuine Intel(R) CPU 0000 @ 2.60GHz" (amostra de engenharia, não se identifica) anuncia AVX-512
     # e o -march=native liga o que a CPUID diz; o jogo fechou com 0xC000001D (instrução ilegal) logo que as SPUs
     # começaram. Processador que não diz o nome comercial fica com a build portátil (AVX2), a que todos os outros usam.
     $nomeCpu = "$((Get-CimInstance Win32_Processor -ErrorAction SilentlyContinue | Select-Object -First 1).Name)".Trim()
-    if ($alvo -eq 'avx512' -and $nomeCpu -match '^Genuine Intel\(R\) CPU|\b0000 @') {
-        Msg "processador sem nome comercial ($nomeCpu, amostra de engenharia): build portátil (AVX2) em vez da AVX-512"
-        $alvo = 'portatil'
+    if ($alvo -eq 'nativa' -and $nomeCpu -match '^Genuine Intel\(R\) CPU|\b0000 @') {
+        Msg "processador sem nome comercial ($nomeCpu, amostra de engenharia): build portátil (AVX2) em vez da nativa"
+        $alvo = 'portatil'; $motivo = 'automático: processador sem nome comercial (amostra de engenharia)'
     }
-}
+} else { $alvo = $escolha; $motivo = 'escolhida pelo jogador' }
 # sem AVX-512: x86-64-v3 (AVX2), a build testada nos PCs de teste, e não -march=native: tira uma variável dos
 # defeitos gráficos vistos num Ryzen 5 5600X (cores de vértice e texturas erradas) enquanto a causa é investigada
-if ($alvo -eq 'avx512') { $bargs = 'native'; $bdir = 'build_native' } else { $bargs = 'x86-64-v3 rz'; $bdir = 'build_v3rz' }
-Etapa '6_compilar' {
-    Msg "build: $alvo (código SPU com $(if ($alvo -eq 'portatil') { '-march=x86-64-v3, contas de float em para-zero' } else { '-march=native' }))"
-    $env:GOWA_VS = $VS
-    $env:FFMPEG_DIR = Join-Path $R "dl\ffmpeg9\$FFMPEG_NOME"
+function Pasta-Build([string]$a) { if ($a -eq 'nativa') { 'build_native' } else { 'build_v3rz' } }
+function Args-Build([string]$a) { if ($a -eq 'nativa') { 'native' } else { 'x86-64-v3 rz' } }
+$bdir = Pasta-Build $alvo
+# a geração anterior: com a mesma escolha e o exe dela no lugar, fica a build usada (inclusive a portátil que
+# substituiu uma nativa que não compilou); escolha diferente ou exe sumido, compila de novo
+$infoBuild = Join-Path $R 'port\build.txt'
+$antes = @{}
+if (Test-Path $infoBuild) { foreach ($l in (Get-Content -LiteralPath $infoBuild -Encoding UTF8)) { if ($l -match '^(\w+)=(.*)$') { $antes[$matches[1]] = $matches[2] } } }
+if ($antes['escolhida'] -eq $escolha -and $antes['pasta'] -and (Test-Path (Join-Path $R "port\$($antes['pasta'])\gowa.exe"))) {
+    $bdir = $antes['pasta']; $alvo = if ($bdir -eq 'build_native') { 'nativa' } else { 'portatil' }
+    if ($antes['motivo']) { $motivo = $antes['motivo'] }
+} elseif (-not (Test-Path (Join-Path $R "port\$bdir\gowa.exe")) -or ($antes['pasta'] -and $antes['pasta'] -ne $bdir)) {
+    if (Test-Path (Join-Path $OUT '6_compilar.ok')) { Msg "versão da build: $(if ($alvo -eq 'nativa') { 'nativa' } else { 'portátil' }) (outra que a anterior): compilando de novo" }
+    Remove-Item -LiteralPath (Join-Path $OUT '6_compilar.ok'), (Join-Path $OUT '7_jogar.ok') -Force -ErrorAction SilentlyContinue
+}
+# uma build (os passos de antes: SDK/CMake que faltam, -j2 se o ninja parar); devolve se o gowa.exe saiu
+function Compilar-Build([string]$a) {
+    $bd = Pasta-Build $a; $ba = Args-Build $a
+    if ($a -eq 'nativa' -and $env:GOWA_TESTE_NATIVA_FALHA -eq '1') { Msg 'teste: a nativa "falhou" (GOWA_TESTE_NATIVA_FALHA)'; return $false }
+    Msg "build: $a (código SPU com $(if ($a -eq 'portatil') { '-march=x86-64-v3, contas de float em para-zero' } else { '-march=native' }))"
     $env:GOWA_JOBS = "$Jobs"
-    # reports 398/402 (30/10): o build_portatil.cmd roda o vcvars64 com o PATH só do Windows; o Python volta por aqui
-    $env:GOWA_PY_DIR = Split-Path -Parent $py
-    $exe = Join-Path $R "port\$bdir\gowa.exe"
-    Exec $LOG "`"$R\scripts\build_portatil.cmd`" $bargs"
+    $exe = Join-Path $R "port\$bd\gowa.exe"
+    Exec $LOG "`"$R\scripts\build_portatil.cmd`" $ba"
     # report 402: Visual Studio sem o Windows SDK (kernel32.lib); report 452: sem o "C++ CMake tools" (o cmake/ninja).
     # Pede ao instalador do VS o componente que falta e tenta de novo.
     $faltaSdk = -not (Test-Path $exe) -and (Select-String -LiteralPath $LOG -Pattern 'GOWA_ERRO_SDK' -SimpleMatch -Quiet)
@@ -1085,32 +1107,53 @@ Etapa '6_compilar' {
                  $(if ($faltaSdk) { 'Windows SDK' } else { 'C++ CMake tools' }))
             $null = SemExcecao { cmd /c ("`"$inst`" modify --installPath `"$VS`" --add $comp " +
                                          "--passive --wait --norestart >> `"$(Join-Path $OUT 'vs_instala.log')`" 2>&1") }
-            Remove-Item -LiteralPath (Join-Path $R "port\$bdir") -Recurse -Force -ErrorAction SilentlyContinue
-            Exec $LOG "`"$R\scripts\build_portatil.cmd`" $bargs"
+            Remove-Item -LiteralPath (Join-Path $R "port\$bd") -Recurse -Force -ErrorAction SilentlyContinue
+            Exec $LOG "`"$R\scripts\build_portatil.cmd`" $ba"
         }
     }
     # report 415: o ninja parou no meio dos arquivos grandes da PPU (provável falta de memória com muitos clang em
     # paralelo). A compilação continua de onde parou com 2 de cada vez.
-    if (-not (Test-Path $exe) -and (Test-Path (Join-Path $R "port\$bdir\build.ninja"))) {
+    if (-not (Test-Path $exe) -and (Test-Path (Join-Path $R "port\$bd\build.ninja"))) {
         Msg 'a compilação parou; tentando de novo com 2 arquivos por vez (menos memória)'
         $env:GOWA_JOBS = '2'
-        Exec $LOG "`"$R\scripts\build_portatil.cmd`" $bargs"
+        Exec $LOG "`"$R\scripts\build_portatil.cmd`" $ba"
     }
-    if (-not (Test-Path $exe)) {
+    return (Test-Path $exe)
+}
+Etapa '6_compilar' {
+    $env:GOWA_VS = $VS
+    $env:FFMPEG_DIR = Join-Path $R "dl\ffmpeg9\$FFMPEG_NOME"
+    # reports 398/402 (30/10): o build_portatil.cmd roda o vcvars64 com o PATH só do Windows; o Python volta por aqui
+    $env:GOWA_PY_DIR = Split-Path -Parent $py
+    $ok = $false
+    try { $ok = Compilar-Build $alvo } catch { if ($alvo -ne 'nativa') { throw }; Anotar $LOG "`r`n=== a nativa parou: $_" }
+    if (-not $ok -and $alvo -eq 'nativa') {
+        # a nativa não compilou: a portátil, com aviso (o jogo continua jogável)
+        Msg 'AVISO: a build nativa não compilou; gerando a portátil (AVX2) no lugar'
+        $script:alvo = 'portatil'; $script:bdir = Pasta-Build 'portatil'
+        $script:motivo = "a nativa não compilou ($motivo); portátil no lugar"
+        $ok = Compilar-Build 'portatil'
+    }
+    if (-not $ok) {
         # o launcher só manda o fim do log: as linhas de erro vão para o fim e para a mensagem
         $err = @(Select-String -LiteralPath $LOG -Pattern 'FAILED:|error:|fatal error|GOWA_ERRO_|LINK : |lld-link: error|reconhecido como|incorreta|CMake Error' |
                  Select-Object -First 30 | ForEach-Object { $_.Line.Substring(0, [Math]::Min(300, $_.Line.Length)) })
         Anotar $LOG ("`r`n=== erros da compilação (primeiras linhas)`r`n" + ($err -join "`r`n"))
         throw ("o gowa.exe não foi gerado (veja $LOG)" + $(if ($err) { "`r`n" + (($err | Select-Object -First 8) -join "`r`n") } else { '' }))
     }
-    # o launcher abre o primeiro exe que existir (build_native antes da build_v3rz): uma build_native de uma geração
-    # anterior (reports 461/462) ganharia da portátil nova. Fica renomeada.
-    $velho = Join-Path $R 'port\build_native\gowa.exe'
-    if ($bdir -ne 'build_native' -and (Test-Path $velho)) {
+}
+# o launcher abre o primeiro exe que existir (build_native antes da build_v3rz): o exe da outra versão (de uma
+# geração anterior, reports 461/462) fica renomeado, e o build.txt diz qual abrir
+foreach ($o in @('build_native', 'build_v3rz')) {
+    $velho = Join-Path $R "port\$o\gowa.exe"
+    if ($o -ne $bdir -and (Test-Path $velho)) {
         Move-Item -LiteralPath $velho -Destination "$velho.antigo" -Force -ErrorAction SilentlyContinue
-        Msg "a build_native antiga ficou como gowa.exe.antigo (o launcher abre a $bdir)"
+        Msg "a $o de antes ficou como gowa.exe.antigo (o jogo abre a $bdir)"
     }
 }
+$usada = if ($bdir -eq 'build_native') { 'nativa' } else { 'portatil' }
+[IO.File]::WriteAllLines($infoBuild, [string[]]@("escolhida=$escolha", "usada=$usada", "pasta=$bdir", "exe=port/$bdir/gowa.exe", "motivo=$motivo"), (New-Object Text.UTF8Encoding $false))   # UTF-8 sem BOM
+Msg "versão da build: escolhida $escolha, usada $usada ($motivo)"
 
 # ---------------------------------------------------------------------------- jogar.cmd
 Etapa '7_jogar' {
