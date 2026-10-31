@@ -114,13 +114,32 @@ extern uint8_t* vm_base;
  * aligned ones single-copy atomic, as on Cell -- the same rule as
  * runtime/memory/guest_mem_atomic.h, which the generated code cannot include. */
 #define VM_RAW_LD(T, ea) ({ const uint8_t* _p = vm_base + (uint32_t)(ea); T _v;     if (!((uintptr_t)_p & (sizeof(T) - 1))) _v = __atomic_load_n((const T*)_p, __ATOMIC_RELAXED);     else memcpy(&_v, _p, sizeof(T)); _v; })
-#define VM_RAW_ST(T, ea, val) do { uint8_t* _p = vm_base + (uint32_t)(ea); T _v = (val);     if (!((uintptr_t)_p & (sizeof(T) - 1))) __atomic_store_n((T*)_p, _v, __ATOMIC_RELAXED);     else memcpy(_p, &_v, sizeof(T)); } while (0)
+/* GOWA (31/10): the raw stores (stvx, stvebx/stvehx/stvewx, stdbrx, stvlx/stvrx) went straight to memory, with
+ * no lock-line lock and no notice to an SPU holding a reservation on the line -- the dcbz defect (vm_dcbz). On a
+ * line an SPU has reserved they now take the same lock and notice as the vm_write path. */
+extern int           spu_coh_armed;
+extern unsigned char spu_coh_bitmap[];
+void spu_lockline_lock_ea(uint32_t addr);
+void spu_lockline_unlock_ea(uint32_t addr);
+void spu_coh_notify_write(uint32_t addr);
+#define VM_COH_RESERVADA(a) (spu_coh_armed && ((spu_coh_bitmap[(uint32_t)(a) >> 10] >> (((uint32_t)(a) >> 7) & 7u)) & 1u))
+#define VM_RAW_ST(T, ea, val) do { const uint32_t _a = (uint32_t)(ea); uint8_t* _p = vm_base + _a; T _v = (val); if (__builtin_expect(VM_COH_RESERVADA(_a), 0)) { spu_lockline_lock_ea(_a); memcpy(_p, &_v, sizeof(T)); spu_coh_notify_write(_a); spu_lockline_unlock_ea(_a); } else if (!((uintptr_t)_p & (sizeof(T) - 1))) __atomic_store_n((T*)_p, _v, __ATOMIC_RELAXED); else memcpy(_p, &_v, sizeof(T)); } while (0)
 static inline void vm_raw_ld16(void* dst, uint64_t ea) {   /* quadword-aligned */
     uint64_t lo = VM_RAW_LD(uint64_t, ea), hi = VM_RAW_LD(uint64_t, ea + 8);
     memcpy(dst, &lo, 8); memcpy((uint8_t*)dst + 8, &hi, 8); }
 static inline void vm_raw_st16(uint64_t ea, const void* src) {
     uint64_t lo, hi; memcpy(&lo, src, 8); memcpy(&hi, (const uint8_t*)src + 8, 8);
     VM_RAW_ST(uint64_t, ea, lo); VM_RAW_ST(uint64_t, ea + 8, hi); }
+/* stvlx (esq=1): the leading 16-sh bytes of vS to EA..the end of its quadword; stvrx (esq=0): the trailing sh bytes
+ * to the start of EA's quadword. Byte loop as before, under the line's lock when an SPU has it reserved. */
+static inline void vm_st_lr16(uint64_t ea, const uint8_t* s, int esq) {
+    const uint32_t q = (uint32_t)(ea & ~0xFULL), sh = (uint32_t)(ea & 0xF);
+    uint8_t* m = vm_base + q;
+    const int coh = VM_COH_RESERVADA(q);
+    if (coh) spu_lockline_lock_ea(q);
+    if (esq) { for (uint32_t i = 0; i < 16u - sh; i++) m[sh + i] = s[i]; }
+    else     { for (uint32_t i = 16u - sh; i < 16u; i++) m[i - (16u - sh)] = s[i]; }
+    if (coh) { spu_coh_notify_write(q); spu_lockline_unlock_ea(q); } }
 extern int      vm_inline_ok;
 extern uint32_t ppu_vm_size;
 extern uint32_t ppu_hle_inject_base;
