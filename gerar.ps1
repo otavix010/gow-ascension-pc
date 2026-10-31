@@ -1138,6 +1138,34 @@ function Novo-No-Log([long]$de, [string]$texto) {
         return $s.Contains($texto)
     } catch { return $false }
 }
+# report 511: o "setup.exe modify ... --wait" pelo cmd voltou na hora (o setup.exe pede a elevação e devolve o
+# controle) e a compilação de novo veio antes do componente. Agora o pedido de administrador é do próprio
+# Start-Process, que espera; depois espera os processos do instalador terminarem (até 40 min).
+function Instalar-ComponenteVS([string]$inst, [string]$comp) {
+    $logVs = Join-Path $OUT 'vs_instala.log'
+    $args_ = @('modify', '--installPath', "`"$VS`"", '--add', $comp, '--passive', '--norestart')
+    try {
+        $p = Start-Process -FilePath $inst -ArgumentList $args_ -Verb RunAs -Wait -PassThru -ErrorAction Stop
+        Anotar $logVs "$(Get-Date) setup.exe $($args_ -join ' '): código $($p.ExitCode)"
+    } catch {
+        # o jogador recusou a permissão de administrador (ou o Windows não deixou pedir)
+        Anotar $logVs "$(Get-Date) setup.exe $($args_ -join ' '): não abriu ($($_.Exception.Message))"
+        Msg "o instalador do Visual Studio não abriu ($($_.Exception.Message))"
+        return
+    }
+    $t0 = Get-Date
+    while (((Get-Date) - $t0).TotalMinutes -lt 40) {
+        $vivos = @(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | Where-Object {
+            $_.Name -in 'vs_installer.exe', 'vs_installershell.exe', 'vs_setup_bootstrapper.exe' -or
+            ($_.Name -eq 'setup.exe' -and (-not $_.ExecutablePath -or $_.ExecutablePath -like '*\Microsoft Visual Studio\Installer\*')) })
+        if (-not $vivos.Count) { break }
+        Start-Sleep -Seconds 5
+    }
+}
+# o kernel32.lib de algum Windows SDK 10/11 (o que o vcvars64.bat procura)
+function Tem-SdkWindows {
+    return [bool](Get-ChildItem -Path "${env:ProgramFiles(x86)}\Windows Kits\10\Lib\*\um\x64\kernel32.lib" -ErrorAction SilentlyContinue)
+}
 # uma build (os passos de antes: SDK/CMake que faltam, -j2 se o ninja parar); devolve se o gowa.exe saiu
 function Compilar-Build([string]$a) {
     $bd = Pasta-Build $a; $ba = Args-Build $a
@@ -1167,8 +1195,11 @@ function Compilar-Build([string]$a) {
             $comp = if ($faltaSdk) { 'Microsoft.VisualStudio.Component.Windows11SDK.22621' } else { 'Microsoft.VisualStudio.Component.VC.CMake.Project' }
             Msg ("o Visual Studio está sem o {0}: instalando o componente (alguns minutos; o Windows pede permissão)" -f
                  $(if ($faltaSdk) { 'Windows SDK' } else { 'C++ CMake tools' }))
-            $null = SemExcecao { cmd /c ("`"$inst`" modify --installPath `"$VS`" --add $comp " +
-                                         "--passive --wait --norestart >> `"$(Join-Path $OUT 'vs_instala.log')`" 2>&1") }
+            Instalar-ComponenteVS $inst $comp
+            if ($faltaSdk -and -not (Tem-SdkWindows)) {
+                Msg ('o Windows SDK continua faltando. Abra o "Visual Studio Installer", clique em Modificar no Build Tools ' +
+                     '2022 e marque "SDK do Windows 11" (em Componentes individuais); depois gere de novo')
+            }
             Remove-Item -LiteralPath (Join-Path $R "port\$bd") -Recurse -Force -ErrorAction SilentlyContinue
             Exec $LOG "`"$R\scripts\build_portatil.cmd`" $ba"
         }
