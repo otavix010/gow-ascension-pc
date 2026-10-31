@@ -4,6 +4,20 @@ O Otavix Launcher mostra este arquivo na página "Novidades" do jogo. Cada atual
 "## <data> · <versão>" e o texto em português (### pt), inglês (### en) e, quando houver, espanhol (### es).
 As mais novas ficam em cima.
 
+## 31/10/2026 · a195d68
+### pt
+- **Mais fps nas cenas pesadas, principalmente em PCs mais fracos:** a parte do motor que prepara a geometria dos personagens e do cenário (o EDGE, que no PS3 rodava nas SPUs) agora tem os trechos mais pesados reescritos em código nativo do PC: skinning, descompressão de vértices e índices, projeção e descarte de triângulos. O resultado é conferido bit a bit contra o original em 600 trabalhos gravados do jogo. Num notebook com i5-10300H, no capítulo 16, o fps subiu cerca de 23% (de ~9,5 para ~11,7). Se notar algum defeito na geometria, a variável GOWA_EDGE_NATIVO=0 volta ao comportamento anterior.
+- **PCs com até 8 núcleos lógicos:** o jogo agora usa 6 SPUs em vez de 7 nesses PCs (a sétima disputava o processador com as outras): +6% de fps no mesmo notebook.
+- **Menos cortes no som em PCs lentos:** a tarefa que mixa o som do jogo agora tem prioridade no processador em PCs com 4 ou mais núcleos lógicos. No mesmo notebook, os trechos de som que chegavam atrasados caíram um terço, sem perder fps.
+### en
+- **More fps in heavy scenes, especially on weaker PCs:** the part of the engine that prepares the geometry of characters and scenery (EDGE, which ran on the SPUs on the PS3) now has its heaviest pieces rewritten as native PC code: skinning, vertex and index decompression, projection and triangle culling. The result is checked bit for bit against the original on 600 recorded jobs from the game. On a notebook with an i5-10300H, in chapter 16, fps went up about 23% (from ~9.5 to ~11.7). If you notice any geometry glitch, the variable GOWA_EDGE_NATIVO=0 goes back to the previous behaviour.
+- **PCs with up to 8 logical cores:** the game now uses 6 SPUs instead of 7 on these PCs (the seventh competed with the others for the processor): +6% fps on the same notebook.
+- **Fewer sound drops on slow PCs:** the task that mixes the game's sound now gets processor priority on PCs with 4 or more logical cores. On the same notebook, the sound blocks that arrived late fell by a third, with no fps lost.
+### es
+- **Más fps en las escenas pesadas, sobre todo en PC más débiles:** la parte del motor que prepara la geometría de los personajes y del escenario (EDGE, que en PS3 corría en las SPU) ahora tiene sus partes más pesadas reescritas en código nativo de PC: skinning, descompresión de vértices e índices, proyección y descarte de triángulos. El resultado se comprueba bit a bit contra el original en 600 trabajos grabados del juego. En un portátil con i5-10300H, en el capítulo 16, los fps subieron cerca de un 23% (de ~9,5 a ~11,7). Si notas algún defecto en la geometría, la variable GOWA_EDGE_NATIVO=0 vuelve al comportamiento anterior.
+- **PC con hasta 8 núcleos lógicos:** el juego ahora usa 6 SPU en vez de 7 en estos PC (la séptima competía con las demás por el procesador): +6% de fps en el mismo portátil.
+- **Menos cortes de sonido en PC lentos:** la tarea que mezcla el sonido del juego ahora tiene prioridad en el procesador en PC con 4 o más núcleos lógicos. En el mismo portátil, los bloques de sonido que llegaban tarde bajaron un tercio, sin perder fps.
+
 ## 30/10/2026 · d17aa34
 ### pt
 - **A geração parava em "6_compilar" com "Split-Path ... o argumento é nulo":** acontecia quando o gerador não achava um Python (por exemplo, só o Python da Microsoft Store). Agora ele aceita esse Python e, sem nenhum, a compilação segue com o PATH do seu PC. Gere de novo pelo launcher.
