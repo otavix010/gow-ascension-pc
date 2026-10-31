@@ -1175,6 +1175,11 @@ function Compilar-Build([string]$a) {
     $exe = Join-Path $R "port\$bd\gowa.exe"
     $nf = Corrigir-Datas
     if ($nf -gt 0) { Msg "$nf arquivo(s) com data no futuro (relógio ou fuso do zip): data corrigida para agora" }
+    # o build_portatil.cmd sai com 0 mesmo quando o ninja falha, e o ninja não apaga o gowa.exe de antes: numa
+    # atualização, um erro de compilação deixava o exe velho e a etapa dizia "ok". O exe de antes fica de lado e só
+    # volta se a compilação não gerar outro (o jogo continua jogável e a etapa mostra o erro).
+    $ant = Join-Path $R "port\$bd\gowa_anterior.exe"
+    if (Test-Path $exe) { Move-Item -LiteralPath $exe -Destination $ant -Force }
     $l0 = (Get-Item -LiteralPath $LOG).Length
     Exec $LOG "`"$R\scripts\build_portatil.cmd`" $ba"
     # o laço do ninja mesmo assim (relógio do Windows muito errado, ou datas que não deu para corrigir): a pasta da
@@ -1211,7 +1216,9 @@ function Compilar-Build([string]$a) {
         $env:GOWA_JOBS = '2'
         Exec $LOG "`"$R\scripts\build_portatil.cmd`" $ba"
     }
-    return (Test-Path $exe)
+    if (Test-Path $exe) { Remove-Item -LiteralPath $ant -Force -ErrorAction SilentlyContinue; return $true }
+    if (Test-Path $ant) { Move-Item -LiteralPath $ant -Destination $exe -Force }
+    return $false
 }
 Etapa '6_compilar' {
     $env:GOWA_VS = $VS
