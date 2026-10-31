@@ -83,4 +83,23 @@ extern unsigned long g_spu_lr_raise;
 }
 #endif
 
+/* GOWA (31/10): spu_coh_is_reserved inline (also in ppu_memory.h, same guard) */
+#ifdef __cplusplus
+extern "C" {
+#endif
+extern int spu_coh_armed;
+extern unsigned char spu_coh_bitmap[];
+#ifdef __cplusplus
+}
+#endif
+#ifndef SPU_COH_RESERVED_INL
+#define SPU_COH_RESERVED_INL
+static inline int spu_coh_reserved_inl(uint32_t addr)
+{
+    if (!spu_coh_armed) return 0;
+    const uint32_t line = addr >> 7;
+    return (spu_coh_bitmap[line >> 3] >> (line & 7)) & 1u;
+}
+#endif
+
 #endif /* SPU_COHERENCY_H */

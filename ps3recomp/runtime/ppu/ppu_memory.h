@@ -132,6 +132,10 @@ void        ppu_resv_break_store(uint64_t ea);
  * spu_coh_is_reserved is a load of a global that stays zero until an SPU
  * reserves its first line, so the ordinary store pays one predictable branch. */
 int         spu_coh_is_reserved(uint32_t addr);
+/* GOWA (31/10): the same test inline. The call was paid on EVERY guest store (VM_WRITE_COH) and on every
+ * line of every SPU PUT; the bitmap and the armed flag are plain globals of spu_coherency.c. */
+extern int           spu_coh_armed;
+extern unsigned char spu_coh_bitmap[];
 void        spu_lockline_lock(void);
 void        spu_lockline_unlock(void);
 void        spu_lockline_lock_ea(uint32_t addr);     /* GOWA: that line's stripe */
@@ -141,9 +145,19 @@ void        spu_coh_notify_write(uint32_t addr);
 }
 #endif
 
+#ifndef SPU_COH_RESERVED_INL
+#define SPU_COH_RESERVED_INL
+static inline int spu_coh_reserved_inl(uint32_t addr)
+{
+    if (!spu_coh_armed) return 0;
+    const uint32_t line = addr >> 7;
+    return (spu_coh_bitmap[line >> 3] >> (line & 7)) & 1u;
+}
+#endif
+
 #define VM_WRITE_COH(addr, src, n)                                            \
     do {                                                                      \
-        if (spu_coh_is_reserved((uint32_t)(addr))) {                          \
+        if (spu_coh_reserved_inl((uint32_t)(addr))) {                          \
             spu_lockline_lock_ea((uint32_t)(addr));                           \
             memcpy(vm_ptr8((uint32_t)(addr)), (src), (n));                    \
             spu_coh_notify_write((uint32_t)(addr));                           \
@@ -238,7 +252,7 @@ static inline int vm_block_reserved(uint32_t guest_dst, size_t len)
     uint32_t first = guest_dst & ~127u;
     uint32_t last  = (uint32_t)(guest_dst + (len - 1)) & ~127u;
     for (uint32_t line = first; ; line += 128u) {
-        if (spu_coh_is_reserved(line)) return 1;
+        if (spu_coh_reserved_inl(line)) return 1;
         if (line == last) break;
     }
     return 0;
@@ -249,7 +263,7 @@ static inline void vm_block_notify(uint32_t guest_dst, size_t len)
     uint32_t first = guest_dst & ~127u;
     uint32_t last  = (uint32_t)(guest_dst + (len - 1)) & ~127u;
     for (uint32_t line = first; ; line += 128u) {
-        if (spu_coh_is_reserved(line)) spu_coh_notify_write(line);
+        if (spu_coh_reserved_inl(line)) spu_coh_notify_write(line);
         if (line == last) break;
     }
 }
@@ -321,7 +335,7 @@ static inline int ppu_stwcx(ppu_context* ctx, uint32_t addr, uint32_t val)
      * can never land inside an SPU PUTLLC's compare/commit window (nor the
      * reverse), and the reserving SPU gets its lost-reservation event. */
     int ok;
-    if (spu_coh_is_reserved(addr)) {
+    if (spu_coh_reserved_inl(addr)) {
         spu_lockline_lock_ea(addr);
         ok = atomic_compare_exchange_strong_explicit(
             atom, &expected, desired,
@@ -370,7 +384,7 @@ static inline int ppu_stdcx(ppu_context* ctx, uint32_t addr, uint64_t val)
     _Atomic(uint64_t)* atom = (_Atomic(uint64_t)*)vm_ptr64(addr);
 
     int ok;
-    if (spu_coh_is_reserved(addr)) {
+    if (spu_coh_reserved_inl(addr)) {
         spu_lockline_lock_ea(addr);
         ok = atomic_compare_exchange_strong_explicit(
             atom, &expected, desired,
