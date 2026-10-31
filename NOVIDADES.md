@@ -4,6 +4,32 @@ O Otavix Launcher mostra este arquivo na página "Novidades" do jogo. Cada atual
 "## <data> · <versão>" e o texto em português (### pt), inglês (### en) e, quando houver, espanhol (### es).
 As mais novas ficam em cima.
 
+## 31/10/2026 · 2b834bc
+### pt
+- **Erro de link ao gerar de novo (símbolo indefinido):** o gerador confere o conteúdo de cada arquivo do código e recompila o que mudou, mesmo quando a atualização chega com data antiga. A primeira geração depois desta atualização recompila tudo.
+- **Compilação interrompida:** arquivos de compilação corrompidos (PC desligado no meio da geração) são refeitos.
+- **Visual Studio:** com duas instalações, o gerador escolhe uma só; num Build Tools sem o Clang ou o CMake, acrescenta os componentes na instalação existente.
+- **Python incompleto:** um Python sem parte da biblioteca padrão é ignorado, e o gerador procura os outros instalados.
+- **Downloads:** o FFmpeg, o update e o firmware mostram o progresso durante o download.
+- **Vibração:** DualSense e DualShock 4 ligados por USB vibram; o motor pequeno passa a vibrar em todos os controles.
+- Para aplicar, gere o jogo novamente pelo launcher.
+### en
+- **Link error when generating again (undefined symbol):** the generator checks the content of each code file and recompiles what changed, even when the update arrives with an old date. The first generation after this update recompiles everything.
+- **Interrupted build:** corrupted build files (PC shut down during generation) are rebuilt.
+- **Visual Studio:** with two installs, the generator picks only one; on Build Tools without Clang or CMake, it adds the components to the existing install.
+- **Incomplete Python:** a Python missing part of the standard library is skipped, and the generator looks for the other installed ones.
+- **Downloads:** FFmpeg, the update and the firmware show progress while downloading.
+- **Vibration:** DualSense and DualShock 4 connected by USB vibrate; the small motor now vibrates on every controller.
+- To apply, generate the game again from the launcher.
+### es
+- **Error de enlace al generar de nuevo (símbolo no definido):** el generador comprueba el contenido de cada archivo del código y recompila lo que cambió, aunque la actualización llegue con fecha antigua. La primera generación después de esta actualización recompila todo.
+- **Compilación interrumpida:** los archivos de compilación dañados (PC apagado durante la generación) se rehacen.
+- **Visual Studio:** con dos instalaciones, el generador elige solo una; en un Build Tools sin Clang o CMake, agrega los componentes a la instalación existente.
+- **Python incompleto:** un Python al que le falta parte de la biblioteca estándar se ignora, y el generador busca los otros instalados.
+- **Descargas:** FFmpeg, el update y el firmware muestran el progreso durante la descarga.
+- **Vibración:** DualSense y DualShock 4 conectados por USB vibran; el motor pequeño ahora vibra en todos los mandos.
+- Para aplicar, genera el juego de nuevo desde el launcher.
+
 ## 31/10/2026 · 6dd163d
 ### pt
 - **Geração:** se a compilação falhar ao gerar de novo, o launcher mostra o erro em vez de seguir com a versão anterior do jogo.
