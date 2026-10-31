@@ -195,6 +195,14 @@ function Etapa([string]$nome, [scriptblock]$corpo) {
 }
 
 # ---------------------------------------------------------------------------- ferramentas
+# report 535: um Python 3.15 (do instalador novo da python.org) sem parte da biblioteca padrão ("Standard library
+# module 'tempfile' was not found") passava na conferência da versão e parava a geração no unself.py. O candidato
+# só serve se importar o que as ferramentas usam.
+$TESTE_PY = 'import sys, tempfile, urllib.request, ssl, zlib, hashlib, json, ctypes; print(sys.version_info[0]*100+sys.version_info[1])'
+function Python-Roda([string]$c) {
+    $v = SemExcecao { & $c -c "import sys; print(sys.version_info[0]*100+sys.version_info[1])" 2>$null }
+    return ("$(@($v)[0])" -match '^\d+$')
+}
 # o "python" do PATH pode não servir: o atalho da Microsoft Store (abre a loja) ou o Python de outro programa, sem
 # pip (report 85 do launcher: o do Inkscape vinha primeiro e o "pip install" parou a geração). Escolhe um Python
 # 3.10+ com pip, o do lançador py primeiro e depois cada python do PATH, e põe a pasta dele na frente do PATH
@@ -206,11 +214,15 @@ function Escolher-Python {
     if ($LASTEXITCODE -eq 0 -and $e) { $cands += "$(@($e)[0])".Trim() }
     $w = SemExcecao { cmd /c 'where python 2>nul' }
     if ($w) { $cands += @($w | ForEach-Object { "$_".Trim() }) }
+    # os outros Pythons que o lançador py conhece (o "py -3" pode ser justamente o incompleto)
+    $l = SemExcecao { cmd /c 'py --list-paths 2>nul' }
+    if ($l) { $cands += @($l | ForEach-Object { if ("$_" -match '([A-Za-z]:\\.*python\.exe)\s*$') { $matches[1] } }) }
     $semPip = $null
     foreach ($c in ($cands | Where-Object { $_ -and $_ -notmatch '\\WindowsApps\\' } | Select-Object -Unique)) {
         if (-not (Test-Path -LiteralPath $c)) { continue }
-        $v = SemExcecao { & $c -c "import sys; print(sys.version_info[0]*100+sys.version_info[1])" 2>$null }
-        if (-not ("$(@($v)[0])" -match '^\d+$') -or [int]"$(@($v)[0])" -lt 310) { continue }
+        $v = SemExcecao { & $c -c $TESTE_PY 2>$null }
+        if (-not ("$(@($v)[0])" -match '^\d+$')) { if (Python-Roda $c) { Msg "o Python em $c está incompleto (falta parte da biblioteca padrão): ignorado" }; continue }
+        if ([int]"$(@($v)[0])" -lt 310) { continue }
         $null = SemExcecao { & $c -m pip --version 2>$null }
         if ($LASTEXITCODE -eq 0) { return $c }
         if (-not $semPip) { $semPip = $c }
@@ -228,7 +240,7 @@ function Escolher-Python {
     # reports 470/473/474: o Python da Microsoft Store (real, não o atalho que abre a loja) só existe em \WindowsApps\;
     # por último, ele serve se rodar e for 3.10+ (o atalho falha na conferência da versão)
     foreach ($c in ($cands | Where-Object { $_ -match '\\WindowsApps\\' } | Select-Object -Unique)) {
-        $v = SemExcecao { & $c -c "import sys; print(sys.version_info[0]*100+sys.version_info[1])" 2>$null }
+        $v = SemExcecao { & $c -c $TESTE_PY 2>$null }
         if ("$(@($v)[0])" -match '^\d+$' -and [int]"$(@($v)[0])" -ge 310) { return $c }
     }
     return $null
