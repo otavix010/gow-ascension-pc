@@ -3666,7 +3666,7 @@ static void tex_index_rebuild(void)
 {
     memset(s_tex_index, 0xFF, sizeof s_tex_index);
     s_tex_index_puts = 0;
-    for (u32 i = 0; i < g.n_textures; i++) tex_index_put(i);
+    for (u32 i = 0; i < g.n_textures; i++) if (g.textures[i].width) tex_index_put(i);
     s_tex_index_ready = 1;
 }
 /* GOWA_TEX_DUMP_SEC=<s>[,max]: from <s> seconds after the first texture
@@ -3719,6 +3719,7 @@ extern unsigned g_ld_gpu_vram_mb;
  * (IDXGIAdapter3::QueryVideoMemoryInfo): acima de 90%, o limite cai para 7/8 das texturas carregadas e o LRU
  * descarta as mais antigas; abaixo de 75%, volta a subir 1/8 por vez até o normal. GOWA_TEX_VRAM=0 desliga. */
 static u32 s_tex_cap_vram;   /* 0 = sem pressão */
+static u32 s_tex_livres[MAX_TEXTURES], s_n_tex_livres;   /* vagas do cache sem textura (ld_tex_encolher) */
 static void ld_tex_vram_olha(u32 cap)
 {
     static int on = -1; static IDXGIAdapter3* ad; static u32 ult;
@@ -3742,8 +3743,9 @@ static void ld_tex_vram_olha(u32 cap)
       if (teste < 0) { const char* e = getenv("GOWA_TEX_VRAM_ORCAMENTO_MB"); teste = e ? atol(e) : 0; }
       if (teste > 0) mi.Budget = (UINT64)teste << 20; }
     const double uso = (double)mi.CurrentUsage / (double)mi.Budget;
-    if (uso > 0.90 && g.n_textures > 1024u) {
-        const u32 novo = g.n_textures - g.n_textures / 8u;
+    const u32 vivas = g.n_textures - s_n_tex_livres;   /* as vagas livres (ld_tex_encolher) não ocupam VRAM */
+    if (uso > 0.90 && vivas > 1024u) {
+        const u32 novo = vivas - vivas / 8u;
         if (!s_tex_cap_vram || novo < s_tex_cap_vram) {
             s_tex_cap_vram = novo < 1024u ? 1024u : novo;
             static int ditos;
@@ -3756,6 +3758,39 @@ static void ld_tex_vram_olha(u32 cap)
         s_tex_cap_vram += s_tex_cap_vram / 8u;
         if (s_tex_cap_vram >= cap) s_tex_cap_vram = 0;
     }
+}
+/* GOWA (30/10, reports 469/480/491): com o limite baixado pela VRAM as texturas carregadas continuavam as mesmas
+ * (o LRU só troca uma pela outra quando o cache está cheio): 16384 carregadas contra o limite 14336 por toda a
+ * sessão, e a VRAM não aliviava. Agora as mais antigas acima do limite são descartadas (pela fila do fence, como no
+ * LRU) e a vaga fica livre (width 0, nunca casa numa busca) para a próxima textura. */
+static u32 ld_tex_vivas(void) { return g.n_textures - s_n_tex_livres; }
+static int ld_tex_cmp_serial(const void* a, const void* b)
+{
+    const u64 x = g.textures[*(const u32*)a].last_use_serial, y = g.textures[*(const u32*)b].last_use_serial;
+    return x < y ? -1 : x > y;
+}
+static void ld_tex_encolher(u32 limite, u32 max_por_vez)
+{
+    const u32 vivas = ld_tex_vivas();
+    if (vivas <= limite) return;
+    static u32 ordem[MAX_TEXTURES];
+    u32 n = 0;
+    for (u32 i = 0; i < g.n_textures; i++) if (g.textures[i].width) ordem[n++] = i;
+    qsort(ordem, n, sizeof ordem[0], ld_tex_cmp_serial);
+    u32 tirar = vivas - limite;
+    if (tirar > max_por_vez) tirar = max_por_vez;
+    for (u32 k = 0; k < tirar; k++) {
+        texcache_t* e = &g.textures[ordem[k]];
+        if (e->tex) retire_texture(e->tex);
+        memset(e, 0, sizeof *e);
+        e->last_use_serial = ~0ull;   /* o LRU de cache cheio não escolhe uma vaga livre */
+        s_tex_livres[s_n_tex_livres++] = ordem[k];
+    }
+    g_ld_texture_cache_evictions += tirar;
+    tex_index_rebuild();
+    static int ditos;
+    if (ditos++ < 20)
+        fprintf(stderr, "[texture-cache] VRAM: %u texturas descartadas (agora %u, limite %u)\n", tirar, ld_tex_vivas(), limite);
 }
 static u32 ld_tex_cap(void)
 {
@@ -3894,9 +3929,10 @@ ld_tex_intacta:
 
     u32 index;
     ID3D12Resource* evicted = NULL;
-    const int cache_was_full = g.n_textures >= ld_tex_cap();
+    ld_tex_encolher(ld_tex_cap(), 512u);
+    const int cache_was_full = ld_tex_vivas() >= ld_tex_cap();
     if (!cache_was_full) {
-        index = g.n_textures++;
+        index = s_n_tex_livres ? s_tex_livres[--s_n_tex_livres] : g.n_textures++;
     } else {
         /*
          * A full boot plus a010 binds far more than 128 distinct guest
@@ -14707,7 +14743,7 @@ ld_present_done:;
                 g_ld_stats.group_drop_ring, g_ld_stats.group_drop_surface,
                 g_ld_stats.clears, g_ld_stats.clear_drop_surface,
                 g_ld_stats.implicit_depth_clears,
-                g.n_textures, ld_tex_cap(),
+                ld_tex_vivas(), ld_tex_cap(),
                 (unsigned long long)g_ld_texture_cache_full,
                 (unsigned long long)g_ld_texture_decode_fail,
                 (unsigned long long)g_ld_zdepth_srv_binds,
