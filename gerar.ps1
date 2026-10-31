@@ -255,7 +255,9 @@ function Achar-VS {
     # report 350: o -latest escolhia um Visual Studio 2026 Enterprise com o componente Clang mas sem o
     # vcvars64.bat (C++ incompleto); agora só serve uma instalação com o vcvars64.bat e o clang-cl, e a 2022
     # (a testada) vem antes das outras
-    $todas = @(& $vswhere -all -products * -requires Microsoft.VisualStudio.Component.VC.Llvm.Clang -format json | ConvertFrom-Json)
+    # report 532: no PowerShell 5.1 o ConvertFrom-Json devolve o array JSON como UM objeto; com duas instalações, os
+    # dois caminhos saíam juntos ("...\2022\BuildTools C:\...\18\Community"). O ForEach-Object separa os itens.
+    $todas = @(& $vswhere -all -products * -requires Microsoft.VisualStudio.Component.VC.Llvm.Clang -format json | ConvertFrom-Json | ForEach-Object { $_ })
     $boas = @($todas | Where-Object {
         (Test-Path (Join-Path $_.installationPath 'VC\Auxiliary\Build\vcvars64.bat')) -and
         (Test-Path (Join-Path $_.installationPath 'VC\Tools\Llvm\x64\bin\clang-cl.exe')) })
@@ -264,6 +266,30 @@ function Achar-VS {
                                @{ Expression = { [version]("$($_.installationVersion)" -replace '[^0-9.].*$', '') }; Descending = $true } |
            Select-Object -First 1
     return $boa.installationPath
+}
+# report 511: o "setup.exe modify ... --wait" pelo cmd voltou na hora (o setup.exe pede a elevação e devolve o
+# controle) e a compilação de novo veio antes do componente. Agora o pedido de administrador é do próprio
+# Start-Process, que espera; depois espera os processos do instalador terminarem (até 40 min).
+function Instalar-ComponenteVS([string]$inst, [string[]]$comp, [string]$pasta = $VS) {
+    $logVs = Join-Path $OUT 'vs_instala.log'
+    $args_ = @('modify', '--installPath', "`"$pasta`"") + @($comp | ForEach-Object { '--add', $_ }) + @('--passive', '--norestart')
+    try {
+        $p = Start-Process -FilePath $inst -ArgumentList $args_ -Verb RunAs -Wait -PassThru -ErrorAction Stop
+        Anotar $logVs "$(Get-Date) setup.exe $($args_ -join ' '): código $($p.ExitCode)"
+    } catch {
+        # o jogador recusou a permissão de administrador (ou o Windows não deixou pedir)
+        Anotar $logVs "$(Get-Date) setup.exe $($args_ -join ' '): não abriu ($($_.Exception.Message))"
+        Msg "o instalador do Visual Studio não abriu ($($_.Exception.Message))"
+        return
+    }
+    $t0 = Get-Date
+    while (((Get-Date) - $t0).TotalMinutes -lt 40) {
+        $vivos = @(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | Where-Object {
+            $_.Name -in 'vs_installer.exe', 'vs_installershell.exe', 'vs_setup_bootstrapper.exe' -or
+            ($_.Name -eq 'setup.exe' -and (-not $_.ExecutablePath -or $_.ExecutablePath -like '*\Microsoft Visual Studio\Installer\*')) })
+        if (-not $vivos.Count) { break }
+        Start-Sleep -Seconds 5
+    }
 }
 Etapa '1_ferramentas' {
     $falta = @()
@@ -325,8 +351,22 @@ $VS = Achar-VS
 # pede a permissão de administrador), e procura de novo.
 if (-not $VS) {
     Remove-Item -LiteralPath (Join-Path $OUT '1_ferramentas.ok') -Force -ErrorAction SilentlyContinue
+    # reports 521/530: um Build Tools já instalado sem o Clang (ou sem o CMake) não muda com o "winget install", que
+    # vê o pacote instalado e não faz nada; o instalador do próprio VS acrescenta os componentes nessa instalação
+    $inst = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\setup.exe"
+    $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+    if ((Test-Path $inst) -and (Test-Path $vswhere)) {
+        $comC = @(& $vswhere -all -products * -format json | ConvertFrom-Json | ForEach-Object { $_ } | Where-Object {
+            Test-Path (Join-Path $_.installationPath 'VC\Auxiliary\Build\vcvars64.bat') }) |
+            Sort-Object @{ Expression = { if ("$($_.installationVersion)" -like '17.*') { 0 } else { 1 } } } | Select-Object -First 1
+        if ($comC) {
+            Msg "o Visual Studio em $($comC.installationPath) está sem o C++ Clang tools: instalando o componente (alguns minutos; o Windows pede permissão)"
+            Instalar-ComponenteVS $inst @('Microsoft.VisualStudio.Component.VC.Llvm.Clang', 'Microsoft.VisualStudio.Component.VC.CMake.Project') $comC.installationPath
+            $VS = Achar-VS
+        }
+    }
     $wg = Get-Command winget -ErrorAction SilentlyContinue
-    if ($wg) {
+    if (-not $VS -and $wg) {
         Msg 'nenhum Visual Studio com C++ e Clang completos: instalando o Visual Studio 2022 Build Tools (alguns GB; o Windows pede permissão)'
         $null = SemExcecao { cmd /c ('winget install -e --id Microsoft.VisualStudio.2022.BuildTools --accept-package-agreements --accept-source-agreements ' +
             '--override "--passive --wait --add Microsoft.VisualStudio.Workload.VCTools --add Microsoft.VisualStudio.Component.VC.Llvm.Clang ' +
@@ -1203,30 +1243,6 @@ function Novo-No-Log([long]$de, [string]$texto) {
         try { $null = $fs.Seek($de, 'Begin'); $s = (New-Object IO.StreamReader($fs)).ReadToEnd() } finally { $fs.Dispose() }
         return $s.Contains($texto)
     } catch { return $false }
-}
-# report 511: o "setup.exe modify ... --wait" pelo cmd voltou na hora (o setup.exe pede a elevação e devolve o
-# controle) e a compilação de novo veio antes do componente. Agora o pedido de administrador é do próprio
-# Start-Process, que espera; depois espera os processos do instalador terminarem (até 40 min).
-function Instalar-ComponenteVS([string]$inst, [string]$comp) {
-    $logVs = Join-Path $OUT 'vs_instala.log'
-    $args_ = @('modify', '--installPath', "`"$VS`"", '--add', $comp, '--passive', '--norestart')
-    try {
-        $p = Start-Process -FilePath $inst -ArgumentList $args_ -Verb RunAs -Wait -PassThru -ErrorAction Stop
-        Anotar $logVs "$(Get-Date) setup.exe $($args_ -join ' '): código $($p.ExitCode)"
-    } catch {
-        # o jogador recusou a permissão de administrador (ou o Windows não deixou pedir)
-        Anotar $logVs "$(Get-Date) setup.exe $($args_ -join ' '): não abriu ($($_.Exception.Message))"
-        Msg "o instalador do Visual Studio não abriu ($($_.Exception.Message))"
-        return
-    }
-    $t0 = Get-Date
-    while (((Get-Date) - $t0).TotalMinutes -lt 40) {
-        $vivos = @(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | Where-Object {
-            $_.Name -in 'vs_installer.exe', 'vs_installershell.exe', 'vs_setup_bootstrapper.exe' -or
-            ($_.Name -eq 'setup.exe' -and (-not $_.ExecutablePath -or $_.ExecutablePath -like '*\Microsoft Visual Studio\Installer\*')) })
-        if (-not $vivos.Count) { break }
-        Start-Sleep -Seconds 5
-    }
 }
 # o kernel32.lib de algum Windows SDK 10/11 (o que o vcvars64.bat procura)
 function Tem-SdkWindows {
