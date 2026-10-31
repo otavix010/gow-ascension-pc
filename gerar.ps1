@@ -81,6 +81,21 @@ New-Item -ItemType Directory -Force $OUT | Out-Null
 if ($RefazerDe -gt 0) {
     Get-ChildItem $OUT -Filter '*.ok' | Where-Object { [int]($_.Name.Split('_')[0]) -ge $RefazerDe } | Remove-Item -Force
 }
+# Reports 470/473/474 (30/10): numa geração retomada, uma etapa marcada como feita pode ter perdido o que fez (antivírus,
+# limpeza, pasta apagada) e a falha aparecia só etapas depois, sem dizer por quê. Etapa cuja saída sumiu é refeita.
+foreach ($c in @(@('2_jogo', 'jogo\GOWA.elf'), @('3_firmware', 'fw\lle\libsre_image.bin'), @('3_firmware', 'port\lle_libsre\libsre_recomp.cpp'),
+                 @('4_ppu', 'port\recompiled\ppu_hle_nids.cpp'), @('5_spu', 'port\spu\gowajm_0072DF80\spu_recomp.c'))) {
+    $marca = Join-Path $OUT "$($c[0]).ok"
+    if ((Test-Path -LiteralPath $marca) -and -not (Test-Path -LiteralPath (Join-Path $R $c[1]))) {
+        Write-Host "[gerar] $($c[0]): marcada como feita, mas $($c[1]) sumiu; refazendo" -ForegroundColor Cyan
+        Remove-Item -LiteralPath $marca -Force
+    }
+}
+# Report 398 (30/10) e parecidos: um PATH sem a pasta do Windows deixa o cmd, o robocopy e o icacls sem achar
+$sis = @("$env:SystemRoot\System32", $env:SystemRoot, "$env:SystemRoot\System32\Wbem", "$env:SystemRoot\System32\WindowsPowerShell\v1.0")
+$noPath = @($env:PATH -split ';' | ForEach-Object { $_.Trim('"', ' ').TrimEnd('\') })
+$faltam = @($sis | Where-Object { $noPath -notcontains $_ })
+if ($faltam) { $env:PATH = ($faltam -join ';') + ';' + $env:PATH }
 
 function Msg($t) { Write-Host "[gerar] $t" -ForegroundColor Cyan }
 # roda um programa externo sem que o stderr dele vire exceção: no Windows PowerShell 5.1,
@@ -185,6 +200,7 @@ function Etapa([string]$nome, [scriptblock]$corpo) {
 # 3.10+ com pip, o do lançador py primeiro e depois cada python do PATH, e põe a pasta dele na frente do PATH
 # desta geração; um 3.10+ sem pip recebe o pip pelo ensurepip. Nenhum: a etapa 1_ferramentas diz o que instalar.
 function Escolher-Python {
+    if ($env:GOWA_TESTE_SEM_PYTHON -eq '1') { return $null }   # teste dos reports 470/473/474
     $cands = @()
     $e = SemExcecao { cmd /c 'py -3 -c "import sys; print(sys.executable)" 2>nul' }
     if ($LASTEXITCODE -eq 0 -and $e) { $cands += "$(@($e)[0])".Trim() }
@@ -221,6 +237,15 @@ $py = Escolher-Python
 if ($py) {
     $env:PATH = (Split-Path -Parent $py) + ';' + $env:PATH
     Msg "Python: $py"
+}
+# Reports 470/473/474: a etapa 1 marcada como feita não garante que o Python e o FFmpeg ainda estejam aqui (desinstalado,
+# pasta dl apagada); sem eles a geração parava etapas depois. A etapa 1 volta, confere e diz o que falta.
+$marca1 = Join-Path $OUT '1_ferramentas.ok'
+if ((Test-Path -LiteralPath $marca1) -and
+    (-not $py -or -not (Test-Path (Join-Path $R "dl\ffmpeg9\$FFMPEG_NOME\include\libavcodec")) -or
+     -not (Test-Path (Join-Path $R "dl\ffmpeg9\$FFMPEG_NOME\bin\*.dll")))) {
+    Msg "1_ferramentas: $(if (-not $py) { 'nenhum Python 3.10+ achado' } else { 'o FFmpeg sumiu da pasta dl' }); conferindo de novo"
+    Remove-Item -LiteralPath $marca1 -Force
 }
 
 $VS = $null
@@ -1132,7 +1157,9 @@ Etapa '6_compilar' {
     # reports 398/402 (30/10): o build_portatil.cmd roda o vcvars64 com o PATH só do Windows; o Python volta por aqui
     # reports 470/473/474: sem Python escolhido ($py nulo) o Split-Path parava a etapa; o build_portatil.cmd usa então
     # o PATH do jogador, como antes do 932cbf8
-    if ($py) { $env:GOWA_PY_DIR = Split-Path -Parent $py } else { Remove-Item Env:GOWA_PY_DIR -ErrorAction SilentlyContinue }
+    # o mesmo Python vai para o cmake (GOWA_PY_EXE), em vez do find_package(Python3) procurar outro por conta própria
+    if ($py) { $env:GOWA_PY_DIR = Split-Path -Parent $py; $env:GOWA_PY_EXE = $py }
+    else { Remove-Item Env:GOWA_PY_DIR, Env:GOWA_PY_EXE -ErrorAction SilentlyContinue }
     $ok = $false
     try { $ok = Compilar-Build $alvo } catch { if ($alvo -ne 'nativa') { throw }; Anotar $LOG "`r`n=== a nativa parou: $_" }
     if (-not $ok -and $alvo -eq 'nativa') {

@@ -60,11 +60,14 @@ set "NINJA_F=%NINJA:\=/%"
 rem Report 427 (30/10): uma pasta com parênteses ("GodofWarAscension(USA)") fechava o bloco "if (...)" no meio do
 rem comando do cmake ("...ps3recomp foi inesperado neste momento"). Sem bloco, com goto, e os caminhos entre aspas
 rem (uma pasta com espaço partia o argumento em dois).
+rem O Python que o gerar.ps1 escolheu (GOWA_PY_EXE) para o find_package(Python3); sem ele, a busca padrão do cmake
+set "PY_ARG=-DPython3_FIND_REGISTRY=FIRST"
+if not "%GOWA_PY_EXE%"=="" set "PY_ARG=-DPython3_EXECUTABLE=%GOWA_PY_EXE:\=/%"
 if exist "%DIR%\build.ninja" goto compila
 "%CMAKE%" -S "%RAIZ%\port" -B "%DIR%" -G Ninja ^
   "-DCMAKE_MAKE_PROGRAM=%NINJA_F%" ^
   -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_COMPILER=clang-cl -DCMAKE_CXX_COMPILER=clang-cl ^
-  "%PGO_MODO%" "%PGO_PERFIL%" ^
+  "%PGO_MODO%" "%PGO_PERFIL%" "%PY_ARG%" ^
   -DGOWA_PPU_MARCH=x86-64-v3 -DGOWA_SPU_X86_V3=ON "-DGOWA_SPU_MARCH=%MARCH%" -DGOWA_HOST_FMA=ON ^
   -DGOWA_RUNTIME_FAST=ON -DGOWA_SPU_DAZ=ON "-DGOWA_SPU_RZ=%RZ%" ^
   "-DPS3RECOMP_DIR=%RAIZ_F%/ps3recomp" -DPS3RECOMP_FFMPEG_RUNTIME=ON -DPS3RECOMP_BUILD_TESTS=OFF ^
