@@ -18,6 +18,26 @@ As mais novas ficam em cima.
 - **PC con hasta 8 núcleos lógicos:** el juego ahora usa 6 SPU en vez de 7 en estos PC (la séptima competía con las demás por el procesador): +6% de fps en el mismo portátil.
 - **Menos cortes de sonido en PC lentos:** la tarea que mezcla el sonido del juego ahora tiene prioridad en el procesador en PC con 4 o más núcleos lógicos. En el mismo portátil, los bloques de sonido que llegaban tarde bajaron un tercio, sin perder fps.
 
+## 31/10/2026 · 17db39a
+### pt
+- **Compilação com Visual Studio 2022 mais antigo:** corrigido o erro `__mmask16` na versão Portátil.
+- **Datas de arquivo no futuro:** o gerador corrige as datas e, se necessário, refaz a pasta de compilação. Resolve o erro "build.ninja still dirty after 100 tries".
+- **Falha na etapa 5_spu (código 3221225477):** o passo agora é repetido até 3 vezes quando o Python fecha sem gravar nada.
+- **Instalação do Windows SDK:** o gerador solicita permissão de administrador, aguarda o fim da instalação e valida o SDK antes de compilar. Sem permissão, exibe as instruções de instalação manual.
+- Para aplicar as correções, gere o jogo novamente pelo launcher.
+### en
+- **Build with older Visual Studio 2022 installs:** fixed the `__mmask16` error in the Portable version.
+- **File dates in the future:** the generator fixes the dates and, if needed, recreates the build folder. Resolves the "build.ninja still dirty after 100 tries" error.
+- **Failure in step 5_spu (code 3221225477):** the step is now retried up to 3 times when Python exits without writing anything.
+- **Windows SDK installation:** the generator requests administrator permission, waits for the installation to finish and validates the SDK before building. Without permission, it shows the manual installation instructions.
+- To apply the fixes, generate the game again from the launcher.
+### es
+- **Compilación con Visual Studio 2022 más antiguo:** corregido el error `__mmask16` en la versión Portátil.
+- **Fechas de archivo en el futuro:** el generador corrige las fechas y, si es necesario, recrea la carpeta de compilación. Resuelve el error "build.ninja still dirty after 100 tries".
+- **Fallo en el paso 5_spu (código 3221225477):** el paso ahora se repite hasta 3 veces cuando Python se cierra sin escribir nada.
+- **Instalación del Windows SDK:** el generador solicita permiso de administrador, espera a que termine la instalación y valida el SDK antes de compilar. Sin permiso, muestra las instrucciones de instalación manual.
+- Para aplicar las correcciones, genera el juego de nuevo desde el launcher.
+
 ## 30/10/2026 · d17aa34
 ### pt
 - **A geração parava em "6_compilar" com "Split-Path ... o argumento é nulo":** acontecia quando o gerador não achava um Python (por exemplo, só o Python da Microsoft Store). Agora ele aceita esse Python e, sem nenhum, a compilação segue com o PATH do seu PC. Gere de novo pelo launcher.

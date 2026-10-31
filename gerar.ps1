@@ -1118,6 +1118,54 @@ if ($antes['escolhida'] -eq $escolha -and $antes['pasta'] -and (Test-Path (Join-
     if (Test-Path (Join-Path $OUT '6_compilar.ok')) { Msg "versão da build: $(if ($alvo -eq 'nativa') { 'nativa' } else { 'portátil' }) (outra que a anterior): compilando de novo" }
     Remove-Item -LiteralPath (Join-Path $OUT '6_compilar.ok'), (Join-Path $OUT '7_jogar.ok') -Force -ErrorAction SilentlyContinue
 }
+# report 508: arquivos com data no futuro (zip extraído num fuso a oeste de quem o fez, relógio acertado no meio da
+# geração) deixam o build.ninja sempre mais velho que as entradas dele, e o ninja reconfigura até desistir
+# ("manifest 'build.ninja' still dirty after 100 tries"). Traz essas datas para agora; devolve quantos arquivos.
+function Corrigir-Datas {
+    $agora = Get-Date; $n = 0
+    foreach ($p in 'port', 'ps3recomp', 'scripts') {
+        Get-ChildItem -LiteralPath (Join-Path $R $p) -Recurse -File -Force -ErrorAction SilentlyContinue |
+            Where-Object { $_.LastWriteTime -gt $agora.AddMinutes(1) } |
+            ForEach-Object { try { $_.LastWriteTime = $agora; $n++ } catch { } }
+    }
+    return $n
+}
+# o texto apareceu no $LOG depois do byte $de (só a saída da última tentativa)
+function Novo-No-Log([long]$de, [string]$texto) {
+    try {
+        $fs = New-Object IO.FileStream($LOG, 'Open', 'Read', 'ReadWrite')
+        try { $null = $fs.Seek($de, 'Begin'); $s = (New-Object IO.StreamReader($fs)).ReadToEnd() } finally { $fs.Dispose() }
+        return $s.Contains($texto)
+    } catch { return $false }
+}
+# report 511: o "setup.exe modify ... --wait" pelo cmd voltou na hora (o setup.exe pede a elevação e devolve o
+# controle) e a compilação de novo veio antes do componente. Agora o pedido de administrador é do próprio
+# Start-Process, que espera; depois espera os processos do instalador terminarem (até 40 min).
+function Instalar-ComponenteVS([string]$inst, [string]$comp) {
+    $logVs = Join-Path $OUT 'vs_instala.log'
+    $args_ = @('modify', '--installPath', "`"$VS`"", '--add', $comp, '--passive', '--norestart')
+    try {
+        $p = Start-Process -FilePath $inst -ArgumentList $args_ -Verb RunAs -Wait -PassThru -ErrorAction Stop
+        Anotar $logVs "$(Get-Date) setup.exe $($args_ -join ' '): código $($p.ExitCode)"
+    } catch {
+        # o jogador recusou a permissão de administrador (ou o Windows não deixou pedir)
+        Anotar $logVs "$(Get-Date) setup.exe $($args_ -join ' '): não abriu ($($_.Exception.Message))"
+        Msg "o instalador do Visual Studio não abriu ($($_.Exception.Message))"
+        return
+    }
+    $t0 = Get-Date
+    while (((Get-Date) - $t0).TotalMinutes -lt 40) {
+        $vivos = @(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | Where-Object {
+            $_.Name -in 'vs_installer.exe', 'vs_installershell.exe', 'vs_setup_bootstrapper.exe' -or
+            ($_.Name -eq 'setup.exe' -and (-not $_.ExecutablePath -or $_.ExecutablePath -like '*\Microsoft Visual Studio\Installer\*')) })
+        if (-not $vivos.Count) { break }
+        Start-Sleep -Seconds 5
+    }
+}
+# o kernel32.lib de algum Windows SDK 10/11 (o que o vcvars64.bat procura)
+function Tem-SdkWindows {
+    return [bool](Get-ChildItem -Path "${env:ProgramFiles(x86)}\Windows Kits\10\Lib\*\um\x64\kernel32.lib" -ErrorAction SilentlyContinue)
+}
 # uma build (os passos de antes: SDK/CMake que faltam, -j2 se o ninja parar); devolve se o gowa.exe saiu
 function Compilar-Build([string]$a) {
     $bd = Pasta-Build $a; $ba = Args-Build $a
@@ -1125,7 +1173,18 @@ function Compilar-Build([string]$a) {
     Msg "build: $a (código SPU com $(if ($a -eq 'portatil') { '-march=x86-64-v3, contas de float em para-zero' } else { '-march=native' }))"
     $env:GOWA_JOBS = "$Jobs"
     $exe = Join-Path $R "port\$bd\gowa.exe"
+    $nf = Corrigir-Datas
+    if ($nf -gt 0) { Msg "$nf arquivo(s) com data no futuro (relógio ou fuso do zip): data corrigida para agora" }
+    $l0 = (Get-Item -LiteralPath $LOG).Length
     Exec $LOG "`"$R\scripts\build_portatil.cmd`" $ba"
+    # o laço do ninja mesmo assim (relógio do Windows muito errado, ou datas que não deu para corrigir): a pasta da
+    # build some e configura de novo uma vez
+    if (-not (Test-Path $exe) -and (Novo-No-Log $l0 'still dirty after')) {
+        Msg 'o ninja não parou de reconfigurar (datas dos arquivos): apagando a pasta da build e compilando de novo'
+        $null = Corrigir-Datas
+        Remove-Item -LiteralPath (Join-Path $R "port\$bd") -Recurse -Force -ErrorAction SilentlyContinue
+        Exec $LOG "`"$R\scripts\build_portatil.cmd`" $ba"
+    }
     # report 402: Visual Studio sem o Windows SDK (kernel32.lib); report 452: sem o "C++ CMake tools" (o cmake/ninja).
     # Pede ao instalador do VS o componente que falta e tenta de novo.
     $faltaSdk = -not (Test-Path $exe) -and (Select-String -LiteralPath $LOG -Pattern 'GOWA_ERRO_SDK' -SimpleMatch -Quiet)
@@ -1136,8 +1195,11 @@ function Compilar-Build([string]$a) {
             $comp = if ($faltaSdk) { 'Microsoft.VisualStudio.Component.Windows11SDK.22621' } else { 'Microsoft.VisualStudio.Component.VC.CMake.Project' }
             Msg ("o Visual Studio está sem o {0}: instalando o componente (alguns minutos; o Windows pede permissão)" -f
                  $(if ($faltaSdk) { 'Windows SDK' } else { 'C++ CMake tools' }))
-            $null = SemExcecao { cmd /c ("`"$inst`" modify --installPath `"$VS`" --add $comp " +
-                                         "--passive --wait --norestart >> `"$(Join-Path $OUT 'vs_instala.log')`" 2>&1") }
+            Instalar-ComponenteVS $inst $comp
+            if ($faltaSdk -and -not (Tem-SdkWindows)) {
+                Msg ('o Windows SDK continua faltando. Abra o "Visual Studio Installer", clique em Modificar no Build Tools ' +
+                     '2022 e marque "SDK do Windows 11" (em Componentes individuais); depois gere de novo')
+            }
             Remove-Item -LiteralPath (Join-Path $R "port\$bd") -Recurse -Force -ErrorAction SilentlyContinue
             Exec $LOG "`"$R\scripts\build_portatil.cmd`" $ba"
         }
