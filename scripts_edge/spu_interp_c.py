@@ -234,6 +234,8 @@ OPS = {
     'or': por_palavra(lambda x, y: x | y),
     'xor': por_palavra(lambda x, y: x ^ y),
     'andc': por_palavra(lambda x, y: x & ~y),
+    'nor': por_palavra(lambda x, y: ~(x | y)),
+    'xshw': lambda a: [sx(w & 0xFFFF, 16) & M32 for w in a],
     'andi': lambda a, i: [w & (sx(i, 10) & M32) for w in a],
     'ilhu': lambda i: [(i & 0xFFFF) << 16] * 4,
     'iohl': lambda a, i: [w | (i & 0xFFFF) for w in a],

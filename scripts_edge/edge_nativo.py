@@ -51,6 +51,10 @@ GANCHOS = [
     # AVX-512 o AoS empatava com o vk, que fica)
     dict(tipo='antes_vk', pasta='gowajm_0072DF80', fn='gowajm_0072DF80_spu_func_0000A880__b', cab='fn_0000A880.h',
          nat='fn_0000A880_nativo', vk='/*VK 0000A880/0000A950*/', destino='loc_0000A950_fim', fim='loc_0000A950'),
+    # 8930/8B90 (compactação dos registros de 8 bytes): as voltas até antes da última entrada que não pula; o laço
+    # traduzido segue do rótulo com os registradores ajustados
+    dict(tipo='antes', pasta='gowajm_0072DF80', fn='gowajm_0072DF80_spu_func_00008930__b', cab='fn_00008930.h',
+         nat='fn_00008930_nativo', rotulo='loc_00008B90', destino='loc_00008B90'),
 ]
 # laços de um bloco só com os registradores em variáveis locais (laco_local.py: o cabeçalho port/edge/ll_*.h é gerado
 # aqui, do próprio módulo): o núcleo faz o laço inteiro e salta para <rótulo>_fim, depois do desvio; vem antes do vk
