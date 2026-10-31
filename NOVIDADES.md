@@ -4,6 +4,23 @@ O Otavix Launcher mostra este arquivo na página "Novidades" do jogo. Cada atual
 "## <data> · <versão>" e o texto em português (### pt), inglês (### en) e, quando houver, espanhol (### es).
 As mais novas ficam em cima.
 
+## 31/10/2026 · 17db39a
+### pt
+- **A geração parava em "6_compilar" com "unknown type name '__mmask16'":** acontecia com o Clang de instalações mais antigas do Visual Studio 2022 na versão Portátil. Agora compila com elas. Gere de novo pelo launcher.
+- **A geração parava com "manifest 'build.ninja' still dirty after 100 tries":** arquivos com data no futuro (por exemplo, um zip extraído num fuso horário diferente, ou o relógio do Windows acertado no meio da geração) deixavam a compilação recomeçando sem parar. O gerador agora corrige essas datas e, se precisar, refaz a pasta da compilação sozinho.
+- **A geração parava em "5_spu" com o código 3221225477:** o Python fechou sozinho num passo rápido. O passo agora é repetido (até 3 vezes) quando isso acontece sem ter gravado nada.
+- **"o Visual Studio está sem o Windows SDK: instalando o componente" e a geração parava logo depois:** o gerador seguia sem esperar o instalador terminar. Agora ele pede a permissão de administrador, espera a instalação acabar e confere o SDK antes de compilar de novo; se a permissão for negada, diz como instalar à mão.
+### en
+- **Generation stopped at "6_compilar" with "unknown type name '__mmask16'":** it happened with the Clang of older Visual Studio 2022 installs on the Portable version. It now builds with them. Generate again from the launcher.
+- **Generation stopped with "manifest 'build.ninja' still dirty after 100 tries":** files dated in the future (for example, a zip extracted in a different time zone, or the Windows clock corrected during generation) kept the build restarting forever. The generator now fixes those dates and, if needed, redoes the build folder by itself.
+- **Generation stopped at "5_spu" with code 3221225477:** Python closed by itself during a quick step. The step is now repeated (up to 3 times) when that happens before anything was written.
+- **"Visual Studio is missing the Windows SDK: installing the component" and generation stopped right after:** the generator went on without waiting for the installer. It now asks for administrator permission, waits for the install to finish and checks the SDK before building again; if permission is denied, it says how to install it by hand.
+### es
+- **La generación se detenía en "6_compilar" con "unknown type name '__mmask16'":** ocurría con el Clang de instalaciones más antiguas de Visual Studio 2022 en la versión Portátil. Ahora compila con ellas. Genera de nuevo desde el launcher.
+- **La generación se detenía con "manifest 'build.ninja' still dirty after 100 tries":** archivos con fecha en el futuro (por ejemplo, un zip extraído en otra zona horaria, o el reloj de Windows corregido en medio de la generación) dejaban la compilación reiniciándose sin parar. El generador ahora corrige esas fechas y, si hace falta, rehace solo la carpeta de compilación.
+- **La generación se detenía en "5_spu" con el código 3221225477:** Python se cerró solo en un paso rápido. Ahora el paso se repite (hasta 3 veces) cuando eso pasa sin haber escrito nada.
+- **"Visual Studio no tiene el Windows SDK: instalando el componente" y la generación se detenía justo después:** el generador seguía sin esperar a que terminara el instalador. Ahora pide permiso de administrador, espera a que termine la instalación y revisa el SDK antes de compilar de nuevo; si se niega el permiso, explica cómo instalarlo a mano.
+
 ## 30/10/2026 · d17aa34
 ### pt
 - **A geração parava em "6_compilar" com "Split-Path ... o argumento é nulo":** acontecia quando o gerador não achava um Python (por exemplo, só o Python da Microsoft Store). Agora ele aceita esse Python e, sem nenhum, a compilação segue com o PATH do seu PC. Gere de novo pelo launcher.
