@@ -49,10 +49,29 @@ if hasattr(sys.stdout, 'reconfigure'):
 AMB = dict(os.environ, PYTHONIOENCODING='utf-8')
 
 
+def _estado(args):
+    """(data, tamanho) do spu_recomp.c de cada pasta dos argumentos (o que um passe grava)."""
+    est = {}
+    for a in args:
+        c = Path(str(a)) / 'spu_recomp.c'
+        if c.is_file():
+            st = c.stat()
+            est[c] = (st.st_mtime_ns, st.st_size)
+    return est
+
+
 def py(*args):
     cmd = [sys.executable, str(S / args[0])] + [str(a) for a in args[1:]]
     print('>', ' '.join(str(a) for a in args), flush=True)
-    r = subprocess.run(cmd, cwd=str(RAIZ), capture_output=True, text=True, encoding='utf-8', errors='replace', env=AMB)
+    # report 505: o Python caiu com 0xC0000005 num passe trivial (0,06 s, nada a mudar). É o processo que
+    # caiu (memória instável, antivírus), não o script: com os arquivos ainda intactos, roda de novo
+    for tentativa in range(3):
+        antes = _estado(args[1:])
+        r = subprocess.run(cmd, cwd=str(RAIZ), capture_output=True, text=True, encoding='utf-8', errors='replace', env=AMB)
+        caiu = (r.returncode & 0xFFFFFFFF) >= 0xC0000000
+        if not caiu or tentativa == 2 or _estado(args[1:]) != antes:
+            break
+        print(f'   o Python caiu (código 0x{r.returncode & 0xFFFFFFFF:08X}) sem gravar nada: tentando de novo', flush=True)
     saida = (r.stdout + r.stderr).strip().split('\n')
     for ln in saida[-2:]:
         if ln.strip():
