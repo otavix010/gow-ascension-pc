@@ -4,7 +4,7 @@ O Otavix Launcher mostra este arquivo na página "Novidades" do jogo. Cada atual
 "## <data> · <versão>" e o texto em português (### pt), inglês (### en) e, quando houver, espanhol (### es).
 As mais novas ficam em cima.
 
-## 31/10/2026 · a195d68
+## 31/10/2026 · cd7c3d2
 ### pt
 - **Desempenho:** o processamento de geometria (EDGE) roda em código nativo do PC, conferido bit a bit contra o original: cerca de +10% de fps no capítulo 16 num i5-10300H.
 - **PCs com até 8 núcleos lógicos:** o jogo usa 6 SPUs em vez de 7, com cerca de +6% de fps.
