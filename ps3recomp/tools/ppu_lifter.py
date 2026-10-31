@@ -2731,8 +2731,8 @@ class PPULifter:
         if mn == "dcbz":
             ra = _reg_idx(ops[0])
             rb = _reg_idx(ops[1])
-            return (f"{{ uint64_t ea = ({_xea(ra,rb)}) & ~0x7FULL; "
-                    f"memset(vm_base + (uint32_t)ea, 0, 128); }}")
+            # vm_dcbz: under the lock-line lock and with the SPU notice when an SPU has the line reserved
+            return f"vm_dcbz((uint32_t)({_xea(ra,rb)}));"
 
         if mn in ("dcbt", "dcbtst", "dcbf", "dcbst", "dcba", "icbi"):
             return f"/* {mn}: cache hint, no-op */;"

@@ -91,6 +91,16 @@ foreach ($c in @(@('2_jogo', 'jogo\GOWA.elf'), @('3_firmware', 'fw\lle\libsre_im
         Remove-Item -LiteralPath $marca -Force
     }
 }
+# a tradução do PPU (etapa 4) é refeita quando o tradutor muda: o código gerado no PC do jogador é do tradutor da
+# geração anterior, e uma correção nele (31/10: dcbz sob a trava da linha, trava da tela de carregamento) só chega
+# traduzindo de novo. A marca guarda o MD5 do ppu_lifter.py que gerou o código; sem marca, também refaz.
+$marcaLifter = Join-Path $R 'port\recompiled\lifter_md5.txt'
+function Md5-Lifter { (Get-FileHash -LiteralPath (Join-Path $R 'ps3recomp\tools\ppu_lifter.py') -Algorithm MD5).Hash }
+if ((Test-Path -LiteralPath (Join-Path $OUT '4_ppu.ok')) -and
+    (-not (Test-Path -LiteralPath $marcaLifter) -or (Get-Content -LiteralPath $marcaLifter -Raw).Trim() -ne (Md5-Lifter))) {
+    Write-Host '[gerar] 4_ppu: o tradutor do PPU mudou nesta atualização; traduzindo de novo' -ForegroundColor Cyan
+    Remove-Item -LiteralPath (Join-Path $OUT '4_ppu.ok'), (Join-Path $OUT '6_compilar.ok'), (Join-Path $OUT '7_jogar.ok') -Force -ErrorAction SilentlyContinue
+}
 # Report 398 (30/10) e parecidos: um PATH sem a pasta do Windows deixa o cmd, o robocopy e o icacls sem achar
 $sis = @("$env:SystemRoot\System32", $env:SystemRoot, "$env:SystemRoot\System32\Wbem", "$env:SystemRoot\System32\WindowsPowerShell\v1.0")
 $noPath = @($env:PATH -split ';' | ForEach-Object { $_.Trim('"', ' ').TrimEnd('\') })
@@ -1094,6 +1104,7 @@ Etapa '4_ppu' {
     Exec $LOG "python `"$R\scripts\remendos_ppu.py`" aplicar"
     Exec $LOG "python `"$R\scripts\sonda.py`" por func_001C05A4 loc_0039C710 loc_00415914 func_00415120"
     Exec $LOG "python `"$R\scripts\gerar_imports_inc.py`""
+    Set-Content -LiteralPath $marcaLifter -Value (Md5-Lifter) -Encoding ASCII
 }
 
 # ---------------------------------------------------------------------------- SPU

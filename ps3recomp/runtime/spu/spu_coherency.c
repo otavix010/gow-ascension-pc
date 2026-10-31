@@ -384,3 +384,13 @@ void spu_coh_notify_write(uint32_t ea)
 #ifdef __cplusplus
 }
 #endif
+
+/* vm_dcbz (ppu_memory.h) zeroed a line an SPU had reserved: counted, and with GOWA_DCBZ_LOG=1 the first 64 logged */
+static volatile long s_dcbz_reservada;
+void gowa_dcbz_reservada(uint32_t line)
+{
+    static int on = -1;
+    if (on < 0) { const char* e = getenv("GOWA_DCBZ_LOG"); on = e && *e == '1'; }
+    long n = _InterlockedIncrement(&s_dcbz_reservada);
+    if (on && n <= 64) { fprintf(stderr, "[dcbz] linha reservada por uma SPU zerada: 0x%08X (%ld)\n", line, n); fflush(stderr); }
+}
