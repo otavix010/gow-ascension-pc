@@ -14,6 +14,13 @@
 #include <string.h>
 #include "spu_helpers.h"
 
+/* clang before 19 in MSVC mode (the clang-cl of older VS 2022 installs) leaves avx512fintrin.h
+ * out of immintrin.h without -mavx512f, and the mask types come from it (report 498) */
+#if defined(__clang__) && !defined(__AVX512FINTRIN_H)
+typedef unsigned char __mmask8;
+typedef unsigned short __mmask16;
+#endif
+
 typedef struct { __m256i l, h; } vk;
 #define VK__I static inline __attribute__((always_inline))
 
