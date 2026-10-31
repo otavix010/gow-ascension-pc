@@ -4,6 +4,17 @@ O Otavix Launcher mostra este arquivo na página "Novidades" do jogo. Cada atual
 "## <data> · <versão>" e o texto em português (### pt), inglês (### en) e, quando houver, espanhol (### es).
 As mais novas ficam em cima.
 
+## 31/10/2026 · 7dcbe7c
+### pt
+- **Travamento na tela de carregamento:** corrigida uma disputa entre o processador principal e as SPUs ao limpar a fila de trabalhos, que podia deixar o jogo parado na carga.
+- A geração refaz a tradução do código do PPU uma vez, por isso demora mais que o normal.
+### en
+- **Freeze on the loading screen:** fixed a race between the main processor and the SPUs when clearing the job queue, which could leave the game stuck while loading.
+- Generation translates the PPU code again once, so it takes longer than usual.
+### es
+- **Bloqueo en la pantalla de carga:** corregida una disputa entre el procesador principal y las SPU al limpiar la cola de trabajos, que podía dejar el juego detenido en la carga.
+- La generación vuelve a traducir el código de la PPU una vez, por eso tarda más de lo normal.
+
 ## 31/10/2026 · 2b834bc
 ### pt
 - **Erro de link ao gerar de novo (símbolo indefinido):** o gerador confere o conteúdo de cada arquivo do código e recompila o que mudou, mesmo quando a atualização chega com data antiga. A primeira geração depois desta atualização recompila tudo.
