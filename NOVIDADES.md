@@ -4,6 +4,14 @@ O Otavix Launcher mostra este arquivo na página "Novidades" do jogo. Cada atual
 "## <data> · <versão>" e o texto em português (### pt), inglês (### en) e, quando houver, espanhol (### es).
 As mais novas ficam em cima.
 
+## 31/10/2026 · 6dd163d
+### pt
+- **Geração:** se a compilação falhar ao gerar de novo, o launcher mostra o erro em vez de seguir com a versão anterior do jogo.
+### en
+- **Generation:** if compiling fails when generating again, the launcher shows the error instead of continuing with the previous version of the game.
+### es
+- **Generación:** si la compilación falla al generar de nuevo, el launcher muestra el error en lugar de seguir con la versión anterior del juego.
+
 ## 31/10/2026 · cd7c3d2
 ### pt
 - **Desempenho:** o processamento de geometria (EDGE) roda em código nativo do PC, conferido bit a bit contra o original: cerca de +10% de fps no capítulo 16 num i5-10300H.
