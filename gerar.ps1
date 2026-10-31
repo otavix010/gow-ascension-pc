@@ -209,6 +209,12 @@ function Escolher-Python {
         Msg "o Python em $semPip não tem pip e não deu para instalar; segue sem ele (o AES vem do Windows)"
         return $semPip
     }
+    # reports 470/473/474: o Python da Microsoft Store (real, não o atalho que abre a loja) só existe em \WindowsApps\;
+    # por último, ele serve se rodar e for 3.10+ (o atalho falha na conferência da versão)
+    foreach ($c in ($cands | Where-Object { $_ -match '\\WindowsApps\\' } | Select-Object -Unique)) {
+        $v = SemExcecao { & $c -c "import sys; print(sys.version_info[0]*100+sys.version_info[1])" 2>$null }
+        if ("$(@($v)[0])" -match '^\d+$' -and [int]"$(@($v)[0])" -ge 310) { return $c }
+    }
     return $null
 }
 $py = Escolher-Python
@@ -1124,7 +1130,9 @@ Etapa '6_compilar' {
     $env:GOWA_VS = $VS
     $env:FFMPEG_DIR = Join-Path $R "dl\ffmpeg9\$FFMPEG_NOME"
     # reports 398/402 (30/10): o build_portatil.cmd roda o vcvars64 com o PATH só do Windows; o Python volta por aqui
-    $env:GOWA_PY_DIR = Split-Path -Parent $py
+    # reports 470/473/474: sem Python escolhido ($py nulo) o Split-Path parava a etapa; o build_portatil.cmd usa então
+    # o PATH do jogador, como antes do 932cbf8
+    if ($py) { $env:GOWA_PY_DIR = Split-Path -Parent $py } else { Remove-Item Env:GOWA_PY_DIR -ErrorAction SilentlyContinue }
     $ok = $false
     try { $ok = Compilar-Build $alvo } catch { if ($alvo -ne 'nativa') { throw }; Anotar $LOG "`r`n=== a nativa parou: $_" }
     if (-not $ok -and $alvo -eq 'nativa') {
