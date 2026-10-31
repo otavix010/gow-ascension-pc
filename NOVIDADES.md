@@ -6,17 +6,17 @@ As mais novas ficam em cima.
 
 ## 31/10/2026 · a195d68
 ### pt
-- **Desempenho:** o processamento de geometria (EDGE) roda em código nativo do PC, conferido bit a bit contra o original: cerca de +23% de fps no capítulo 16 num i5-10300H.
+- **Desempenho:** o processamento de geometria (EDGE) roda em código nativo do PC, conferido bit a bit contra o original: cerca de +10% de fps no capítulo 16 num i5-10300H.
 - **PCs com até 8 núcleos lógicos:** o jogo usa 6 SPUs em vez de 7, com cerca de +6% de fps.
 - **Áudio:** a mixagem de som tem prioridade no processador em PCs com 4 ou mais núcleos lógicos, com menos cortes em PCs lentos.
 - Para aplicar, gere o jogo novamente pelo launcher.
 ### en
-- **Performance:** geometry processing (EDGE) runs as native PC code, checked bit for bit against the original: about +23% fps in chapter 16 on an i5-10300H.
+- **Performance:** geometry processing (EDGE) runs as native PC code, checked bit for bit against the original: about +10% fps in chapter 16 on an i5-10300H.
 - **PCs with up to 8 logical cores:** the game uses 6 SPUs instead of 7, for about +6% fps.
 - **Audio:** sound mixing gets processor priority on PCs with 4 or more logical cores, with fewer drops on slow PCs.
 - To apply, generate the game again from the launcher.
 ### es
-- **Rendimiento:** el procesamiento de geometría (EDGE) se ejecuta en código nativo de PC, comprobado bit a bit contra el original: cerca de +23% de fps en el capítulo 16 en un i5-10300H.
+- **Rendimiento:** el procesamiento de geometría (EDGE) se ejecuta en código nativo de PC, comprobado bit a bit contra el original: cerca de +10% de fps en el capítulo 16 en un i5-10300H.
 - **PC con hasta 8 núcleos lógicos:** el juego usa 6 SPU en vez de 7, con cerca de +6% de fps.
 - **Audio:** la mezcla de sonido tiene prioridad en el procesador en PC con 4 o más núcleos lógicos, con menos cortes en PC lentos.
 - Para aplicar, genera el juego de nuevo desde el launcher.
