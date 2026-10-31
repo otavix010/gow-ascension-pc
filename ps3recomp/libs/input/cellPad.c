@@ -472,6 +472,10 @@ typedef struct {
     PadHostState st;
     u16  apertados;         /* buttons seen pressed since the last poll */
     u8   flick_x, flick_y;  /* the right stick's farthest point since the last poll */
+    volatile LONG porta;    /* the host port pad_poll_sony gave it (-1: none) */
+    HANDLE hw;              /* a handle of its own for the output reports (vibration), next to the reader's */
+    int  out_len;           /* the output report's length (HidP_GetCaps) */
+    int  mot_l, mot_s;      /* the motors last sent (-1: nothing yet) */
 } PadSony;
 static PadSony s_sony[PAD_SONY_MAX];
 static volatile LONG s_sony_vivo;
@@ -535,6 +539,11 @@ static DWORD WINAPI pad_sony_leitor(LPVOID arg)
     HANDLE h = CreateFileW(s->caminho, GENERIC_READ | GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_EXISTING, 0, NULL);
     if (h == INVALID_HANDLE_VALUE)
         h = CreateFileW(s->caminho, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_EXISTING, 0, NULL);
+    /* the vibration writes on another handle: on the reader's, a synchronous WriteFile would wait for its ReadFile */
+    HANDLE hw = CreateFileW(s->caminho, GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_EXISTING, 0, NULL);
+    AcquireSRWLockExclusive(&s->lock);
+    s->hw = hw;
+    ReleaseSRWLockExclusive(&s->lock);
     if (h != INVALID_HANDLE_VALUE) {
         u8 r[128];
         DWORD n;
@@ -555,6 +564,9 @@ static DWORD WINAPI pad_sony_leitor(LPVOID arg)
     }
     AcquireSRWLockExclusive(&s->lock);
     s->dados = 0;
+    if (s->hw != INVALID_HANDLE_VALUE && s->hw) CloseHandle(s->hw);
+    s->hw = INVALID_HANDLE_VALUE;
+    InterlockedExchange(&s->porta, -1);
     ReleaseSRWLockExclusive(&s->lock);
     InterlockedExchange(&s->vivo, 0);   /* unplugged: the next search opens it again */
     return 0;
@@ -633,6 +645,9 @@ static DWORD WINAPI pad_sony_busca(LPVOID arg)
                     s->caminho[511] = 0;
                     s->ds5 = ds5;
                     s->bt = caps.InputReportByteLength != 64;
+                    s->out_len = caps.OutputReportByteLength;
+                    s->porta = -1;
+                    s->mot_l = s->mot_s = -1;
                     HANDLE t = CreateThread(NULL, 0, pad_sony_leitor, s, 0, NULL);
                     if (t) CloseHandle(t); else InterlockedExchange(&s->vivo, 0);
                     break;
@@ -661,6 +676,7 @@ static void pad_poll_sony(void)
         s->apertados = 0;
         s->flick_x = s->flick_y = 128;
         ReleaseSRWLockExclusive(&s->lock);
+        InterlockedExchange(&s->porta, -1);
         if (!tem) continue;
         while (porta < PAD_MAX_HOST_PORTS && s_host_state[porta].connected) porta++;
         if (porta >= PAD_MAX_HOST_PORTS) return;
@@ -668,6 +684,7 @@ static void pad_poll_sony(void)
         st.buttons |= extra;
         if (pad_sony_longe(st.analog_rx, st.analog_ry) < 64 && pad_sony_longe(fx, fy) >= 64) { st.analog_rx = fx; st.analog_ry = fy; }
         s_host_state[porta] = st;
+        InterlockedExchange(&s->porta, porta);
         if (porta == 0) {
             s_xinput_ligado = 1;
             if (st.buttons || st.trigger_l2 > 40 || st.trigger_r2 > 40 || pad_sony_longe(st.analog_lx, st.analog_ly) > 64 ||
@@ -676,6 +693,37 @@ static void pad_poll_sony(void)
         }
         porta++;
     }
+}
+
+/* Report 571 (31/10): the vibration of a Sony controller read from HID. cellPadSetActDirect only reached XInput
+ * (and sent it to the XInput index of a port that was the Sony's). Over USB, the DualSense's output report 0x02
+ * (flag 0x01 "compatible vibration" + 0x02 "haptics select", motors in bytes 3 and 4) and the DualShock 4's 0x05
+ * (flag 0x01, motors in bytes 4 and 5), as Linux's hid-playstation sends them; written only when the motors change.
+ * Bluetooth (0x31/0x11, with a CRC32) is left for when it can be tried on a controller. 1 = the port is a Sony's. */
+static int pad_sony_vibrar(u32 porta, u8 grande, u8 pequeno)
+{
+    for (int k = 0; k < PAD_SONY_MAX; k++) {
+        PadSony* s = &s_sony[k];
+        if (!s->vivo || s->porta != (LONG)porta) continue;
+        AcquireSRWLockExclusive(&s->lock);
+        if (!s->bt && s->hw && s->hw != INVALID_HANDLE_VALUE && s->out_len >= 6 && s->out_len <= 128 &&
+            (s->mot_l != grande || s->mot_s != pequeno)) {
+            u8 r[128];
+            memset(r, 0, sizeof r);
+            if (s->ds5) { r[0] = 0x02; r[1] = 0x03; r[3] = pequeno; r[4] = grande; }
+            else        { r[0] = 0x05; r[1] = 0x01; r[4] = pequeno; r[5] = grande; }
+            DWORD n = 0;
+            if (WriteFile(s->hw, r, (DWORD)s->out_len, &n, NULL)) { s->mot_l = grande; s->mot_s = pequeno; }
+            else {
+                static int avisou;
+                if (!avisou++) fprintf(stderr, "[controle] vibração do %s não foi enviada (erro %lu)\n",
+                                       s->ds5 ? "DualSense" : "DualShock 4", GetLastError());
+            }
+        }
+        ReleaseSRWLockExclusive(&s->lock);
+        return 1;
+    }
+    return 0;
 }
 
 /* Map XInput buttons to PS3 CELL_PAD_CTRL_* (also read by the sampler thread above) */
@@ -1665,12 +1713,20 @@ s32 cellPadSetActDirect(u32 port_no, CellPadActParam* param)
 
     param = GUEST_PTR(param, CellPadActParam*);
 
+    /* the small motor only turns on or off (0 or 1, the SDK's CellPadActParam); the large one is a speed 0-255.
+     * Scaled as a speed, the small motor's 1 was 257 of 65535: nothing felt. */
+    const u8 pequeno = param->motor[CELL_PAD_ACTUATOR_PARAM_SMALL] ? 255 : 0;
+    const u8 grande = param->motor[CELL_PAD_ACTUATOR_PARAM_LARGE];
+    (void)pequeno; (void)grande;
+    { static int primeira = 1;
+      if (primeira && (grande || pequeno)) { primeira = 0; printf("[cellPad] vibração pedida pelo jogo (porta %u: grande %u, pequeno %u)\n", port_no, grande, pequeno); } }
+
 #if PAD_BACKEND_XINPUT
-    /* Map to XInput vibration */
-    if (port_no < PAD_MAX_HOST_PORTS && s_host_state[port_no].connected) {
+    /* Map to XInput vibration (or to the Sony controller read from HID on that port) */
+    if (port_no < PAD_MAX_HOST_PORTS && s_host_state[port_no].connected && !pad_sony_vibrar(port_no, grande, pequeno)) {
         XINPUT_VIBRATION vib;
-        vib.wLeftMotorSpeed  = (WORD)(param->motor[CELL_PAD_ACTUATOR_PARAM_LARGE] * 257);
-        vib.wRightMotorSpeed = (WORD)(param->motor[CELL_PAD_ACTUATOR_PARAM_SMALL] * 257);
+        vib.wLeftMotorSpeed  = (WORD)(grande * 257);
+        vib.wRightMotorSpeed = (WORD)(pequeno * 257);
         XInputSetState((DWORD)port_no, &vib);
     }
 #endif
@@ -1679,8 +1735,8 @@ s32 cellPadSetActDirect(u32 port_no, CellPadActParam* param)
     if (port_no < PAD_MAX_HOST_PORTS && s_sdl_controllers[port_no]) {
         SDL_GameControllerRumble(
             s_sdl_controllers[port_no],
-            (Uint16)(param->motor[CELL_PAD_ACTUATOR_PARAM_LARGE] * 257),
-            (Uint16)(param->motor[CELL_PAD_ACTUATOR_PARAM_SMALL] * 257),
+            (Uint16)(grande * 257),
+            (Uint16)(pequeno * 257),
             100 /* duration ms */
         );
     }
