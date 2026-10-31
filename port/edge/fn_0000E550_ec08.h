@@ -306,7 +306,12 @@ static inline int ec08_rapido(spu_context* ctx, uint32_t s, uint32_t m_out, uint
     for (int k = 0; k < np; k++) {
         const uint8_t* q0 = ls + ((s + 16u * (uint32_t)k) & SPU_LS_MASK);
         const uint8_t* q1 = ls + ((s + 16u * (uint32_t)k + 8u) & SPU_LS_MASK);
-        const __m256 W = _mm256_mul_ps(_mm256_cvtepi32_ps(_mm256_setr_epi32(q0[0], q0[2], q0[4], q0[6], q1[0], q1[2], q1[4], q1[6])), k91v);
+        /* os 8 pesos (bytes pares dos dois vértices, 16 bytes seguidos): uma carga e um pshufb em vez de 8 bytes soltos */
+        const __m256i wi = q1 == q0 + 8
+            ? _mm256_cvtepu8_epi32(_mm_shuffle_epi8(_mm_loadu_si128((const __m128i*)q0),
+                                                    _mm_setr_epi8(0, 2, 4, 6, 8, 10, 12, 14, -1, -1, -1, -1, -1, -1, -1, -1)))
+            : _mm256_setr_epi32(q0[0], q0[2], q0[4], q0[6], q1[0], q1[2], q1[4], q1[6]);
+        const __m256 W = _mm256_mul_ps(_mm256_cvtepi32_ps(wi), k91v);
         __m256 Wb[4];
         for (int b = 0; b < 4; b++) Wb[b] = _mm256_permutevar8x32_ps(W, _mm256_setr_epi32(b, b, b, b, 4 + b, 4 + b, 4 + b, 4 + b));
         __m256 L[3];
