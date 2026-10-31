@@ -4,6 +4,20 @@ O Otavix Launcher mostra este arquivo na página "Novidades" do jogo. Cada atual
 "## <data> · <versão>" e o texto em português (### pt), inglês (### en) e, quando houver, espanhol (### es).
 As mais novas ficam em cima.
 
+## 30/10/2026 · d17aa34
+### pt
+- **A geração parava em "6_compilar" com "Split-Path ... o argumento é nulo":** acontecia quando o gerador não achava um Python (por exemplo, só o Python da Microsoft Store). Agora ele aceita esse Python e, sem nenhum, a compilação segue com o PATH do seu PC. Gere de novo pelo launcher.
+- **Geração retomada mais robusta:** uma etapa marcada como feita cujos arquivos sumiram agora é refeita sozinha, e o gerador confere de novo o Python e o FFmpeg e completa o PATH do Windows quando faltar.
+- **Travadinhas em sessões longas:** com a memória de vídeo cheia, o cache de texturas agora libera as mais antigas de verdade (antes só baixava o limite), o que deve reduzir os engasgos.
+### en
+- **Generation stopped at "6_compilar" with "Split-Path ... the argument is null":** it happened when the generator could not find a Python (for example, only the Microsoft Store one). It now accepts that Python and, with none, the build goes on with your PC's PATH. Generate again from the launcher.
+- **More robust resumed generation:** a step marked as done whose files went missing is now redone by itself, and the generator checks Python and FFmpeg again and completes the Windows PATH when it is missing.
+- **Stutters in long sessions:** with video memory full, the texture cache now really frees the oldest textures (before, it only lowered the limit), which should reduce the hitches.
+### es
+- **La generación se detenía en "6_compilar" con "Split-Path ... el argumento es nulo":** ocurría cuando el generador no encontraba un Python (por ejemplo, solo el de Microsoft Store). Ahora acepta ese Python y, sin ninguno, la compilación sigue con el PATH de tu PC. Genera de nuevo desde el launcher.
+- **Generación retomada más robusta:** un paso marcado como hecho cuyos archivos desaparecieron ahora se rehace solo, y el generador revisa de nuevo Python y FFmpeg y completa el PATH de Windows cuando falte.
+- **Tirones en sesiones largas:** con la memoria de vídeo llena, la caché de texturas ahora libera de verdad las más antiguas (antes solo bajaba el límite), lo que debería reducir los tirones.
+
 ## 30/10/2026 · dc55a5c
 ### pt
 - **Escolha da versão do executável:** a nova opção "Versão do executável" do launcher escolhe entre Automático (o padrão: o gerador escolhe pelo seu processador), Portátil (AVX2, a que quase todos usam) e Nativa (compilada para o seu processador). Trocar de versão gera de novo só a compilação. Se a Nativa não compilar no seu PC, o gerador faz a Portátil no lugar e avisa.
