@@ -127,6 +127,30 @@ if (-not $Disco -and ($Refazer -or -not (Test-Path $marcaJogo))) {
 if (-not $Update) { $Update = 'auto' }
 if (-not $Firmware) { $Firmware = 'auto' }
 # baixa um arquivo grande (curl.exe do Windows; senão Invoke-WebRequest), por um .part
+# reports 546-549: o curl baixava em silêncio (o FFmpeg tem 77 MB, o update 235 MB) e o launcher mostrava só o
+# cabeçalho da etapa durante minutos; o jogador achou que travou e cancelou (o cancelar sai com código 1, sem
+# mensagem). O tamanho baixado vai para o log da etapa a cada 3 s, que é a linha que o launcher mostra.
+function Curl-Com-Progresso([string]$exe, [string]$url, [string]$part, [string]$extra) {
+    $si = New-Object Diagnostics.ProcessStartInfo
+    $si.FileName = $exe
+    $si.Arguments = "-L --fail --retry 3 --silent --show-error $extra -o `"$part`" `"$url`""
+    $si.UseShellExecute = $false; $si.CreateNoWindow = $true; $si.RedirectStandardError = $true
+    $p = [Diagnostics.Process]::Start($si)
+    $err = $p.StandardError.ReadToEndAsync()
+    $nome = Split-Path -Leaf ($part -replace '\.part$', '')
+    $ultimo = -1
+    while (-not $p.WaitForExit(3000)) {
+        $mb = 0; try { $mb = [int]((Get-Item -LiteralPath $part -ErrorAction Stop).Length / 1MB) } catch { }
+        if ($mb -ne $ultimo) {
+            $ultimo = $mb
+            if ($script:LOG) { Anotar $script:LOG "baixando $nome... $mb MB" }
+        }
+    }
+    $p.WaitForExit()
+    $e = $err.Result
+    if ($e -and $script:LOG) { Anotar $script:LOG $e.Trim() }
+    return $p.ExitCode
+}
 function Baixar([string]$url, [string]$destino) {
     New-Item -ItemType Directory -Force (Split-Path $destino) | Out-Null
     $part = "$destino.part"
@@ -137,11 +161,11 @@ function Baixar([string]$url, [string]$destino) {
         # report 453: o Windows (antivírus ou política) não deixava o curl.exe rodar ("Acesso negado"): o PowerShell
         # parava a geração na hora. Agora isso cai no download pelo próprio PowerShell, abaixo.
         try {
-            SemExcecao { & $curl.Source -L --fail --retry 3 --silent --show-error -o $part $url }
+            $cod = Curl-Com-Progresso $curl.Source $url $part ''
             # curl 35 (CRYPT_E_NO_REVOCATION_CHECK): a rede ou o antivírus do jogador não deixa o schannel consultar a
             # revogação do certificado (report 47 do launcher, no Dante); de novo sem essa consulta, o certificado ainda conferido
-            if ($LASTEXITCODE -eq 35) { SemExcecao { & $curl.Source -L --fail --retry 3 --silent --show-error --ssl-no-revoke -o $part $url } }
-            if ($LASTEXITCODE -ne 0) { $erroCurl = "curl $LASTEXITCODE" }
+            if ($cod -eq 35) { $cod = Curl-Com-Progresso $curl.Source $url $part '--ssl-no-revoke' }
+            if ($cod -ne 0) { $erroCurl = "curl $cod" }
         } catch {
             $erroCurl = "o curl.exe não pôde rodar: $($_.Exception.Message)"
         }
