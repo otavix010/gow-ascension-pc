@@ -12349,7 +12349,7 @@ int rsx_live_draw_framegen_on(void);
  * ficam guardadas (a saída, os 2 primeiros e os 6 últimos "[tela]", os "[tela-alvos]" e os "[modulos]") e
  * rsx_live_draw_resumo_tela() reimprime tudo ao fechar o jogo, como "[resumo-tela]". */
 #define LD_RES_LIN 176
-static char s_res_saida[LD_RES_LIN], s_res_ini[2][LD_RES_LIN], s_res_ult[6][LD_RES_LIN], s_res_alvos[16][LD_RES_LIN], s_res_mods[12][LD_RES_LIN];
+static char s_res_saida[LD_RES_LIN], s_res_ini[2][LD_RES_LIN], s_res_ult[6][LD_RES_LIN], s_res_alvos[16][LD_RES_LIN], s_res_mods[14][LD_RES_LIN];
 static unsigned s_res_n_tela, s_res_n_alvos, s_res_n_mods;
 static void ld_res_copia(char* d, const char* s)
 {
@@ -12372,7 +12372,7 @@ static void ld_res_linha(int cat, int novo, const char* fmt, ...)
         s_res_n_tela++;
         break;
     case 2: if (novo) s_res_n_alvos = 0; if (s_res_n_alvos < 16) ld_res_copia(s_res_alvos[s_res_n_alvos++], b); break;
-    default: if (novo) s_res_n_mods = 0; if (s_res_n_mods < 12) ld_res_copia(s_res_mods[s_res_n_mods++], b); break;
+    default: if (novo) s_res_n_mods = 0; if (s_res_n_mods < 14) ld_res_copia(s_res_mods[s_res_n_mods++], b); break;
     }
 }
 void rsx_live_draw_resumo_tela(void)
@@ -12387,6 +12387,8 @@ void rsx_live_draw_resumo_tela(void)
     }
     for (unsigned i = 0; i < s_res_n_alvos; i++) fprintf(stderr, "[resumo-tela] %s\n", s_res_alvos[i]);
     for (unsigned i = 0; i < s_res_n_mods; i++) fprintf(stderr, "[resumo-tela] %s\n", s_res_mods[i]);
+    { extern void cellVdec_resumo(char* b, size_t n); char v[256]; cellVdec_resumo(v, sizeof v);
+      fprintf(stderr, "[resumo-tela] [video] ao fechar: %s\n", v); }
 }
 typedef struct { ID3D12Resource* rb; UINT64 size, offset; u64 fence; u32 frame, w, h, pitch; DXGI_FORMAT fmt; int busy; } ld_tela_rb;
 static ld_tela_rb s_tela[2];   /* 0 = a surface do jogo, 1 = o backbuffer */
@@ -12532,15 +12534,18 @@ static void ld_log_modulos(const char* quando)
     if (!K32EnumProcessModules(GetCurrentProcess(), mods, sizeof mods, &nb)) return;
     char win[MAX_PATH] = {0}; GetWindowsDirectoryA(win, sizeof win);
     const size_t lw = strlen(win);
+    /* o menu é um vídeo: o estado do decodificador entra junto (cellVdec.c) */
+    { extern void cellVdec_resumo(char* b, size_t n); char v[256]; cellVdec_resumo(v, sizeof v);
+      ld_res_linha(3, 1, "[video] %s: %s\n", quando, v); }
     int n = 0;
     for (DWORD k = 0; k < nb / sizeof(HMODULE); k++) {
         char cam[MAX_PATH];
         if (!K32GetModuleFileNameExA(GetCurrentProcess(), mods[k], cam, sizeof cam)) continue;
         if (lw && !_strnicmp(cam, win, lw)) continue;   /* do Windows */
-        ld_res_linha(3, n == 0, "[modulos] %s: %s\n", quando, cam);
+        ld_res_linha(3, 0, "[modulos] %s: %s\n", quando, cam);
         n++;
     }
-    ld_res_linha(3, n == 0, "[modulos] %s: %d DLLs fora do Windows\n", quando, n);
+    ld_res_linha(3, 0, "[modulos] %s: %d DLLs fora do Windows\n", quando, n);
 }
 static void ld_tela_diag(ID3D12Resource* src, D3D12_RESOURCE_STATES src_state, ID3D12Resource* bb, D3D12_RESOURCE_STATES bb_state)
 {

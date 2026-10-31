@@ -74,6 +74,20 @@ static void vdec_notify(CellVdecHandle handle, u32 msg_type, s32 msg_data)
                        (u64)(s64)msg_data, (u64)v->cbArg, 0, 0, 0, 0);
 }
 
+/* GOWA (31/10): reports 492/519/476/497 -- tela preta com som. O menu do jogo é um vídeo, e o quadro que ele
+ * desenha vem do GetPicture; o report só leva o fim do log, sem o Open. cellVdec_resumo() entra no resumo da
+ * tela preta (rsx_live_draw.c): decodificadores abertos (com libavcodec ou sem, e então quadros pretos de
+ * propósito), quadros decodificados e entregues, o formato pedido e o brilho médio (Y) do último entregue. */
+static volatile long s_vd_abertos, s_vd_ff, s_vd_quadros, s_vd_entregues, s_vd_pretos;
+static u32 s_vd_fmt = ~0u, s_vd_dst, s_vd_w, s_vd_h;
+static int s_vd_y = -1;
+void cellVdec_resumo(char* b, size_t n)
+{
+    snprintf(b, n, "abertos %ld (ff %ld), decod %ld, entregues %ld, Y %d, fmt %d %ux%u @0x%08X, pretos %ld",
+             s_vd_abertos, s_vd_ff, s_vd_quadros, s_vd_entregues, s_vd_y, (int)s_vd_fmt, s_vd_w, s_vd_h, s_vd_dst,
+             s_vd_pretos);
+}
+
 /* ---------------------------------------------------------------------------
  * Decoder path (libavcodec present)
  * -----------------------------------------------------------------------*/
@@ -128,6 +142,7 @@ static void vdec_on_picture(void* ctx, const VdecFfPicture* pic)
     q->item.width     = (u16)pic->width;
     q->item.height    = (u16)pic->height;
     v->qCount++;
+    __atomic_add_fetch(&s_vd_quadros, 1, __ATOMIC_RELAXED);
     v->newPics++;
 }
 
@@ -189,6 +204,8 @@ s32 cellVdecOpen(const CellVdecType* type, const CellVdecResource* res,
             s_vdec[i].cbFunc = cb_ea ? vm_read32(cb_ea + 0) : 0;
             s_vdec[i].cbArg  = cb_ea ? vm_read32(cb_ea + 4) : 0;
             s_vdec[i].ff = vdec_ff_open(codec_type);
+            __atomic_add_fetch(&s_vd_abertos, 1, __ATOMIC_RELAXED);
+            if (s_vdec[i].ff) __atomic_add_fetch(&s_vd_ff, 1, __ATOMIC_RELAXED);
             vm_write32((u32)(uintptr_t)handle, (u32)i);
             printf("[cellVdec] Open -> handle=%u\n", i);
             if (s_vdec[i].ff)
@@ -448,9 +465,19 @@ static s32 vdec_take_picture(VdecSlot* v, u32 dst, u32 type, u32 matrix, u8 alph
     VdecPic* q = &v->queue[v->qHead];
     v->qHead = (v->qHead + 1) % VDEC_QUEUE;
     v->qCount--;
-    if (dst)                                           /* NULL: a skip */
+    if (dst) {                                         /* NULL: a skip */
         vdec_store_picture(dst, q->yuv, q->item.width, q->item.height,
                            type, matrix, alpha);
+        /* cellVdec_resumo: o Y médio de uma amostra do quadro (1 a cada 61 bytes do plano Y) */
+        const size_t ny = (size_t)q->item.width * q->item.height;
+        if (q->yuv && ny) {
+            unsigned long long s = 0, k = 0;
+            for (size_t i = 0; i < ny; i += 61, k++) s += q->yuv[i];
+            s_vd_y = (int)(s / k);
+        }
+        s_vd_fmt = type; s_vd_dst = dst; s_vd_w = q->item.width; s_vd_h = q->item.height;
+        __atomic_add_fetch(&s_vd_entregues, 1, __ATOMIC_RELAXED);
+    }
     free(q->yuv);
     q->yuv = NULL;
     return CELL_OK;
@@ -478,6 +505,7 @@ s32 cellVdecGetPicture(CellVdecHandle handle, const void* format, void* outBuff)
     v->hasPic = 0;
     if (!dst)
         return CELL_OK;                                /* a skip: consume only */
+    __atomic_add_fetch(&s_vd_pretos, 1, __ATOMIC_RELAXED);
 
     u32 type  = vm_read32(fmt_ea + 0);
     u8  alpha = vm_read8(fmt_ea + 8);
