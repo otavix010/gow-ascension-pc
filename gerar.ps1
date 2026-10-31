@@ -93,9 +93,9 @@ foreach ($c in @(@('2_jogo', 'jogo\GOWA.elf'), @('3_firmware', 'fw\lle\libsre_im
 }
 # a tradução do PPU (etapa 4) é refeita quando o tradutor muda: o código gerado no PC do jogador é do tradutor da
 # geração anterior, e uma correção nele (31/10: dcbz sob a trava da linha, trava da tela de carregamento) só chega
-# traduzindo de novo. A marca guarda o MD5 do ppu_lifter.py que gerou o código; sem marca, também refaz.
+# traduzindo de novo. A marca guarda o MD5 do ppu_lifter.py e do preâmbulo (port\ppu_recomp_preambulo.h) que geraram o código; sem marca, também refaz.
 $marcaLifter = Join-Path $R 'port\recompiled\lifter_md5.txt'
-function Md5-Lifter { (Get-FileHash -LiteralPath (Join-Path $R 'ps3recomp\tools\ppu_lifter.py') -Algorithm MD5).Hash }
+function Md5-Lifter { (@('ps3recomp\tools\ppu_lifter.py', 'port\ppu_recomp_preambulo.h') | ForEach-Object { (Get-FileHash -LiteralPath (Join-Path $R $_) -Algorithm MD5).Hash }) -join '' }
 if ((Test-Path -LiteralPath (Join-Path $OUT '4_ppu.ok')) -and
     (-not (Test-Path -LiteralPath $marcaLifter) -or (Get-Content -LiteralPath $marcaLifter -Raw).Trim() -ne (Md5-Lifter))) {
     Write-Host '[gerar] 4_ppu: o tradutor do PPU mudou nesta atualização; traduzindo de novo' -ForegroundColor Cyan

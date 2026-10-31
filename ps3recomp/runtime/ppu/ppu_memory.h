@@ -244,28 +244,6 @@ static inline int vm_block_reserved(uint32_t guest_dst, size_t len)
     return 0;
 }
 
-/* dcbz: zeros the 128-byte line as one store. It was a bare memset, outside the lock-line lock and with no
- * notice to an SPU holding a reservation on the line: zeroing could land inside an SPU PUTLLC's compare and
- * commit (the SPURS job queues are reset with dcbz loops while the SPUs poll them). Same path as VM_WRITE_COH.
- * GOWA_DCBZ_LOG=1: the first lines zeroed while an SPU had them reserved go to the log. */
-#ifdef __cplusplus
-extern "C"
-#endif
-void gowa_dcbz_reservada(uint32_t line);
-static inline void vm_dcbz(uint32_t ea)
-{
-    const uint32_t line = ea & ~127u;
-    if (spu_coh_is_reserved(line)) {
-        spu_lockline_lock_ea(line);
-        memset(vm_ptr8(line), 0, 128);
-        spu_coh_notify_write(line);
-        spu_lockline_unlock_ea(line);
-        gowa_dcbz_reservada(line);
-    } else {
-        memset(vm_ptr8(line), 0, 128);
-    }
-}
-
 static inline void vm_block_notify(uint32_t guest_dst, size_t len)
 {
     uint32_t first = guest_dst & ~127u;

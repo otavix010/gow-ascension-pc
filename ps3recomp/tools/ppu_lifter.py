@@ -236,6 +236,33 @@ static inline int vm_inl_st_ok(uint32_t ea, uint32_t n)
     return __builtin_expect(vm_inline_st_ok, 1) && vm_inl_ok(ea, n) &&
            !(spu_coh_armed && ((spu_coh_bitmap[ea >> 10] >> ((ea >> 7) & 7u)) & 1u));
 }
+/* GOWA (31/10): dcbz zeroes the 128-byte line as one store. A bare memset ran outside the lock-line lock and
+ * never told an SPU holding a reservation on the line (the SPURS job queues are reset with dcbz loops while
+ * the SPUs run GETLLAR/PUTLLC on them). On a reserved line: under that line's lock, with the SPU notice.
+ * GOWA_DCBZ_LOG=1 logs the first reserved lines zeroed (spu_coherency.c). */
+#ifdef __cplusplus
+extern "C" {
+#endif
+void spu_lockline_lock_ea(uint32_t addr);
+void spu_lockline_unlock_ea(uint32_t addr);
+void spu_coh_notify_write(uint32_t addr);
+void gowa_dcbz_reservada(uint32_t line);
+#ifdef __cplusplus
+}
+#endif
+static inline void vm_dcbz(uint32_t ea)
+{
+    const uint32_t line = ea & ~127u;
+    if (spu_coh_armed && ((spu_coh_bitmap[line >> 10] >> ((line >> 7) & 7u)) & 1u)) {
+        spu_lockline_lock_ea(line);
+        memset(vm_base + line, 0, 128);
+        spu_coh_notify_write(line);
+        spu_lockline_unlock_ea(line);
+        gowa_dcbz_reservada(line);
+    } else {
+        memset(vm_base + line, 0, 128);
+    }
+}
 static inline void vm_write8_inl(uint64_t a, uint8_t v)
 {
     const uint32_t ea = (uint32_t)a;
