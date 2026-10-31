@@ -1130,6 +1130,72 @@ function Corrigir-Datas {
     }
     return $n
 }
+# reports 536/537/559/560/563: o launcher extrai a atualização com a data do commit, e um commit publicado horas
+# depois fica mais velho que os .obj de uma geração feita nesse meio-tempo; o ninja não recompila o arquivo novo e o
+# link junta objetos de versões diferentes (símbolo indefinido, ou pior, código velho que liga). O conteúdo de cada
+# fonte do repositório fica anotado na pasta da build depois de compilar; o que mudou desde então vai para agora.
+# Sem a anotação (build de antes desta correção), todos vão para agora: uma compilação completa, uma vez.
+function Fontes-Repo {
+    $p = Join-Path $R 'port'
+    @(Get-ChildItem -LiteralPath $p -File -Force -ErrorAction SilentlyContinue) +
+    @(Get-ChildItem -LiteralPath (Join-Path $p 'edge') -Recurse -File -Force -ErrorAction SilentlyContinue) +
+    @(Get-ChildItem -LiteralPath (Join-Path $p 'spu') -Directory -Filter 'gowanat_*' -Force -ErrorAction SilentlyContinue |
+      ForEach-Object { Get-ChildItem -LiteralPath $_.FullName -Recurse -File -Force -ErrorAction SilentlyContinue }) +
+    @(Get-ChildItem -LiteralPath (Join-Path $R 'ps3recomp') -Recurse -File -Force -ErrorAction SilentlyContinue) +
+    @(Get-ChildItem -LiteralPath (Join-Path $R 'scripts') -Recurse -File -Force -ErrorAction SilentlyContinue)
+}
+function Hashes-Fontes {
+    $md5 = [Security.Cryptography.MD5]::Create(); $h = @{}
+    try {
+        foreach ($f in Fontes-Repo) {
+            try {
+                $b = [IO.File]::ReadAllBytes($f.FullName)
+                $h[$f.FullName.Substring($R.Length).TrimStart('\')] = [BitConverter]::ToString($md5.ComputeHash($b)).Replace('-', '')
+            } catch { }
+        }
+    } finally { $md5.Dispose() }
+    return $h
+}
+function Atualizar-Datas-Fontes([string]$bd) {
+    $pasta = Join-Path $R "port\$bd"
+    if (-not (Test-Path (Join-Path $pasta 'build.ninja'))) { return 0 }   # build nova: o ninja compila tudo
+    $anot = @{}
+    $arq = Join-Path $pasta 'fontes_md5.txt'
+    if (Test-Path $arq) {
+        foreach ($l in [IO.File]::ReadAllLines($arq)) { if ($l -match '^([0-9A-F]{32}) (.+)$') { $anot[$matches[2]] = $matches[1] } }
+    }
+    $agora = Get-Date; $n = 0
+    foreach ($kv in (Hashes-Fontes).GetEnumerator()) {
+        if ($anot[$kv.Key] -ne $kv.Value) {
+            try { (Get-Item -LiteralPath (Join-Path $R $kv.Key) -Force).LastWriteTime = $agora; $n++ } catch { }
+        }
+    }
+    return $n
+}
+function Anotar-Fontes([string]$bd) {
+    $linhas = foreach ($kv in (Hashes-Fontes).GetEnumerator()) { "$($kv.Value) $($kv.Key)" }
+    try { [IO.File]::WriteAllLines((Join-Path $R "port\$bd\fontes_md5.txt"), [string[]]@($linhas), (New-Object Text.UTF8Encoding $false)) } catch { }
+}
+# report 538: um .obj zerado (o PC desligou ou travou no meio da compilação) é mais novo que o fonte e o ninja não o
+# refaz; o llvm-lib para em "unknown machine: 0" e o lld-link o lê como vazio (símbolo indefinido). Um .obj de
+# verdade começa com a máquina (x64) ou com a assinatura do bigobj; quatro bytes zero é arquivo perdido.
+function Apagar-Obj-Zerados([string]$bd) {
+    $n = 0; $b = New-Object byte[] 4
+    # (o -Include não vale com -LiteralPath no PowerShell 5.1: o filtro é pela extensão)
+    foreach ($f in @(Get-ChildItem -LiteralPath (Join-Path $R "port\$bd") -Recurse -File -Force -ErrorAction SilentlyContinue |
+                     Where-Object { $_.Extension -eq '.obj' -or $_.Extension -eq '.lib' })) {
+        $ruim = $f.Length -lt 4
+        if (-not $ruim) {
+            try {
+                $fs = [IO.File]::OpenRead($f.FullName)
+                try { $null = $fs.Read($b, 0, 4) } finally { $fs.Dispose() }
+                $ruim = ($b[0] -eq 0 -and $b[1] -eq 0 -and $b[2] -eq 0 -and $b[3] -eq 0)
+            } catch { }
+        }
+        if ($ruim) { try { Remove-Item -LiteralPath $f.FullName -Force; $n++ } catch { } }
+    }
+    return $n
+}
 # o texto apareceu no $LOG depois do byte $de (só a saída da última tentativa)
 function Novo-No-Log([long]$de, [string]$texto) {
     try {
@@ -1175,6 +1241,10 @@ function Compilar-Build([string]$a) {
     $exe = Join-Path $R "port\$bd\gowa.exe"
     $nf = Corrigir-Datas
     if ($nf -gt 0) { Msg "$nf arquivo(s) com data no futuro (relógio ou fuso do zip): data corrigida para agora" }
+    $nm = Atualizar-Datas-Fontes $bd
+    if ($nm -gt 0) { Msg "$nm arquivo(s) do código mudaram desde a última compilação: serão compilados de novo" }
+    $nz = Apagar-Obj-Zerados $bd
+    if ($nz -gt 0) { Msg "$nz arquivo(s) da compilação anterior estavam corrompidos (zerados): serão compilados de novo" }
     # o build_portatil.cmd sai com 0 mesmo quando o ninja falha, e o ninja não apaga o gowa.exe de antes: numa
     # atualização, um erro de compilação deixava o exe velho e a etapa dizia "ok". O exe de antes fica de lado e só
     # volta se a compilação não gerar outro (o jogo continua jogável e a etapa mostra o erro).
@@ -1216,7 +1286,7 @@ function Compilar-Build([string]$a) {
         $env:GOWA_JOBS = '2'
         Exec $LOG "`"$R\scripts\build_portatil.cmd`" $ba"
     }
-    if (Test-Path $exe) { Remove-Item -LiteralPath $ant -Force -ErrorAction SilentlyContinue; return $true }
+    if (Test-Path $exe) { Remove-Item -LiteralPath $ant -Force -ErrorAction SilentlyContinue; Anotar-Fontes $bd; return $true }
     if (Test-Path $ant) { Move-Item -LiteralPath $ant -Destination $exe -Force }
     return $false
 }
