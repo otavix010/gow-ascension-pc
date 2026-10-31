@@ -86,6 +86,7 @@ static volatile long g_ld_ps1_vram_ready = 0;
 #include <immintrin.h>
 #include <math.h>
 #include <stdio.h>
+#include <stdarg.h>   /* ld_res_linha */
 #include <stdlib.h>
 #include <stddef.h>   /* offsetof (GOWA pipeline library) */
 #include <wchar.h>    /* swprintf */
@@ -103,6 +104,7 @@ static volatile long g_ld_ps1_vram_ready = 0;
 #define WIN32_LEAN_AND_MEAN
 #endif
 #include <windows.h>
+#include <psapi.h>   /* K32EnumProcessModules: [modulos] da tela preta */
 #include <initguid.h>
 #include <d3d12.h>
 #include <d3d12sdklayers.h>
@@ -3664,7 +3666,7 @@ static void tex_index_rebuild(void)
 {
     memset(s_tex_index, 0xFF, sizeof s_tex_index);
     s_tex_index_puts = 0;
-    for (u32 i = 0; i < g.n_textures; i++) tex_index_put(i);
+    for (u32 i = 0; i < g.n_textures; i++) if (g.textures[i].width) tex_index_put(i);
     s_tex_index_ready = 1;
 }
 /* GOWA_TEX_DUMP_SEC=<s>[,max]: from <s> seconds after the first texture
@@ -3712,6 +3714,84 @@ static void ld_tex_dump(const rsx_dsp_texture* t)
  * 16384 with 8 GB of VRAM or more (henry: same fps as 8192), 8192 below that (the 4 GB
  * cards). GOWA_TEX_CAP=<n> picks it (256..MAX_TEXTURES). */
 extern unsigned g_ld_gpu_vram_mb;
+/* GOWA (30/10, reports 434/450: 12 GB cheios, travadinhas e o jogo fechando): o limite também segue a VRAM. Uma vez
+ * a cada 60 quadros, o uso da memória de vídeo do processo contra o orçamento que o Windows dá a ele
+ * (IDXGIAdapter3::QueryVideoMemoryInfo): acima de 90%, o limite cai para 7/8 das texturas carregadas e o LRU
+ * descarta as mais antigas; abaixo de 75%, volta a subir 1/8 por vez até o normal. GOWA_TEX_VRAM=0 desliga. */
+static u32 s_tex_cap_vram;   /* 0 = sem pressão */
+static u32 s_tex_livres[MAX_TEXTURES], s_n_tex_livres;   /* vagas do cache sem textura (ld_tex_encolher) */
+static void ld_tex_vram_olha(u32 cap)
+{
+    static int on = -1; static IDXGIAdapter3* ad; static u32 ult;
+    if (on < 0) {
+        const char* e = getenv("GOWA_TEX_VRAM"); on = !(e && *e == '0');
+        if (on && g.dev) {
+            IDXGIFactory4* f = NULL;
+            if (SUCCEEDED(CreateDXGIFactory1(&IID_IDXGIFactory4, (void**)&f)) && f) {
+                LUID luid = {0}; g.dev->lpVtbl->GetAdapterLuid(g.dev, &luid);
+                f->lpVtbl->EnumAdapterByLuid(f, luid, &IID_IDXGIAdapter3, (void**)&ad);
+                f->lpVtbl->Release(f);
+            }
+        }
+        if (!ad) on = 0;
+    }
+    if (!on || g_ld_frames - ult < 60u) return;
+    ult = g_ld_frames;
+    DXGI_QUERY_VIDEO_MEMORY_INFO mi;
+    if (FAILED(ad->lpVtbl->QueryVideoMemoryInfo(ad, 0, DXGI_MEMORY_SEGMENT_GROUP_LOCAL, &mi)) || !mi.Budget) return;
+    { static long teste = -1;   /* GOWA_TEX_VRAM_ORCAMENTO_MB=<MB>: simula um orçamento menor (teste) */
+      if (teste < 0) { const char* e = getenv("GOWA_TEX_VRAM_ORCAMENTO_MB"); teste = e ? atol(e) : 0; }
+      if (teste > 0) mi.Budget = (UINT64)teste << 20; }
+    const double uso = (double)mi.CurrentUsage / (double)mi.Budget;
+    const u32 vivas = g.n_textures - s_n_tex_livres;   /* as vagas livres (ld_tex_encolher) não ocupam VRAM */
+    if (uso > 0.90 && vivas > 1024u) {
+        const u32 novo = vivas - vivas / 8u;
+        if (!s_tex_cap_vram || novo < s_tex_cap_vram) {
+            s_tex_cap_vram = novo < 1024u ? 1024u : novo;
+            static int ditos;
+            if (ditos++ < 20)
+                fprintf(stderr, "[texture-cache] VRAM em %llu de %llu MB (%.0f%%): limite de texturas cai para %u\n",
+                        (unsigned long long)(mi.CurrentUsage >> 20), (unsigned long long)(mi.Budget >> 20), uso * 100.0,
+                        s_tex_cap_vram);
+        }
+    } else if (uso < 0.75 && s_tex_cap_vram) {
+        s_tex_cap_vram += s_tex_cap_vram / 8u;
+        if (s_tex_cap_vram >= cap) s_tex_cap_vram = 0;
+    }
+}
+/* GOWA (30/10, reports 469/480/491): com o limite baixado pela VRAM as texturas carregadas continuavam as mesmas
+ * (o LRU só troca uma pela outra quando o cache está cheio): 16384 carregadas contra o limite 14336 por toda a
+ * sessão, e a VRAM não aliviava. Agora as mais antigas acima do limite são descartadas (pela fila do fence, como no
+ * LRU) e a vaga fica livre (width 0, nunca casa numa busca) para a próxima textura. */
+static u32 ld_tex_vivas(void) { return g.n_textures - s_n_tex_livres; }
+static int ld_tex_cmp_serial(const void* a, const void* b)
+{
+    const u64 x = g.textures[*(const u32*)a].last_use_serial, y = g.textures[*(const u32*)b].last_use_serial;
+    return x < y ? -1 : x > y;
+}
+static void ld_tex_encolher(u32 limite, u32 max_por_vez)
+{
+    const u32 vivas = ld_tex_vivas();
+    if (vivas <= limite) return;
+    static u32 ordem[MAX_TEXTURES];
+    u32 n = 0;
+    for (u32 i = 0; i < g.n_textures; i++) if (g.textures[i].width) ordem[n++] = i;
+    qsort(ordem, n, sizeof ordem[0], ld_tex_cmp_serial);
+    u32 tirar = vivas - limite;
+    if (tirar > max_por_vez) tirar = max_por_vez;
+    for (u32 k = 0; k < tirar; k++) {
+        texcache_t* e = &g.textures[ordem[k]];
+        if (e->tex) retire_texture(e->tex);
+        memset(e, 0, sizeof *e);
+        e->last_use_serial = ~0ull;   /* o LRU de cache cheio não escolhe uma vaga livre */
+        s_tex_livres[s_n_tex_livres++] = ordem[k];
+    }
+    g_ld_texture_cache_evictions += tirar;
+    tex_index_rebuild();
+    static int ditos;
+    if (ditos++ < 20)
+        fprintf(stderr, "[texture-cache] VRAM: %u texturas descartadas (agora %u, limite %u)\n", tirar, ld_tex_vivas(), limite);
+}
 static u32 ld_tex_cap(void)
 {
     static u32 cap;
@@ -3722,7 +3802,8 @@ static u32 ld_tex_cap(void)
         if (cap > MAX_TEXTURES) cap = MAX_TEXTURES;
         fprintf(stderr, "[texture-cache] até %u texturas (%u MB de VRAM)\n", cap, g_ld_gpu_vram_mb);
     }
-    return cap;
+    ld_tex_vram_olha(cap);
+    return s_tex_cap_vram && s_tex_cap_vram < cap ? s_tex_cap_vram : cap;
 }
 
 static u32 texture_srv_slot(const rsx_dsp_texture* t)
@@ -3848,9 +3929,10 @@ ld_tex_intacta:
 
     u32 index;
     ID3D12Resource* evicted = NULL;
-    const int cache_was_full = g.n_textures >= ld_tex_cap();
+    ld_tex_encolher(ld_tex_cap(), 512u);
+    const int cache_was_full = ld_tex_vivas() >= ld_tex_cap();
     if (!cache_was_full) {
-        index = g.n_textures++;
+        index = s_n_tex_livres ? s_tex_livres[--s_n_tex_livres] : g.n_textures++;
     } else {
         /*
          * A full boot plus a010 binds far more than 128 distinct guest
@@ -9686,6 +9768,10 @@ static void write_topology_indices(u32 prim, u32* indices)
     }
 }
 
+/* GOWA (30/10, tela preta 397/399/409/425/431): quando o [tela] vê o jogo todo preto (o mesmo gatilho do
+ * [tela-alvos]), o registro [tgt] de cada desenho (shader, blend, máscara de cor, texturas, scissor) liga sozinho
+ * por 2 quadros, em qualquer alvo, até 1200 linhas: mostra o que o jogo desenha quando a imagem sai preta. */
+static u32 g_ld_tgt_auto_left, g_ld_tgt_auto_fim;
 static void sink_end_impl(void* user, const rsx_dispatch* r)
 {
     (void)user; (void)r;
@@ -10941,11 +11027,14 @@ static void sink_end_impl(void* user, const rsx_dispatch* r)
                                    /* "<n>s": seconds after the first draw instead of a frame */
                                    if (c && strchr(c + 1, 's') && (!c2 || strchr(c + 1, 's') < c2)) { tl_sec = atof(c + 1); tl_from = 0; } }
                           tl_t0 = GetTickCount64(); }
-          if (tl && tl_sec >= 0.0 && (double)(GetTickCount64() - tl_t0) < tl_sec * 1000.0) { }
-          else if (tl && tl_n < tl_max && (long)g_ld_frames >= tl_from) {
+          if (g_ld_tgt_auto_left && g_ld_frames > g_ld_tgt_auto_fim) g_ld_tgt_auto_left = 0;
+          const int tl_auto = g_ld_tgt_auto_left != 0;
+          if (!tl_auto && tl && tl_sec >= 0.0 && (double)(GetTickCount64() - tl_t0) < tl_sec * 1000.0) { }
+          else if (tl_auto || (tl && tl_n < tl_max && (long)g_ld_frames >= tl_from)) {
               rsx_dsp_surface st; rsx_dsp_get_surface(&g.rsx, &st);
-              if (st.color_offset[0] == tl_off || tl_off == 0xFFFFFFFFu) {   /* FFFFFFFF = any target */
-                  tl_n++;
+              if (tl_auto || st.color_offset[0] == tl_off || tl_off == 0xFFFFFFFFu) {   /* FFFFFFFF = any target */
+                  if (tl_auto) g_ld_tgt_auto_left--; else tl_n++;
+                  fprintf(stderr, "[tgt] alvo=%u:0x%X ", st.color_location[0], st.color_offset[0]);
                   fprintf(stderr, "[tgt] frame %u lk=%016llx pso=%016llx clip=%ux%u mrt=%u:%X,%X,%X fp=%u:0x%X n=%u blend=%u sf=0x%08X df=0x%08X eq=0x%08X cmask=0x%08X tex:",
                           g_ld_frames, (unsigned long long)live_legacy_pso_key(), (unsigned long long)g_ld_current_pso.key,
                           st.clip_w, st.clip_h, ld_rt_count(st.color_target), st.color_offset[1], st.color_offset[2], st.color_offset[3],
@@ -12255,6 +12344,50 @@ static int ld_blit_pipeline(void)
  * do Present (driver, HDR, monitor). Uma vez no começo, "[tela-saida]" diz o formato do swap chain, o monitor e o
  * HDR. GOWA_TELA_DIAG=0 desliga. */
 int rsx_live_draw_framegen_on(void);
+/* GOWA (30/10, reports 455-460): o relatório anexa só o fim do jogo.log (~8 KB); depois dos 3 primeiros minutos o
+ * "[tela]" sai a cada 30 s e o "[tgt]" automático enche o fim, então nenhum aparecia. As linhas do diagnóstico
+ * ficam guardadas (a saída, os 2 primeiros e os 6 últimos "[tela]", os "[tela-alvos]" e os "[modulos]") e
+ * rsx_live_draw_resumo_tela() reimprime tudo ao fechar o jogo, como "[resumo-tela]". */
+#define LD_RES_LIN 176
+static char s_res_saida[LD_RES_LIN], s_res_ini[2][LD_RES_LIN], s_res_ult[6][LD_RES_LIN], s_res_alvos[16][LD_RES_LIN], s_res_mods[12][LD_RES_LIN];
+static unsigned s_res_n_tela, s_res_n_alvos, s_res_n_mods;
+static void ld_res_copia(char* d, const char* s)
+{
+    size_t n = strlen(s);
+    while (n && (s[n - 1] == '\n' || s[n - 1] == '\r')) n--;
+    if (n >= LD_RES_LIN) n = LD_RES_LIN - 1;
+    memcpy(d, s, n); d[n] = 0;
+}
+/* cat: 0 saída, 1 tela, 2 alvos (novo=1 recomeça a lista), 3 módulos (novo=1 recomeça) */
+static void ld_res_linha(int cat, int novo, const char* fmt, ...)
+{
+    char b[512];
+    va_list ap; va_start(ap, fmt); vsnprintf(b, sizeof b, fmt, ap); va_end(ap);
+    fputs(b, stderr);
+    switch (cat) {
+    case 0: ld_res_copia(s_res_saida, b); break;
+    case 1:
+        if (s_res_n_tela < 2) ld_res_copia(s_res_ini[s_res_n_tela], b);
+        else ld_res_copia(s_res_ult[(s_res_n_tela - 2) % 6], b);
+        s_res_n_tela++;
+        break;
+    case 2: if (novo) s_res_n_alvos = 0; if (s_res_n_alvos < 16) ld_res_copia(s_res_alvos[s_res_n_alvos++], b); break;
+    default: if (novo) s_res_n_mods = 0; if (s_res_n_mods < 12) ld_res_copia(s_res_mods[s_res_n_mods++], b); break;
+    }
+}
+void rsx_live_draw_resumo_tela(void)
+{
+    fprintf(stderr, "[resumo-tela] diagnóstico da tela (%u medidas):\n", s_res_n_tela);
+    if (s_res_saida[0]) fprintf(stderr, "[resumo-tela] %s\n", s_res_saida);
+    for (unsigned i = 0; i < 2 && i < s_res_n_tela; i++) fprintf(stderr, "[resumo-tela] %s\n", s_res_ini[i]);
+    if (s_res_n_tela > 8) fprintf(stderr, "[resumo-tela] ... (%u medidas no meio)\n", s_res_n_tela - 8);
+    if (s_res_n_tela > 2) {
+        const unsigned u = s_res_n_tela - 2 < 6 ? s_res_n_tela - 2 : 6;
+        for (unsigned k = s_res_n_tela - 2 - u; k < s_res_n_tela - 2; k++) fprintf(stderr, "[resumo-tela] %s\n", s_res_ult[k % 6]);
+    }
+    for (unsigned i = 0; i < s_res_n_alvos; i++) fprintf(stderr, "[resumo-tela] %s\n", s_res_alvos[i]);
+    for (unsigned i = 0; i < s_res_n_mods; i++) fprintf(stderr, "[resumo-tela] %s\n", s_res_mods[i]);
+}
 typedef struct { ID3D12Resource* rb; UINT64 size, offset; u64 fence; u32 frame, w, h, pitch; DXGI_FORMAT fmt; int busy; } ld_tela_rb;
 static ld_tela_rb s_tela[2];   /* 0 = a surface do jogo, 1 = o backbuffer */
 static void ld_tela_copia(ld_tela_rb* t, ID3D12Resource* res, D3D12_RESOURCE_STATES state)
@@ -12348,7 +12481,7 @@ static void ld_tela_saida(void)
         }
         o->lpVtbl->Release(o);
     }
-    fprintf(stderr, "[tela-saida] swap chain %ux%u fmt %d, %u buffers, flags 0x%X, vsync %d, tearing %d; %s\n",
+    ld_res_linha(0, 0, "[tela-saida] swap chain %ux%u fmt %d, %u buffers, flags 0x%X, vsync %d, tearing %d; %s\n",
             sd.Width, sd.Height, (int)sd.Format, sd.BufferCount, sd.Flags, g_ld_present_sync, g_ld_present_tearing, mon);
 }
 /* GOWA (30/10, reports 397, 399, 409): a logo aparece, mas do menu em diante a surface mostrada fica preta (brilho
@@ -12379,17 +12512,35 @@ static void ld_tela_alvos_medir(void)
     const u64 done = g.fence->lpVtbl->GetCompletedValue(g.fence);
     for (u32 i = 0; i < MAX_SURFACES; i++)
         if (s_alvos[i].busy && s_alvos[i].fence > done) return;
-    fprintf(stderr, "[tela-alvos] quadro %u: surfaces vivas (a mostrada é a de \"[tela]\")\n", g_ld_frames);
+    ld_res_linha(2, 1, "[tela-alvos] quadro %u: surfaces vivas (a mostrada é a de \"[tela]\")\n", g_ld_frames);
     for (u32 i = 0; i < MAX_SURFACES; i++) {
         if (!s_alvos[i].busy) continue;
         char a[96];
         ld_tela_medir(&s_alvos[i], a, sizeof a);
-        fprintf(stderr, "[tela-alvos]   %2u loc %u off 0x%08X fmt %d: %s\n", i, s_alvos_loc[i], s_alvos_off[i],
+        ld_res_linha(2, 0, "[tela-alvos]   %2u loc %u off 0x%08X fmt %d: %s\n", i, s_alvos_loc[i], s_alvos_off[i],
                 (int)s_alvos[i].fmt, a);
         if (s_alvos[i].rb) { s_alvos[i].rb->lpVtbl->Release(s_alvos[i].rb); s_alvos[i].rb = NULL; s_alvos[i].size = 0; }
     }
     fflush(stderr);
     s_alvos_pend = 0;
+}
+/* GOWA (30/10): as DLLs carregadas no processo que não são do Windows (System32/SysWOW64/WinSxS): é onde aparecem
+ * as sobreposições e filtros que se injetam no D3D12 (RivaTuner, Discord, Steam, ReShade, filtros da NVIDIA/AMD) */
+static void ld_log_modulos(const char* quando)
+{
+    HMODULE mods[1024]; DWORD nb = 0;
+    if (!K32EnumProcessModules(GetCurrentProcess(), mods, sizeof mods, &nb)) return;
+    char win[MAX_PATH] = {0}; GetWindowsDirectoryA(win, sizeof win);
+    const size_t lw = strlen(win);
+    int n = 0;
+    for (DWORD k = 0; k < nb / sizeof(HMODULE); k++) {
+        char cam[MAX_PATH];
+        if (!K32GetModuleFileNameExA(GetCurrentProcess(), mods[k], cam, sizeof cam)) continue;
+        if (lw && !_strnicmp(cam, win, lw)) continue;   /* do Windows */
+        ld_res_linha(3, n == 0, "[modulos] %s: %s\n", quando, cam);
+        n++;
+    }
+    ld_res_linha(3, n == 0, "[modulos] %s: %d DLLs fora do Windows\n", quando, n);
 }
 static void ld_tela_diag(ID3D12Resource* src, D3D12_RESOURCE_STATES src_state, ID3D12Resource* bb, D3D12_RESOURCE_STATES bb_state)
 {
@@ -12408,7 +12559,7 @@ static void ld_tela_diag(ID3D12Resource* src, D3D12_RESOURCE_STATES src_state, I
         const u32 frame = s_tela[0].frame;
         ld_tela_medir(&s_tela[0], a, sizeof a); ld_tela_medir(&s_tela[1], b, sizeof b);
         HWND w = NULL; g.swap->lpVtbl->GetHwnd(g.swap, &w);
-        fprintf(stderr, "[tela] quadro %u, %.0f s: jogo %s | final %s | janela %ux%u%s%s\n", frame,
+        ld_res_linha(1, 0, "[tela] quadro %u, %.0f s: jogo %s | final %s | janela %ux%u%s%s\n", frame,
                 (GetTickCount64() - t0) / 1000.0, a, b, g.width, g.height, w && IsIconic(w) ? " (minimizada)" : "",
                 rsx_live_draw_framegen_on() ? " (geração de quadros)" : "");
         static int forca = -1;   /* GOWA_TELA_ALVOS=1: registra as surfaces mesmo sem tela preta (teste) */
@@ -12417,7 +12568,11 @@ static void ld_tela_diag(ID3D12Resource* src, D3D12_RESOURCE_STATES src_state, I
         if (pretos >= 3 && GetTickCount64() - t0 > 30000 && s_alvos_vezes < 2) {
             s_alvos_vezes++; pretos = -60;   /* a 2ª vez, se ainda preto, uns 2 min depois */
             ld_tela_alvos_copiar(src);
+            g_ld_tgt_auto_left = 1200; g_ld_tgt_auto_fim = g_ld_frames + 2u;
+            fprintf(stderr, "[tgt] registro automático dos desenhos por 2 quadros (tela preta)\n");
+            ld_log_modulos("tela preta");
         }
+        { static int mods_ok; if (!mods_ok && GetTickCount64() - t0 > 10000) { mods_ok = 1; ld_log_modulos("10 s"); } }
         return;
     }
     const ULONGLONG now = GetTickCount64();
@@ -14597,7 +14752,7 @@ ld_present_done:;
                 g_ld_stats.group_drop_ring, g_ld_stats.group_drop_surface,
                 g_ld_stats.clears, g_ld_stats.clear_drop_surface,
                 g_ld_stats.implicit_depth_clears,
-                g.n_textures, ld_tex_cap(),
+                ld_tex_vivas(), ld_tex_cap(),
                 (unsigned long long)g_ld_texture_cache_full,
                 (unsigned long long)g_ld_texture_decode_fail,
                 (unsigned long long)g_ld_zdepth_srv_binds,

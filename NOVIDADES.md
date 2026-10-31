@@ -4,13 +4,86 @@ O Otavix Launcher mostra este arquivo na página "Novidades" do jogo. Cada atual
 "## <data> · <versão>" e o texto em português (### pt), inglês (### en) e, quando houver, espanhol (### es).
 As mais novas ficam em cima.
 
-## 30/10/2026 · 9986152
+## 30/10/2026 · d17aa34
 ### pt
-- **Menos cortes no som em PCs lentos:** a tarefa que mixa o som do jogo agora tem prioridade no processador em PCs com 4 ou mais núcleos lógicos. Num notebook com i5-10300H, no capítulo mais pesado, os trechos de som que chegavam atrasados caíram um terço, sem perder fps.
+- **A geração parava em "6_compilar" com "Split-Path ... o argumento é nulo":** acontecia quando o gerador não achava um Python (por exemplo, só o Python da Microsoft Store). Agora ele aceita esse Python e, sem nenhum, a compilação segue com o PATH do seu PC. Gere de novo pelo launcher.
+- **Geração retomada mais robusta:** uma etapa marcada como feita cujos arquivos sumiram agora é refeita sozinha, e o gerador confere de novo o Python e o FFmpeg e completa o PATH do Windows quando faltar.
+- **Travadinhas em sessões longas:** com a memória de vídeo cheia, o cache de texturas agora libera as mais antigas de verdade (antes só baixava o limite), o que deve reduzir os engasgos.
 ### en
-- **Fewer sound drops on slow PCs:** the task that mixes the game's sound now gets processor priority on PCs with 4 or more logical cores. On a notebook with an i5-10300H, in the heaviest chapter, the sound blocks that arrived late fell by a third, with no fps lost.
+- **Generation stopped at "6_compilar" with "Split-Path ... the argument is null":** it happened when the generator could not find a Python (for example, only the Microsoft Store one). It now accepts that Python and, with none, the build goes on with your PC's PATH. Generate again from the launcher.
+- **More robust resumed generation:** a step marked as done whose files went missing is now redone by itself, and the generator checks Python and FFmpeg again and completes the Windows PATH when it is missing.
+- **Stutters in long sessions:** with video memory full, the texture cache now really frees the oldest textures (before, it only lowered the limit), which should reduce the hitches.
 ### es
-- **Menos cortes de sonido en PC lentos:** la tarea que mezcla el sonido del juego ahora tiene prioridad en el procesador en PC con 4 o más núcleos lógicos. En un portátil con i5-10300H, en el capítulo más pesado, los bloques de sonido que llegaban tarde bajaron un tercio, sin perder fps.
+- **La generación se detenía en "6_compilar" con "Split-Path ... el argumento es nulo":** ocurría cuando el generador no encontraba un Python (por ejemplo, solo el de Microsoft Store). Ahora acepta ese Python y, sin ninguno, la compilación sigue con el PATH de tu PC. Genera de nuevo desde el launcher.
+- **Generación retomada más robusta:** un paso marcado como hecho cuyos archivos desaparecieron ahora se rehace solo, y el generador revisa de nuevo Python y FFmpeg y completa el PATH de Windows cuando falte.
+- **Tirones en sesiones largas:** con la memoria de vídeo llena, la caché de texturas ahora libera de verdad las más antiguas (antes solo bajaba el límite), lo que debería reducir los tirones.
+
+## 30/10/2026 · dc55a5c
+### pt
+- **Escolha da versão do executável:** a nova opção "Versão do executável" do launcher escolhe entre Automático (o padrão: o gerador escolhe pelo seu processador), Portátil (AVX2, a que quase todos usam) e Nativa (compilada para o seu processador). Trocar de versão gera de novo só a compilação. Se a Nativa não compilar no seu PC, o gerador faz a Portátil no lugar e avisa.
+- **O jogo fechava ao abrir com o erro 0xC000001D num processador sem nome comercial ("Genuine Intel CPU 0000", amostra de engenharia):** esse processador anunciava instruções que não executa, e a versão Nativa era compilada com elas. No Automático, ele agora fica com a versão Portátil. Gere de novo pelo launcher.
+- **Tela preta ou branca:** o report só leva o fim do log, e as medidas da tela não chegavam nele. Agora, ao fechar o jogo pela janela, o fim do log traz um resumo dessas medidas. Se a sua imagem fica preta ou branca, abra o jogo, espere a tela ficar assim, feche pela janela (não pelo Gerenciador de Tarefas) e mande um report.
+### en
+- **Choosing the executable version:** the launcher's new "Executable version" option picks between Automatic (the default: the generator picks by your processor), Portable (AVX2, the one almost everyone uses) and Native (built for your processor). Switching versions only redoes the build step. If Native does not build on your PC, the generator makes the Portable one instead and says so.
+- **The game closed on start with error 0xC000001D on a processor without a retail name ("Genuine Intel CPU 0000", an engineering sample):** that processor advertised instructions it does not run, and the Native version was built with them. On Automatic it now gets the Portable version. Generate again from the launcher.
+- **Black or white screen:** the report only carries the end of the log, and the screen measurements did not reach it. Now, when you close the game through its window, the end of the log has a summary of those measurements. If your picture goes black or white, open the game, wait until the screen looks like that, close it through the window (not through Task Manager) and send a report.
+### es
+- **Elegir la versión del ejecutable:** la nueva opción "Versión del ejecutable" del launcher elige entre Automático (el predeterminado: el generador elige según tu procesador), Portátil (AVX2, la que usa casi todo el mundo) y Nativa (compilada para tu procesador). Cambiar de versión solo rehace la compilación. Si la Nativa no compila en tu PC, el generador hace la Portátil en su lugar y lo avisa.
+- **El juego se cerraba al abrir con el error 0xC000001D en un procesador sin nombre comercial ("Genuine Intel CPU 0000", muestra de ingeniería):** ese procesador anunciaba instrucciones que no ejecuta, y la versión Nativa se compilaba con ellas. En Automático ahora queda con la versión Portátil. Genera de nuevo desde el launcher.
+- **Pantalla negra o blanca:** el report solo lleva el final del log, y las medidas de la pantalla no llegaban a él. Ahora, al cerrar el juego desde la ventana, el final del log trae un resumen de esas medidas. Si tu imagen se pone negra o blanca, abre el juego, espera a que la pantalla quede así, ciérralo desde la ventana (no desde el Administrador de tareas) y manda un report.
+
+## 30/10/2026 · cf4be45
+### pt
+- **A geração parava em "6_compilar" com "'cmake' não é reconhecido":** acontecia quando o Visual Studio estava sem o componente "C++ CMake tools". Agora o gerador usa outro CMake instalado no PC ou instala o componente sozinho (o Windows pede permissão). Gere de novo pelo launcher.
+- **A geração parava ao baixar o update com "Falha na execução do programa 'curl.exe': Acesso negado":** quando o antivírus ou o Windows não deixa o curl rodar, o download agora é feito pelo próprio PowerShell.
+- **Memória de vídeo cheia, travadinhas e o jogo fechando em placas de 12 GB ou menos:** o jogo agora acompanha quanta memória de vídeo o Windows reserva para ele e, perto do limite, troca as texturas menos usadas em vez de continuar carregando novas.
+### en
+- **Generation stopped at "6_compilar" with "'cmake' is not recognized":** it happened when Visual Studio lacked the "C++ CMake tools" component. The generator now uses another CMake installed on the PC or installs the component by itself (Windows asks for permission). Generate again from the launcher.
+- **Generation stopped while downloading the update with "Program 'curl.exe' failed to run: Access is denied":** when the antivirus or Windows does not let curl run, the download is now done by PowerShell itself.
+- **Video memory full, stutters and the game closing on 12 GB cards or smaller:** the game now follows how much video memory Windows reserves for it and, near the limit, swaps out the least used textures instead of loading more.
+### es
+- **La generación se detenía en "6_compilar" con "'cmake' no se reconoce":** pasaba cuando Visual Studio no tenía el componente "C++ CMake tools". Ahora el generador usa otro CMake instalado en el PC o instala el componente solo (Windows pide permiso). Genera de nuevo desde el launcher.
+- **La generación se detenía al descargar el update con "Error al ejecutar el programa 'curl.exe': Acceso denegado":** cuando el antivirus o Windows no deja ejecutar curl, la descarga ahora la hace el propio PowerShell.
+- **Memoria de vídeo llena, tirones y el juego cerrándose en tarjetas de 12 GB o menos:** el juego ahora sigue cuánta memoria de vídeo le reserva Windows y, cerca del límite, cambia las texturas menos usadas en lugar de seguir cargando nuevas.
+
+## 30/10/2026 · 964fdee
+### pt
+- **Tela preta com som depois da logo:** ainda não acontece em nenhum PC de teste (nem no renderizador de referência da Microsoft). Quando a imagem fica preta, o jogo agora registra no log cada desenho daquele momento e os programas que se carregaram dentro dele (sobreposições e filtros, como RivaTuner, Discord, ReShade ou filtros da placa). Se isso acontece com você, abra o jogo, espere uns 30 segundos com a tela preta, feche e mande um report com o log.
+### en
+- **Black screen with sound after the logo:** it still does not happen on any test PC (not even on Microsoft's reference renderer). When the picture goes black, the game now writes to the log every draw of that moment and the programs that loaded inside it (overlays and filters such as RivaTuner, Discord, ReShade or graphics card filters). If this happens to you, open the game, wait about 30 seconds on the black screen, close it and send a report with the log.
+### es
+- **Pantalla negra con sonido después del logo:** todavía no ocurre en ningún PC de prueba (ni en el renderizador de referencia de Microsoft). Cuando la imagen se pone negra, el juego ahora registra en el log cada dibujo de ese momento y los programas que se cargaron dentro de él (superposiciones y filtros como RivaTuner, Discord, ReShade o filtros de la tarjeta). Si te pasa, abre el juego, espera unos 30 segundos con la pantalla negra, ciérralo y manda un report con el log.
+
+## 30/10/2026 · e8a5a83
+### pt
+- **A geração parava em "2_jogo" com "A parameter cannot be found that matches parameter name 'File'":** acontecia quando o arquivo do jogo escolhido vinha sem a pasta no caminho. Corrigido.
+- **A geração parava em "6_compilar" com "...ps3recomp foi inesperado neste momento":** acontecia quando a pasta do jogo tinha parênteses no nome, como "GodofWarAscension(USA)", ou espaços. Corrigido; gere de novo pelo launcher.
+- **Menos trabalho jogado fora nas SPUs:** o antisserrilhado que o jogo calcula nas SPUs (MLAA) já não aparecia na imagem, mas continuava processando o quadro inteiro. Agora ele quase não trabalha, e sobra processador para o resto do jogo, o que ajuda mais em PCs de 4 núcleos.
+- **Controle não reconhecido:** o log agora diz quais controles o jogo encontrou e se cada um é suportado. São suportados os controles XInput (Xbox e compatíveis), o DualShock 4 e o DualSense. Um controle genérico precisa do modo XInput dele, do Steam Input ou do DS4Windows. Se o seu não funcionar, mande um report com o log.
+### en
+- **Generation stopped at "2_jogo" with "A parameter cannot be found that matches parameter name 'File'":** it happened when the picked game file came without its folder in the path. Fixed.
+- **Generation stopped at "6_compilar" with "...ps3recomp was unexpected at this time":** it happened when the game folder had parentheses in its name, like "GodofWarAscension(USA)", or spaces. Fixed; generate again from the launcher.
+- **Less wasted work on the SPUs:** the anti-aliasing the game computes on the SPUs (MLAA) no longer showed in the picture but still processed the whole frame. It now does almost nothing, leaving processor time for the rest of the game, which helps most on 4-core PCs.
+- **Controller not recognized:** the log now says which controllers the game found and whether each is supported. Supported are XInput controllers (Xbox and compatible), the DualShock 4 and the DualSense. A generic controller needs its XInput mode, Steam Input or DS4Windows. If yours does not work, send a report with the log.
+### es
+- **La generación se detenía en "2_jogo" con "A parameter cannot be found that matches parameter name 'File'":** pasaba cuando el archivo del juego elegido venía sin la carpeta en la ruta. Corregido.
+- **La generación se detenía en "6_compilar" con "...ps3recomp no se esperaba en este momento":** pasaba cuando la carpeta del juego tenía paréntesis en el nombre, como "GodofWarAscension(USA)", o espacios. Corregido; genera de nuevo desde el launcher.
+- **Menos trabajo desperdiciado en las SPU:** el antialiasing que el juego calcula en las SPU (MLAA) ya no aparecía en la imagen, pero seguía procesando el cuadro entero. Ahora casi no trabaja y queda procesador para el resto del juego, lo que ayuda más en PC de 4 núcleos.
+- **Mando no reconocido:** el log ahora dice qué mandos encontró el juego y si cada uno es compatible. Son compatibles los mandos XInput (Xbox y compatibles), el DualShock 4 y el DualSense. Un mando genérico necesita su modo XInput, Steam Input o DS4Windows. Si el tuyo no funciona, manda un report con el log.
+
+## 30/10/2026 · e316534
+### pt
+- **A geração parava em "6_compilar" com "o gowa.exe não foi gerado":** em alguns PCs o ambiente do Visual Studio não era montado ("'cmake' não é reconhecido", "A sintaxe do nome do arquivo... está incorreta") ou faltava o Windows SDK ("could not open 'kernel32.lib'"). Agora o gerador monta esse ambiente sem depender do PATH do seu Windows, instala sozinho o Windows 11 SDK quando ele falta (o Windows pede a permissão de administrador) e, se a compilação parar no meio, continua com menos arquivos ao mesmo tempo (usa menos memória). Gere de novo pelo launcher.
+- **Erros da compilação mais fáceis de achar:** o log da compilação ficou bem menor e as linhas de erro vão para o fim dele, que é a parte que o launcher envia nos reports.
+- **Tela preta com som depois da logo da Santa Monica:** ainda não reproduz nos PCs de teste. Quando a imagem fica preta, o jogo agora registra no log em qual etapa do desenho ela se perde. Se isso acontece com você, mande um report com o log depois desta atualização.
+### en
+- **Generation stopped at "6_compilar" with "gowa.exe was not made":** on some PCs the Visual Studio environment was not set up ("'cmake' is not recognized", "The filename, directory name, or volume label syntax is incorrect") or the Windows SDK was missing ("could not open 'kernel32.lib'"). The generator now sets up that environment without depending on your Windows PATH, installs the Windows 11 SDK by itself when it is missing (Windows asks for administrator permission) and, if the build stops halfway, carries on with fewer files at a time (less memory). Generate again from the launcher.
+- **Build errors easier to find:** the build log is much smaller and the error lines go to its end, which is the part the launcher sends with reports.
+- **Black screen with sound after the Santa Monica logo:** it still does not happen on the test PCs. When the picture goes black, the game now writes to the log at which drawing step it gets lost. If this happens to you, send a report with the log after this update.
+### es
+- **La generación se detenía en "6_compilar" con "no se generó el gowa.exe":** en algunos PC el entorno de Visual Studio no se montaba ("'cmake' no se reconoce", "La sintaxis del nombre de archivo... no es correcta") o faltaba el Windows SDK ("could not open 'kernel32.lib'"). Ahora el generador monta ese entorno sin depender del PATH de tu Windows, instala solo el Windows 11 SDK cuando falta (Windows pide permiso de administrador) y, si la compilación se detiene a mitad, sigue con menos archivos a la vez (usa menos memoria). Genera de nuevo desde el launcher.
+- **Errores de compilación más fáciles de encontrar:** el log de la compilación es mucho más pequeño y las líneas de error van al final, que es la parte que el launcher envía en los reports.
+- **Pantalla negra con sonido después del logo de Santa Monica:** todavía no ocurre en los PC de prueba. Cuando la imagen se pone negra, el juego ahora registra en el log en qué paso del dibujo se pierde. Si te pasa, manda un report con el log después de esta actualización.
 
 ## 29/10/2026 · ccd3641
 ### pt

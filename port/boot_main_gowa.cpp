@@ -46,6 +46,7 @@
 #include <stdlib.h>
 
 extern "C" void gowa_watch_dump(void);   /* spu_channels.c: GOWA_WATCH_A03 */
+extern "C" void rsx_live_draw_resumo_tela(void);   /* rsx_live_draw.c: [resumo-tela] ao fechar */
 extern "C" {
 uint32_t ppu_load_elf(const char* path);
 void     ppu_recomp_register(void);
@@ -1905,6 +1906,7 @@ static DWORD WINAPI vblank_ticker(LPVOID)
             if (rsx_pump_messages() != 0) {
                 rsx_ok = 0;
                 fprintf(stderr, "[janela] a janela fechou; o jogo vai encerrar\n");
+                rsx_live_draw_resumo_tela();   /* reports 455-460: o fim do log é o que vai no relatório */
                 /* GOWA (25/10): the guest threads (PPU, SPUs, audio) never stop by themselves, and this
                  * loop has no way out: with the window gone the process kept running with no window,
                  * eating CPU and playing sound, and stayed behind after the launcher closed (a player's

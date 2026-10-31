@@ -46,7 +46,7 @@ param(
     [string]$Update = '',
     [string]$Firmware = '',
     [string]$ChavesRpcs3 = '',
-    [ValidateSet('auto', 'avx512', 'portatil')][string]$Build = 'auto',
+    [ValidateSet('auto', 'avx512', 'nativa', 'portatil')][string]$Build = 'auto',
     [int]$Jobs = 0,
     [switch]$SemOtimizar,
     [int]$RefazerDe = 0,
@@ -81,6 +81,21 @@ New-Item -ItemType Directory -Force $OUT | Out-Null
 if ($RefazerDe -gt 0) {
     Get-ChildItem $OUT -Filter '*.ok' | Where-Object { [int]($_.Name.Split('_')[0]) -ge $RefazerDe } | Remove-Item -Force
 }
+# Reports 470/473/474 (30/10): numa geração retomada, uma etapa marcada como feita pode ter perdido o que fez (antivírus,
+# limpeza, pasta apagada) e a falha aparecia só etapas depois, sem dizer por quê. Etapa cuja saída sumiu é refeita.
+foreach ($c in @(@('2_jogo', 'jogo\GOWA.elf'), @('3_firmware', 'fw\lle\libsre_image.bin'), @('3_firmware', 'port\lle_libsre\libsre_recomp.cpp'),
+                 @('4_ppu', 'port\recompiled\ppu_hle_nids.cpp'), @('5_spu', 'port\spu\gowajm_0072DF80\spu_recomp.c'))) {
+    $marca = Join-Path $OUT "$($c[0]).ok"
+    if ((Test-Path -LiteralPath $marca) -and -not (Test-Path -LiteralPath (Join-Path $R $c[1]))) {
+        Write-Host "[gerar] $($c[0]): marcada como feita, mas $($c[1]) sumiu; refazendo" -ForegroundColor Cyan
+        Remove-Item -LiteralPath $marca -Force
+    }
+}
+# Report 398 (30/10) e parecidos: um PATH sem a pasta do Windows deixa o cmd, o robocopy e o icacls sem achar
+$sis = @("$env:SystemRoot\System32", $env:SystemRoot, "$env:SystemRoot\System32\Wbem", "$env:SystemRoot\System32\WindowsPowerShell\v1.0")
+$noPath = @($env:PATH -split ';' | ForEach-Object { $_.Trim('"', ' ').TrimEnd('\') })
+$faltam = @($sis | Where-Object { $noPath -notcontains $_ })
+if ($faltam) { $env:PATH = ($faltam -join ';') + ';' + $env:PATH }
 
 function Msg($t) { Write-Host "[gerar] $t" -ForegroundColor Cyan }
 # roda um programa externo sem que o stderr dele vire exceção: no Windows PowerShell 5.1,
@@ -117,15 +132,27 @@ function Baixar([string]$url, [string]$destino) {
     $part = "$destino.part"
     Remove-Item $part -ErrorAction SilentlyContinue
     $curl = Get-Command curl.exe -ErrorAction SilentlyContinue
+    $erroCurl = $null
     if ($curl) {
-        SemExcecao { & $curl.Source -L --fail --retry 3 --silent --show-error -o $part $url }
-        # curl 35 (CRYPT_E_NO_REVOCATION_CHECK): a rede ou o antivírus do jogador não deixa o schannel consultar a
-        # revogação do certificado (report 47 do launcher, no Dante); de novo sem essa consulta, o certificado ainda conferido
-        if ($LASTEXITCODE -eq 35) { SemExcecao { & $curl.Source -L --fail --retry 3 --silent --show-error --ssl-no-revoke -o $part $url } }
-        if ($LASTEXITCODE -ne 0) { throw "falhou o download de $url (curl $LASTEXITCODE)" }
-    } else {
+        # report 453: o Windows (antivírus ou política) não deixava o curl.exe rodar ("Acesso negado"): o PowerShell
+        # parava a geração na hora. Agora isso cai no download pelo próprio PowerShell, abaixo.
+        try {
+            SemExcecao { & $curl.Source -L --fail --retry 3 --silent --show-error -o $part $url }
+            # curl 35 (CRYPT_E_NO_REVOCATION_CHECK): a rede ou o antivírus do jogador não deixa o schannel consultar a
+            # revogação do certificado (report 47 do launcher, no Dante); de novo sem essa consulta, o certificado ainda conferido
+            if ($LASTEXITCODE -eq 35) { SemExcecao { & $curl.Source -L --fail --retry 3 --silent --show-error --ssl-no-revoke -o $part $url } }
+            if ($LASTEXITCODE -ne 0) { $erroCurl = "curl $LASTEXITCODE" }
+        } catch {
+            $erroCurl = "o curl.exe não pôde rodar: $($_.Exception.Message)"
+        }
+    }
+    if (-not $curl -or $erroCurl) {
+        if ($erroCurl) { Msg "download pelo curl falhou ($erroCurl); tentando pelo PowerShell" }
+        Remove-Item $part -ErrorAction SilentlyContinue
         $ProgressPreference = 'SilentlyContinue'
-        Invoke-WebRequest -Uri $url -OutFile $part -UseBasicParsing
+        [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+        try { Invoke-WebRequest -Uri $url -OutFile $part -UseBasicParsing }
+        catch { throw "falhou o download de $url ($(if ($erroCurl) { "$erroCurl; " })PowerShell: $($_.Exception.Message))" }
     }
     Move-Item $part $destino -Force
 }
@@ -173,6 +200,7 @@ function Etapa([string]$nome, [scriptblock]$corpo) {
 # 3.10+ com pip, o do lançador py primeiro e depois cada python do PATH, e põe a pasta dele na frente do PATH
 # desta geração; um 3.10+ sem pip recebe o pip pelo ensurepip. Nenhum: a etapa 1_ferramentas diz o que instalar.
 function Escolher-Python {
+    if ($env:GOWA_TESTE_SEM_PYTHON -eq '1') { return $null }   # teste dos reports 470/473/474
     $cands = @()
     $e = SemExcecao { cmd /c 'py -3 -c "import sys; print(sys.executable)" 2>nul' }
     if ($LASTEXITCODE -eq 0 -and $e) { $cands += "$(@($e)[0])".Trim() }
@@ -197,12 +225,27 @@ function Escolher-Python {
         Msg "o Python em $semPip não tem pip e não deu para instalar; segue sem ele (o AES vem do Windows)"
         return $semPip
     }
+    # reports 470/473/474: o Python da Microsoft Store (real, não o atalho que abre a loja) só existe em \WindowsApps\;
+    # por último, ele serve se rodar e for 3.10+ (o atalho falha na conferência da versão)
+    foreach ($c in ($cands | Where-Object { $_ -match '\\WindowsApps\\' } | Select-Object -Unique)) {
+        $v = SemExcecao { & $c -c "import sys; print(sys.version_info[0]*100+sys.version_info[1])" 2>$null }
+        if ("$(@($v)[0])" -match '^\d+$' -and [int]"$(@($v)[0])" -ge 310) { return $c }
+    }
     return $null
 }
 $py = Escolher-Python
 if ($py) {
     $env:PATH = (Split-Path -Parent $py) + ';' + $env:PATH
     Msg "Python: $py"
+}
+# Reports 470/473/474: a etapa 1 marcada como feita não garante que o Python e o FFmpeg ainda estejam aqui (desinstalado,
+# pasta dl apagada); sem eles a geração parava etapas depois. A etapa 1 volta, confere e diz o que falta.
+$marca1 = Join-Path $OUT '1_ferramentas.ok'
+if ((Test-Path -LiteralPath $marca1) -and
+    (-not $py -or -not (Test-Path (Join-Path $R "dl\ffmpeg9\$FFMPEG_NOME\include\libavcodec")) -or
+     -not (Test-Path (Join-Path $R "dl\ffmpeg9\$FFMPEG_NOME\bin\*.dll")))) {
+    Msg "1_ferramentas: $(if (-not $py) { 'nenhum Python 3.10+ achado' } else { 'o FFmpeg sumiu da pasta dl' }); conferindo de novo"
+    Remove-Item -LiteralPath $marca1 -Force
 }
 
 $VS = $null
@@ -393,7 +436,15 @@ function Achar-Disco([string]$d) {
     # reports 66/72: um .iso escolhido que não é arquivo nenhum (movido, renomeado, download por terminar, sem acesso):
     # com um só arquivo de disco na mesma pasta, é ele; senão, diz o que o Windows respondeu
     if ($d -match '\.(7z|zip|rar|iso)$' -and -not (Test-Path -LiteralPath $d -PathType Container)) {
-        $outro = @(Get-ChildItem -LiteralPath (Split-Path $d) -File -ErrorAction SilentlyContinue | Where-Object { $_.Name -match '\.(7z|zip|rar|iso)$' })
+        # report 435: um nome sem pasta deixava o Split-Path vazio e o Get-ChildItem parava com "A parameter cannot be
+        # found that matches parameter name 'File'" (sem caminho ele não sabe que é uma pasta do disco)
+        $pai = Split-Path $d
+        if (-not $pai) { $pai = (Get-Location).ProviderPath }
+        $outro = @()
+        if ($pai -and [IO.Directory]::Exists($pai)) {
+            $outro = @(try { [IO.Directory]::GetFiles($pai) | Where-Object { $_ -match '\.(7z|zip|rar|iso)$' } |
+                             ForEach-Object { [IO.FileInfo]::new($_) } } catch { })
+        }
         if ($outro.Count -eq 1) {
             Msg "o arquivo $d não existe; usando $($outro[0].FullName), o arquivo do jogo dessa pasta"
             return (Achar-Disco $outro[0].FullName)
@@ -1026,24 +1077,118 @@ Etapa '5_spu' {
 }
 
 # ---------------------------------------------------------------------------- compilar
+# A versão da build (30/10, pedido do usuário): GOWA_BUILD=auto|portatil|nativa (a opção do launcher; o -Build da
+# linha de comando, se dado, vale mais). auto = a detecção: AVX-512 -> nativa (-march=native), senão portátil
+# (x86-64-v3); processador sem nome comercial -> portátil. Trocar de versão recompila (as etapas 6 e 7 voltam).
+# Se a nativa não compilar, a geração cai para a portátil com aviso. O resultado vai para port\build.txt
+# (escolhida/usada/pasta/exe/motivo, uma chave=valor por linha): o launcher abre esse exe e manda no report.
 $llvm = Join-Path $VS 'VC\Tools\Llvm\x64\bin'
-$alvo = $Build
-if ($alvo -eq 'auto') {
+$escolha = if ($PSBoundParameters.ContainsKey('Build')) { $Build } elseif ($env:GOWA_BUILD) { $env:GOWA_BUILD.Trim().ToLower() } else { 'auto' }
+if ($escolha -eq 'avx512') { $escolha = 'nativa' }
+if ($escolha -notin @('auto', 'portatil', 'nativa')) { Msg "GOWA_BUILD='$escolha' não existe (auto, portatil, nativa): usando auto"; $escolha = 'auto' }
+$motivo = ''
+if ($escolha -eq 'auto') {
     $def = (cmd /c "echo.| `"$llvm\clang.exe`" -march=native -dM -E -x c - 2>nul") -join "`n"
-    if ($def -match '__AVX512F__' -and $def -match '__AVX512BW__' -and $def -match '__AVX512VL__' -and $def -match '__AVX512DQ__') { $alvo = 'avx512' }
-    else { $alvo = 'portatil' }
-}
+    if ($def -match '__AVX512F__' -and $def -match '__AVX512BW__' -and $def -match '__AVX512VL__' -and $def -match '__AVX512DQ__') {
+        $alvo = 'nativa'; $motivo = 'automático: o processador tem AVX-512'
+    } else { $alvo = 'portatil'; $motivo = 'automático: sem AVX-512' }
+    # reports 461/462: "Genuine Intel(R) CPU 0000 @ 2.60GHz" (amostra de engenharia, não se identifica) anuncia AVX-512
+    # e o -march=native liga o que a CPUID diz; o jogo fechou com 0xC000001D (instrução ilegal) logo que as SPUs
+    # começaram. Processador que não diz o nome comercial fica com a build portátil (AVX2), a que todos os outros usam.
+    $nomeCpu = "$((Get-CimInstance Win32_Processor -ErrorAction SilentlyContinue | Select-Object -First 1).Name)".Trim()
+    if ($alvo -eq 'nativa' -and $nomeCpu -match '^Genuine Intel\(R\) CPU|\b0000 @') {
+        Msg "processador sem nome comercial ($nomeCpu, amostra de engenharia): build portátil (AVX2) em vez da nativa"
+        $alvo = 'portatil'; $motivo = 'automático: processador sem nome comercial (amostra de engenharia)'
+    }
+} else { $alvo = $escolha; $motivo = 'escolhida pelo jogador' }
 # sem AVX-512: x86-64-v3 (AVX2), a build testada nos PCs de teste, e não -march=native: tira uma variável dos
 # defeitos gráficos vistos num Ryzen 5 5600X (cores de vértice e texturas erradas) enquanto a causa é investigada
-if ($alvo -eq 'avx512') { $bargs = 'native'; $bdir = 'build_native' } else { $bargs = 'x86-64-v3 rz'; $bdir = 'build_v3rz' }
+function Pasta-Build([string]$a) { if ($a -eq 'nativa') { 'build_native' } else { 'build_v3rz' } }
+function Args-Build([string]$a) { if ($a -eq 'nativa') { 'native' } else { 'x86-64-v3 rz' } }
+$bdir = Pasta-Build $alvo
+# a geração anterior: com a mesma escolha e o exe dela no lugar, fica a build usada (inclusive a portátil que
+# substituiu uma nativa que não compilou); escolha diferente ou exe sumido, compila de novo
+$infoBuild = Join-Path $R 'port\build.txt'
+$antes = @{}
+if (Test-Path $infoBuild) { foreach ($l in (Get-Content -LiteralPath $infoBuild -Encoding UTF8)) { if ($l -match '^(\w+)=(.*)$') { $antes[$matches[1]] = $matches[2] } } }
+if ($antes['escolhida'] -eq $escolha -and $antes['pasta'] -and (Test-Path (Join-Path $R "port\$($antes['pasta'])\gowa.exe"))) {
+    $bdir = $antes['pasta']; $alvo = if ($bdir -eq 'build_native') { 'nativa' } else { 'portatil' }
+    if ($antes['motivo']) { $motivo = $antes['motivo'] }
+} elseif (-not (Test-Path (Join-Path $R "port\$bdir\gowa.exe")) -or ($antes['pasta'] -and $antes['pasta'] -ne $bdir)) {
+    if (Test-Path (Join-Path $OUT '6_compilar.ok')) { Msg "versão da build: $(if ($alvo -eq 'nativa') { 'nativa' } else { 'portátil' }) (outra que a anterior): compilando de novo" }
+    Remove-Item -LiteralPath (Join-Path $OUT '6_compilar.ok'), (Join-Path $OUT '7_jogar.ok') -Force -ErrorAction SilentlyContinue
+}
+# uma build (os passos de antes: SDK/CMake que faltam, -j2 se o ninja parar); devolve se o gowa.exe saiu
+function Compilar-Build([string]$a) {
+    $bd = Pasta-Build $a; $ba = Args-Build $a
+    if ($a -eq 'nativa' -and $env:GOWA_TESTE_NATIVA_FALHA -eq '1') { Msg 'teste: a nativa "falhou" (GOWA_TESTE_NATIVA_FALHA)'; return $false }
+    Msg "build: $a (código SPU com $(if ($a -eq 'portatil') { '-march=x86-64-v3, contas de float em para-zero' } else { '-march=native' }))"
+    $env:GOWA_JOBS = "$Jobs"
+    $exe = Join-Path $R "port\$bd\gowa.exe"
+    Exec $LOG "`"$R\scripts\build_portatil.cmd`" $ba"
+    # report 402: Visual Studio sem o Windows SDK (kernel32.lib); report 452: sem o "C++ CMake tools" (o cmake/ninja).
+    # Pede ao instalador do VS o componente que falta e tenta de novo.
+    $faltaSdk = -not (Test-Path $exe) -and (Select-String -LiteralPath $LOG -Pattern 'GOWA_ERRO_SDK' -SimpleMatch -Quiet)
+    $faltaCmake = -not (Test-Path $exe) -and (Select-String -LiteralPath $LOG -Pattern 'GOWA_ERRO_CMAKE' -SimpleMatch -Quiet)
+    if ($faltaSdk -or $faltaCmake) {
+        $inst = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\setup.exe"
+        if (Test-Path $inst) {
+            $comp = if ($faltaSdk) { 'Microsoft.VisualStudio.Component.Windows11SDK.22621' } else { 'Microsoft.VisualStudio.Component.VC.CMake.Project' }
+            Msg ("o Visual Studio está sem o {0}: instalando o componente (alguns minutos; o Windows pede permissão)" -f
+                 $(if ($faltaSdk) { 'Windows SDK' } else { 'C++ CMake tools' }))
+            $null = SemExcecao { cmd /c ("`"$inst`" modify --installPath `"$VS`" --add $comp " +
+                                         "--passive --wait --norestart >> `"$(Join-Path $OUT 'vs_instala.log')`" 2>&1") }
+            Remove-Item -LiteralPath (Join-Path $R "port\$bd") -Recurse -Force -ErrorAction SilentlyContinue
+            Exec $LOG "`"$R\scripts\build_portatil.cmd`" $ba"
+        }
+    }
+    # report 415: o ninja parou no meio dos arquivos grandes da PPU (provável falta de memória com muitos clang em
+    # paralelo). A compilação continua de onde parou com 2 de cada vez.
+    if (-not (Test-Path $exe) -and (Test-Path (Join-Path $R "port\$bd\build.ninja"))) {
+        Msg 'a compilação parou; tentando de novo com 2 arquivos por vez (menos memória)'
+        $env:GOWA_JOBS = '2'
+        Exec $LOG "`"$R\scripts\build_portatil.cmd`" $ba"
+    }
+    return (Test-Path $exe)
+}
 Etapa '6_compilar' {
-    Msg "build: $alvo (código SPU com $(if ($alvo -eq 'portatil') { '-march=x86-64-v3, contas de float em para-zero' } else { '-march=native' }))"
     $env:GOWA_VS = $VS
     $env:FFMPEG_DIR = Join-Path $R "dl\ffmpeg9\$FFMPEG_NOME"
-    $env:GOWA_JOBS = "$Jobs"
-    Exec $LOG "`"$R\scripts\build_portatil.cmd`" $bargs"
-    if (-not (Test-Path (Join-Path $R "port\$bdir\gowa.exe"))) { throw "o gowa.exe não foi gerado (veja $LOG)" }
+    # reports 398/402 (30/10): o build_portatil.cmd roda o vcvars64 com o PATH só do Windows; o Python volta por aqui
+    # reports 470/473/474: sem Python escolhido ($py nulo) o Split-Path parava a etapa; o build_portatil.cmd usa então
+    # o PATH do jogador, como antes do 932cbf8
+    # o mesmo Python vai para o cmake (GOWA_PY_EXE), em vez do find_package(Python3) procurar outro por conta própria
+    if ($py) { $env:GOWA_PY_DIR = Split-Path -Parent $py; $env:GOWA_PY_EXE = $py }
+    else { Remove-Item Env:GOWA_PY_DIR, Env:GOWA_PY_EXE -ErrorAction SilentlyContinue }
+    $ok = $false
+    try { $ok = Compilar-Build $alvo } catch { if ($alvo -ne 'nativa') { throw }; Anotar $LOG "`r`n=== a nativa parou: $_" }
+    if (-not $ok -and $alvo -eq 'nativa') {
+        # a nativa não compilou: a portátil, com aviso (o jogo continua jogável)
+        Msg 'AVISO: a build nativa não compilou; gerando a portátil (AVX2) no lugar'
+        $script:alvo = 'portatil'; $script:bdir = Pasta-Build 'portatil'
+        $script:motivo = "a nativa não compilou ($motivo); portátil no lugar"
+        $ok = Compilar-Build 'portatil'
+    }
+    if (-not $ok) {
+        # o launcher só manda o fim do log: as linhas de erro vão para o fim e para a mensagem
+        $err = @(Select-String -LiteralPath $LOG -Pattern 'FAILED:|error:|fatal error|GOWA_ERRO_|LINK : |lld-link: error|reconhecido como|incorreta|CMake Error' |
+                 Select-Object -First 30 | ForEach-Object { $_.Line.Substring(0, [Math]::Min(300, $_.Line.Length)) })
+        Anotar $LOG ("`r`n=== erros da compilação (primeiras linhas)`r`n" + ($err -join "`r`n"))
+        throw ("o gowa.exe não foi gerado (veja $LOG)" + $(if ($err) { "`r`n" + (($err | Select-Object -First 8) -join "`r`n") } else { '' }))
+    }
 }
+# o launcher abre o primeiro exe que existir (build_native antes da build_v3rz): o exe da outra versão (de uma
+# geração anterior, reports 461/462) fica renomeado, e o build.txt diz qual abrir
+foreach ($o in @('build_native', 'build_v3rz')) {
+    $velho = Join-Path $R "port\$o\gowa.exe"
+    if ($o -ne $bdir -and (Test-Path $velho)) {
+        Move-Item -LiteralPath $velho -Destination "$velho.antigo" -Force -ErrorAction SilentlyContinue
+        Msg "a $o de antes ficou como gowa.exe.antigo (o jogo abre a $bdir)"
+    }
+}
+$usada = if ($bdir -eq 'build_native') { 'nativa' } else { 'portatil' }
+[IO.File]::WriteAllLines($infoBuild, [string[]]@("escolhida=$escolha", "usada=$usada", "pasta=$bdir", "exe=port/$bdir/gowa.exe", "motivo=$motivo"), (New-Object Text.UTF8Encoding $false))   # UTF-8 sem BOM
+Msg "versão da build: escolhida $escolha, usada $usada ($motivo)"
 
 # ---------------------------------------------------------------------------- jogar.cmd
 Etapa '7_jogar' {
