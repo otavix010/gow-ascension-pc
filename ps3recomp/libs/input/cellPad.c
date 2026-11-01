@@ -578,7 +578,12 @@ static int pad_hid_ler(PadSony* s, u8* r, DWORD n, PadHostState* o)
     u8 v[7] = { 128, 128, 128, 0, 0, 128, 0xFF };   /* 0..255; the hat as its index (0xFF: centred) */
     for (int k = 0; k < 7; k++) {
         ULONG x = 0;
-        if (!s->tem[k] || HidP_GetUsageValue(HidP_Input, 0x01, 0, uso[k], &x, s->pp, (PCHAR)r, n) != HIDP_STATUS_SUCCESS) continue;
+        if (!s->tem[k] || HidP_GetUsageValue(HidP_Input, 0x01, 0, uso[k], &x, s->pp, (PCHAR)r, n) != HIDP_STATUS_SUCCESS) {
+            /* a report without the sticks (another report ID: the DualSense over Bluetooth sends some) says nothing
+             * about the pad; read as a neutral pad it let go of the buttons held (DualSense test, 01/11) */
+            if (k < 2) return 0;
+            continue;
+        }
         LONG val = (LONG)x;
         if (s->vmin[k] < 0 && s->bits[k] > 0 && s->bits[k] < 32 && (x & (1UL << (s->bits[k] - 1))))
             val = (LONG)(x | ~((1UL << s->bits[k]) - 1));   /* signed field */
