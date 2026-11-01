@@ -11263,6 +11263,42 @@ static void sink_end(void* user, const rsx_dispatch* r)
 #endif
 }
 
+/* The RSX clear honours the scissor; ClearRenderTargetView/ClearDepthStencilView
+ * with no rects clear the whole view. GoW Ascension's menu draws its frame and then
+ * blacks out a 5/3-pixel border with four scissored clears -- unclipped, each wiped the
+ * whole frame (black screen with sound after the logos). Same rect as the draw path;
+ * returns 1 and fills *rc when the scissor covers less than the surface.
+ * GOWA_CLEAR_SCISSOR=0: the old whole-view clears. */
+static int ld_clear_rect(u32 target, D3D12_RECT* rc)
+{
+    static int on = -1;
+    if (on < 0) { const char* e = getenv("GOWA_CLEAR_SCISSOR"); on = !(e && *e == '0'); }
+    if (!on) return 0;
+    if (!g.rsx.seen[M_SCISSOR_HORIZONTAL >> 2] && !g.rsx.seen[M_SCISSOR_VERTICAL >> 2]) return 0;
+    rsx_dsp_surface sf; rsx_dsp_get_surface(&g.rsx, &sf);
+    const LONG fw = (LONG)(g.surfaces[target].w ? g.surfaces[target].w : g.width);
+    const LONG fh = (LONG)(g.surfaces[target].h ? g.surfaces[target].h : g.height);
+    D3D12_RECT sc = { 0, 0, fw, fh };
+    const u32 sh = rsx_dsp_reg(&g.rsx, M_SCISSOR_HORIZONTAL);
+    const u32 sv = rsx_dsp_reg(&g.rsx, M_SCISSOR_VERTICAL);
+    const LONG ax = sf.aa_sx ? (LONG)sf.aa_sx : 1, ay = sf.aa_sy ? (LONG)sf.aa_sy : 1;
+    const LONG sx = (LONG)(sh & 0xFFFFu) * ax, sw = (LONG)(sh >> 16) * ax;
+    const LONG sy = (LONG)(sv & 0xFFFFu) * ay, svh = (LONG)(sv >> 16) * ay;
+    if (sx > sc.left)         sc.left   = sx;
+    if (sy > sc.top)          sc.top    = sy;
+    if (sx + sw  < sc.right)  sc.right  = sx + sw;
+    if (sy + svh < sc.bottom) sc.bottom = sy + svh;
+    if (sc.right  < sc.left)  sc.right  = sc.left;
+    if (sc.bottom < sc.top)   sc.bottom = sc.top;
+    if (sc.left == 0 && sc.top == 0 && sc.right == fw && sc.bottom == fh) return 0;
+    if (g.res_scale != 1) {
+        sc.left = (LONG)LD_PX(sc.left); sc.top = (LONG)LD_PX(sc.top);
+        sc.right = (LONG)LD_PX(sc.right); sc.bottom = (LONG)LD_PX(sc.bottom);
+    }
+    *rc = sc;
+    return 1;
+}
+
 static void sink_clear(void* user, const rsx_dispatch* r, u32 mask)
 {
     (void)user; (void)r;
@@ -11315,7 +11351,9 @@ static void sink_clear(void* user, const rsx_dispatch* r, u32 mask)
         { static int ct = -1;
           if (ct < 0) ct = getenv("LD_CLEAR_TEST") ? 1 : 0;
           if (ct) { col[0] = 1.0f; col[1] = 0.0f; col[2] = 1.0f; col[3] = 1.0f; } }
-        g.list->lpVtbl->ClearRenderTargetView(g.list, rtv, col, 0, NULL);
+        { D3D12_RECT rc; const int part = ld_clear_rect(target, &rc);
+          if (!part || (rc.right > rc.left && rc.bottom > rc.top))
+              g.list->lpVtbl->ClearRenderTargetView(g.list, rtv, col, part ? 1 : 0, part ? &rc : NULL); }
         ld_surface_note_write(target, LD_SURFACE_WRITE_CLEAR);
     }
     if ((mask & (RSX_CLEAR_DEPTH | RSX_CLEAR_STENCIL)) && g.depth) {
@@ -11346,8 +11384,10 @@ static void sink_clear(void* user, const rsx_dispatch* r, u32 mask)
               if (zd && zn < 60 && (int)g_ld_frames > zd) { zn++;
                   fprintf(stderr, "[zclear] frame %u zeta %u:0x%X slot %u zs=0x%08X z16=%d -> %f mask=0x%X\n",
                           g_ld_frames, sf.zeta_location, sf.zeta_offset, zslot, zs, z16, cd, mask); } }
-            g.list->lpVtbl->ClearDepthStencilView(g.list, dsv,
-                clear_flags, cd, z16 ? (UINT8)0 : (UINT8)(zs & 0xFFu), 0, NULL);
+            { D3D12_RECT rc; const int part = ld_clear_rect(target, &rc);
+              if (!part || (rc.right > rc.left && rc.bottom > rc.top))
+                  g.list->lpVtbl->ClearDepthStencilView(g.list, dsv,
+                      clear_flags, cd, z16 ? (UINT8)0 : (UINT8)(zs & 0xFFu), part ? 1 : 0, part ? &rc : NULL); }
         }
         if (zslot) {
             g.zdepths[zslot - 1].cleared = 1;
