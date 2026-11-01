@@ -63,10 +63,22 @@ rem (uma pasta com espaço partia o argumento em dois).
 rem O Python que o gerar.ps1 escolheu (GOWA_PY_EXE) para o find_package(Python3); sem ele, a busca padrão do cmake
 set "PY_ARG=-DPython3_FIND_REGISTRY=FIRST"
 if not "%GOWA_PY_EXE%"=="" set "PY_ARG=-DPython3_EXECUTABLE=%GOWA_PY_EXE:\=/%"
-if exist "%DIR%\build.ninja" goto compila
+rem Report 586 (31/10): uma pasta de build antiga guardava no CMakeCache.txt o clang-cl de outra instalação (Clang 12),
+rem e o Visual Studio 18 parava em "STL1000: expected Clang 20 or newer". O clang-cl vai pelo caminho completo, e um
+rem cache que aponta para outro compilador é refeito.
+set "CLANGCL=%GOWA_VS%\VC\Tools\Llvm\x64\bin\clang-cl.exe"
+if not exist "%CLANGCL%" set "CLANGCL=clang-cl"
+set "CLANGCL_F=%CLANGCL:\=/%"
+if not exist "%DIR%\build.ninja" goto configura
+if "%CLANGCL%"=="clang-cl" goto compila
+findstr /i /l /c:"CMAKE_CXX_COMPILER:STRING=%CLANGCL_F%" "%DIR%\CMakeCache.txt" >nul 2>&1 && goto compila
+echo -- o cache do CMake aponta para outro compilador: configurando de novo com "%CLANGCL%"
+del /q "%DIR%\CMakeCache.txt" "%DIR%\build.ninja" 2>nul
+rd /s /q "%DIR%\CMakeFiles" 2>nul
+:configura
 "%CMAKE%" -S "%RAIZ%\port" -B "%DIR%" -G Ninja ^
   "-DCMAKE_MAKE_PROGRAM=%NINJA_F%" ^
-  -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_COMPILER=clang-cl -DCMAKE_CXX_COMPILER=clang-cl ^
+  -DCMAKE_BUILD_TYPE=Release "-DCMAKE_C_COMPILER=%CLANGCL_F%" "-DCMAKE_CXX_COMPILER=%CLANGCL_F%" ^
   "%PGO_MODO%" "%PGO_PERFIL%" "%PY_ARG%" ^
   -DGOWA_PPU_MARCH=x86-64-v3 -DGOWA_SPU_X86_V3=ON "-DGOWA_SPU_MARCH=%MARCH%" -DGOWA_HOST_FMA=ON ^
   -DGOWA_RUNTIME_FAST=ON -DGOWA_SPU_DAZ=ON "-DGOWA_SPU_RZ=%RZ%" ^
