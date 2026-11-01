@@ -476,10 +476,19 @@ typedef struct {
     HANDLE hw;              /* a handle of its own for the output reports (vibration), next to the reader's */
     int  out_len;           /* the output report's length (HidP_GetCaps) */
     int  mot_l, mot_s;      /* the motors last sent (-1: nothing yet) */
+    /* 01/11 (reports 623/624/633/643): any other HID gamepad (PS4 clones, generic USB pads) read through the HID
+     * parser: buttons of page 0x09, X Y Z Rx Ry Rz and the hat, laid out as the DualShock 4's own descriptor */
+    int  gen;
+    PHIDP_PREPARSED_DATA pp;
+    int  tem[7], bits[7];   /* X Y Z Rx Ry Rz hat: present, value size */
+    int  gat;               /* Rx/Ry are triggers (rest near 0 in the first report); -1: not seen yet */
+    const u16* mapa;        /* HID button n -> CELL_PAD_CTRL_*, n = 1..16 */
+    LONG vmin[7], vmax[7];
 } PadSony;
 static PadSony s_sony[PAD_SONY_MAX];
 static volatile LONG s_sony_vivo;
 
+static int pad_sony_saida(PadHostState* o, u16 btns, const u8* ax, u8 l2, u8 r2);
 static int pad_sony_ler(const u8* r, DWORD n, int ds5, int bt, PadHostState* o)
 {
     const u8 *ax, *b;   /* LX LY RX RY; the three button bytes */
@@ -504,6 +513,12 @@ static int pad_sony_ler(const u8* r, DWORD n, int ds5, int bt, PadHostState* o)
     if (b[1] & 0x40) btns |= CELL_PAD_CTRL_L3;
     if (b[1] & 0x80) btns |= CELL_PAD_CTRL_R3;
     if (b[2] & 0x02) btns |= CELL_PAD_CTRL_SELECT;      /* the touchpad's click, as in RPCS3 */
+    return pad_sony_saida(o, btns, ax, l2, r2);
+}
+
+/* the common tail: buttons, sticks (LX LY RX RY, 0..255 with Y down) and triggers into the host state */
+static int pad_sony_saida(PadHostState* o, u16 btns, const u8* ax, u8 l2, u8 r2)
+{
     if (l2 > PAD_TRIGGER_THRESHOLD) btns |= CELL_PAD_CTRL_L2;
     if (r2 > PAD_TRIGGER_THRESHOLD) btns |= CELL_PAD_CTRL_R2;
     o->connected = 1;
@@ -531,6 +546,76 @@ static int pad_sony_ler(const u8* r, DWORD n, int ds5, int bt, PadHostState* o)
     return 1;
 }
 
+/* a generic HID gamepad's report. Buttons from s_pads_hid when the VID:PID is known, else as the DualShock 4
+ * numbers them in DirectInput (1 Square, 2 Cross, 3 Circle, 4 Triangle, 5 L1, 6 R1, 7 L2, 8 R2, 9 Share,
+ * 10 Options, 11 L3, 12 R3, 13 PS, 14 touchpad); GOWA_PAD_HID=pc forces the usual PC pad (1 Triangle, 2 Circle,
+ * 3 Cross, 4 Square). Left stick X/Y; right stick
+ * Z/Rz (Rx/Ry when there is no Rz), analog triggers Rx/Ry next to Z/Rz. */
+static int s_pad_hid_pc = -1;
+#define P_(x) CELL_PAD_CTRL_##x
+static const u16 s_mapa_ds4[16] = { P_(SQUARE), P_(CROSS), P_(CIRCLE), P_(TRIANGLE), P_(L1), P_(R1), P_(L2), P_(R2),
+                                    P_(SELECT), P_(START), P_(L3), P_(R3), 0, P_(SELECT), 0, 0 };
+static const u16 s_mapa_pc[16]  = { P_(TRIANGLE), P_(CIRCLE), P_(CROSS), P_(SQUARE), P_(L1), P_(R1), P_(L2), P_(R2),
+                                    P_(SELECT), P_(START), P_(L3), P_(R3), 0, 0, 0, 0 };
+/* Switch Pro in HID mode: B A Y X L R ZL ZR - + LS RS Home Capture; by position (B is the bottom one, as Cross) */
+static const u16 s_mapa_switch[16] = { P_(CROSS), P_(CIRCLE), P_(SQUARE), P_(TRIANGLE), P_(L1), P_(R1), P_(L2), P_(R2),
+                                       P_(SELECT), P_(START), P_(L3), P_(R3), 0, 0, 0, 0 };
+#undef P_
+/* the generic pads whose buttons are known; the others get the DualShock 4's layout and a line in the log asking for
+ * their VID:PID, to grow this table */
+static const struct { u16 vid, pid; const u16* mapa; const char* nome; } s_pads_hid[] = {
+    { 0x057E, 0x2009, s_mapa_switch, "Switch Pro" },
+    { 0x0079, 0x0006, s_mapa_pc,     "DragonRise (USB genérico)" },
+    { 0x0810, 0x0001, s_mapa_pc,     "Twin USB (adaptador de PS2)" },
+};
+static int pad_hid_ler(PadSony* s, u8* r, DWORD n, PadHostState* o)
+{
+    static const USAGE uso[7] = { 0x30, 0x31, 0x32, 0x33, 0x34, 0x35, 0x39 };
+    static const u16 hat[8] = { CELL_PAD_CTRL_UP, CELL_PAD_CTRL_UP | CELL_PAD_CTRL_RIGHT, CELL_PAD_CTRL_RIGHT,
+        CELL_PAD_CTRL_DOWN | CELL_PAD_CTRL_RIGHT, CELL_PAD_CTRL_DOWN, CELL_PAD_CTRL_DOWN | CELL_PAD_CTRL_LEFT,
+        CELL_PAD_CTRL_LEFT, CELL_PAD_CTRL_UP | CELL_PAD_CTRL_LEFT };
+    if (s_pad_hid_pc < 0) { const char* e = getenv("GOWA_PAD_HID"); s_pad_hid_pc = e && !_stricmp(e, "pc"); }
+    u8 v[7] = { 128, 128, 128, 0, 0, 128, 0xFF };   /* 0..255; the hat as its index (0xFF: centred) */
+    for (int k = 0; k < 7; k++) {
+        ULONG x = 0;
+        if (!s->tem[k] || HidP_GetUsageValue(HidP_Input, 0x01, 0, uso[k], &x, s->pp, (PCHAR)r, n) != HIDP_STATUS_SUCCESS) continue;
+        LONG val = (LONG)x;
+        if (s->vmin[k] < 0 && s->bits[k] > 0 && s->bits[k] < 32 && (x & (1UL << (s->bits[k] - 1))))
+            val = (LONG)(x | ~((1UL << s->bits[k]) - 1));   /* signed field */
+        if (k == 6) { const LONG h = val - s->vmin[k]; v[6] = h >= 0 && h < 8 ? (u8)h : 0xFF; continue; }
+        const LONG span = s->vmax[k] - s->vmin[k];
+        if (span <= 0) continue;
+        LONG t = (val - s->vmin[k]) * 255 / span;
+        v[k] = (u8)(t < 0 ? 0 : t > 255 ? 255 : t);
+    }
+    USAGE b[64];
+    ULONG nb = 64;
+    u16 btns = v[6] < 8 ? hat[v[6]] : 0;
+    if (HidP_GetUsages(HidP_Input, 0x09, 0, b, &nb, s->pp, (PCHAR)r, n) == HIDP_STATUS_SUCCESS)
+        for (ULONG i = 0; i < nb; i++) {
+            if (b[i] < 1 || b[i] > 16) continue;
+            btns |= (s_pad_hid_pc ? s_mapa_pc : s->mapa ? s->mapa : s_mapa_ds4)[b[i] - 1];
+        }
+    u8 ax[4] = { v[0], v[1], v[2], v[5] };
+    u8 l2 = v[3], r2 = v[4];
+    if (!s->tem[5] && s->tem[3] && s->tem[4]) { ax[2] = v[3]; ax[3] = v[4]; l2 = r2 = 0; }
+    if (s->gat < 0) s->gat = v[3] < 64 && v[4] < 64;
+    if (!s->tem[3] || !s->tem[5] || !s->gat) l2 = 0;
+    if (!s->tem[4] || !s->tem[5] || !s->gat) r2 = 0;
+    if (btns & CELL_PAD_CTRL_L2) l2 = 255;
+    if (btns & CELL_PAD_CTRL_R2) r2 = 255;
+    { static int lg = -1; static u16 ant = 0xFFFF; static u8 aa[6];   /* GOWA_PAD_HID_LOG=1: each change (test) */
+      if (lg < 0) lg = getenv("GOWA_PAD_HID_LOG") ? 1 : 0;
+      const u8 now[6] = { ax[0], ax[1], ax[2], ax[3], l2, r2 };
+      int mudou = btns != ant;
+      for (int k = 0; k < 6 && !mudou; k++) mudou = abs((int)now[k] - (int)aa[k]) > 40;
+      if (lg && mudou) {
+          ant = btns; memcpy(aa, now, 6);
+          fprintf(stderr, "[controle-hid] botoes=%04X LX=%u LY=%u RX=%u RY=%u L2=%u R2=%u\n", btns, ax[0], ax[1], ax[2], ax[3], l2, r2);
+      } }
+    return pad_sony_saida(o, btns, ax, l2, r2);
+}
+
 static int pad_sony_longe(u8 x, u8 y) { return abs((int)x - 128) + abs((int)y - 128); }
 
 static DWORD WINAPI pad_sony_leitor(LPVOID arg)
@@ -545,14 +630,20 @@ static DWORD WINAPI pad_sony_leitor(LPVOID arg)
     s->hw = hw;
     ReleaseSRWLockExclusive(&s->lock);
     if (h != INVALID_HANDLE_VALUE) {
-        u8 r[128];
+        u8 r[512];   /* a generic pad's report can be longer than the Sony ones */
         DWORD n;
         PadHostState st;
         int primeiro = 1;
         while (s_sony_vivo && ReadFile(h, r, sizeof r, &n, NULL)) {
             memset(&st, 0, sizeof st);
-            if (!pad_sony_ler(r, n, s->ds5, s->bt, &st)) continue;
-            if (primeiro) { printf("[cellPad] controle Sony lendo (%s, %s, relatório 0x%02X)\n", s->ds5 ? "DualSense" : "DualShock 4", s->bt ? "Bluetooth" : "USB", r[0]); primeiro = 0; }
+            if (!(s->gen ? pad_hid_ler(s, r, n, &st) : pad_sony_ler(r, n, s->ds5, s->bt, &st))) continue;
+            if (primeiro) {
+                if (s->gen) fprintf(stderr, "[controle] HID genérico lendo (layout %s; gatilhos analógicos %s)\n",
+                                    s_pad_hid_pc || s->mapa == s_mapa_pc ? "PC" : s->mapa == s_mapa_switch ? "Switch" : "DualShock 4",
+                                    s->gat ? "sim" : "não");
+                else printf("[cellPad] controle Sony lendo (%s, %s, relatório 0x%02X)\n", s->ds5 ? "DualSense" : "DualShock 4", s->bt ? "Bluetooth" : "USB", r[0]);
+                primeiro = 0;
+            }
             AcquireSRWLockExclusive(&s->lock);
             s->st = st;
             s->dados = 1;
@@ -567,6 +658,7 @@ static DWORD WINAPI pad_sony_leitor(LPVOID arg)
     if (s->hw != INVALID_HANDLE_VALUE && s->hw) CloseHandle(s->hw);
     s->hw = INVALID_HANDLE_VALUE;
     InterlockedExchange(&s->porta, -1);
+    if (s->pp) { HidD_FreePreparsedData(s->pp); s->pp = NULL; }
     ReleaseSRWLockExclusive(&s->lock);
     InterlockedExchange(&s->vivo, 0);   /* unplugged: the next search opens it again */
     return 0;
@@ -587,35 +679,20 @@ static DWORD WINAPI pad_sony_busca(LPVOID arg)
                 det.d.cbSize = sizeof det.d;
                 if (!SetupDiGetDeviceInterfaceDetailW(lista, &di, &det.d, sizeof det, NULL, NULL)) continue;
                 const WCHAR* p = det.d.DevicePath;
-                /* 28/10: "vid_054c" over USB, but "..._VID&0002054c_PID&0ce6..." over Bluetooth: the old test
-                 * skipped every Bluetooth controller (a DualSense only worked by cable or through DSX). Any path
-                 * naming 054c, then the vendor in the attributes below. */
+                /* 28/10: "vid_054c" over USB, but "..._VID&0002054c_PID&0ce6..." over Bluetooth: the path is only
+                 * a hint, the vendor comes from the attributes below. 01/11: every other HID gamepad is read too
+                 * (generic layout), except the HID side of an XInput pad ("&ig_" in the path, or Microsoft's), which
+                 * XInput already reads. GOWA_PAD_HID=0 keeps only the Sony ones. */
+                static int s_hid_gen = -1;
+                if (s_hid_gen < 0) { const char* e = getenv("GOWA_PAD_HID"); s_hid_gen = e && !_stricmp(e, "todos") ? 2 : !(e && *e == '0'); }   /* todos: the Sony ones too (test) */
+                int xinput = 0;
                 {
                     WCHAR baixo[512];
                     size_t i = 0;
                     for (; p[i] && i < 511; i++) baixo[i] = (WCHAR)towlower(p[i]);
                     baixo[i] = 0;
-                    if (!wcsstr(baixo, L"054c")) {
-                        /* 30/10 (reports 422/423): na primeira busca, os controles HID que não são da Sony (DirectInput:
-                         * 8BitDo em modo D, Switch Pro, genéricos USB) vão para o log como não suportados */
-                        if (s_sony_buscas == 0) {
-                            HANDLE g = CreateFileW(p, 0, FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_EXISTING, 0, NULL);
-                            if (g != INVALID_HANDLE_VALUE) {
-                                HIDD_ATTRIBUTES ga = { sizeof ga };
-                                PHIDP_PREPARSED_DATA gp = NULL;
-                                HIDP_CAPS gc;
-                                if (HidD_GetAttributes(g, &ga) && HidD_GetPreparsedData(g, &gp) &&
-                                    HidP_GetCaps(gp, &gc) == HIDP_STATUS_SUCCESS && gc.UsagePage == 0x01 &&
-                                    (gc.Usage == 0x04 || gc.Usage == 0x05))
-                                    fprintf(stderr, "[controle] HID %04X:%04X (%s) sem suporte direto: use o modo XInput do controle, "
-                                            "o Steam Input ou o DS4Windows\n", ga.VendorID, ga.ProductID,
-                                            gc.Usage == 0x05 ? "gamepad" : "joystick");
-                                if (gp) HidD_FreePreparsedData(gp);
-                                CloseHandle(g);
-                            }
-                        }
-                        continue;
-                    }
+                    xinput = wcsstr(baixo, L"&ig_") != NULL;
+                    if (!wcsstr(baixo, L"054c") && (xinput || !s_hid_gen)) continue;
                 }
                 int aberto = 0;
                 for (int k = 0; k < PAD_SONY_MAX; k++) aberto |= s_sony[k].vivo && !_wcsicmp(s_sony[k].caminho, p);
@@ -627,17 +704,57 @@ static DWORD WINAPI pad_sony_busca(LPVOID arg)
                 PHIDP_PREPARSED_DATA pp = NULL;
                 HIDP_CAPS caps;
                 int ok = HidD_GetAttributes(h, &at) && HidD_GetPreparsedData(h, &pp) && HidP_GetCaps(pp, &caps) == HIDP_STATUS_SUCCESS;
-                if (pp) HidD_FreePreparsedData(pp);
                 CloseHandle(h);
-                if (!ok || at.VendorID != 0x054C || caps.UsagePage != 0x01 || (caps.Usage != 0x05 && caps.Usage != 0x04)) continue;
-                const int ds5 = at.ProductID == 0x0CE6 || at.ProductID == 0x0DF2;
-                const int ds4 = at.ProductID == 0x05C4 || at.ProductID == 0x09CC || at.ProductID == 0x0BA0;
-                if (!ds5 && !ds4) {
+                if (!ok || caps.UsagePage != 0x01 || (caps.Usage != 0x05 && caps.Usage != 0x04)) { if (pp) HidD_FreePreparsedData(pp); continue; }
+                const int sony = at.VendorID == 0x054C;
+                const int ds5 = sony && (at.ProductID == 0x0CE6 || at.ProductID == 0x0DF2);
+                const int ds4 = sony && (at.ProductID == 0x05C4 || at.ProductID == 0x09CC || at.ProductID == 0x0BA0);
+                int gen = (!ds5 && !ds4) || s_hid_gen == 2;
+                if (gen && (!s_hid_gen || at.VendorID == 0x045E || (sony && at.ProductID == 0x0268))) {
+                    /* the DualShock 3 numbers its buttons in another order: not through the generic layout */
                     if (s_sony_buscas == 0)
-                        fprintf(stderr, "[controle] Sony %04X:%04X sem suporte (só DualShock 4 e DualSense)\n", at.VendorID, at.ProductID);
+                        fprintf(stderr, "[controle] HID %04X:%04X (%s) sem suporte direto: use o modo XInput do controle, "
+                                "o Steam Input ou o DS4Windows\n", at.VendorID, at.ProductID, caps.Usage == 0x05 ? "gamepad" : "joystick");
+                    HidD_FreePreparsedData(pp);
                     continue;
                 }
-                fprintf(stderr, "[controle] %s por %s\n", ds5 ? "DualSense" : "DualShock 4", caps.InputReportByteLength != 64 ? "Bluetooth" : "USB");
+                /* the generic layout needs the sticks: X and Y at least */
+                PadSony g;
+                memset(&g, 0, sizeof g);
+                if (gen) {
+                    static const USAGE uso[7] = { 0x30, 0x31, 0x32, 0x33, 0x34, 0x35, 0x39 };
+                    HIDP_VALUE_CAPS vc[32];
+                    USHORT nv = 32;
+                    if (HidP_GetValueCaps(HidP_Input, vc, &nv, pp) == HIDP_STATUS_SUCCESS)
+                        for (USHORT j = 0; j < nv; j++) {
+                            if (vc[j].UsagePage != 0x01) continue;
+                            for (int k = 0; k < 7; k++) {
+                                const int dentro = vc[j].IsRange ? (uso[k] >= vc[j].Range.UsageMin && uso[k] <= vc[j].Range.UsageMax)
+                                                                 : uso[k] == vc[j].NotRange.Usage;
+                                if (!dentro || g.tem[k]) continue;
+                                g.tem[k] = 1; g.bits[k] = vc[j].BitSize; g.vmin[k] = vc[j].LogicalMin; g.vmax[k] = vc[j].LogicalMax;
+                                if (g.vmax[k] <= g.vmin[k] && g.bits[k] > 0 && g.bits[k] < 32) { g.vmin[k] = 0; g.vmax[k] = (LONG)((1UL << g.bits[k]) - 1); }
+                            }
+                        }
+                    if (!g.tem[0] || !g.tem[1]) {
+                        if (s_sony_buscas == 0)
+                            fprintf(stderr, "[controle] HID %04X:%04X sem eixos X/Y: ignorado\n", at.VendorID, at.ProductID);
+                        HidD_FreePreparsedData(pp);
+                        continue;
+                    }
+                    const char* nome = NULL;
+                    for (size_t j = 0; j < sizeof s_pads_hid / sizeof s_pads_hid[0]; j++)
+                        if (s_pads_hid[j].vid == at.VendorID && s_pads_hid[j].pid == at.ProductID) { g.mapa = s_pads_hid[j].mapa; nome = s_pads_hid[j].nome; }
+                    fprintf(stderr, "[controle] HID genérico %04X:%04X %s (%s; eixos%s%s%s%s%s%s, hat %s)%s\n", at.VendorID, at.ProductID,
+                            nome ? nome : "desconhecido", caps.Usage == 0x05 ? "gamepad" : "joystick", g.tem[0] ? " X" : "", g.tem[1] ? " Y" : "",
+                            g.tem[2] ? " Z" : "", g.tem[3] ? " Rx" : "", g.tem[4] ? " Ry" : "", g.tem[5] ? " Rz" : "", g.tem[6] ? "sim" : "não",
+                            nome ? "" : ": botões no layout do DualShock 4 (GOWA_PAD_HID=pc para o de PC); se vierem trocados, mande esta linha");
+                } else {
+                    HidD_FreePreparsedData(pp);
+                    pp = NULL;
+                    fprintf(stderr, "[controle] %s por %s\n", ds5 ? "DualSense" : "DualShock 4", caps.InputReportByteLength != 64 ? "Bluetooth" : "USB");
+                }
+                int pos = 0;
                 for (int k = 0; k < PAD_SONY_MAX; k++) {
                     if (InterlockedCompareExchange(&s_sony[k].vivo, 1, 0) != 0) continue;
                     PadSony* s = &s_sony[k];
@@ -648,10 +765,18 @@ static DWORD WINAPI pad_sony_busca(LPVOID arg)
                     s->out_len = caps.OutputReportByteLength;
                     s->porta = -1;
                     s->mot_l = s->mot_s = -1;
+                    s->gen = gen;
+                    s->pp = pp;
+                    memcpy(s->tem, g.tem, sizeof g.tem); memcpy(s->bits, g.bits, sizeof g.bits);
+                    memcpy(s->vmin, g.vmin, sizeof g.vmin); memcpy(s->vmax, g.vmax, sizeof g.vmax);
+                    s->gat = -1;
+                    s->mapa = g.mapa;
                     HANDLE t = CreateThread(NULL, 0, pad_sony_leitor, s, 0, NULL);
-                    if (t) CloseHandle(t); else InterlockedExchange(&s->vivo, 0);
+                    if (t) CloseHandle(t); else { s->pp = NULL; InterlockedExchange(&s->vivo, 0); }
+                    pos = t != NULL;
                     break;
                 }
+                if (!pos && pp) HidD_FreePreparsedData(pp);
             }
             SetupDiDestroyDeviceInfoList(lista);
         }
@@ -706,7 +831,7 @@ static int pad_sony_vibrar(u32 porta, u8 grande, u8 pequeno)
         PadSony* s = &s_sony[k];
         if (!s->vivo || s->porta != (LONG)porta) continue;
         AcquireSRWLockExclusive(&s->lock);
-        if (!s->bt && s->hw && s->hw != INVALID_HANDLE_VALUE && s->out_len >= 6 && s->out_len <= 128 &&
+        if (!s->gen && !s->bt && s->hw && s->hw != INVALID_HANDLE_VALUE && s->out_len >= 6 && s->out_len <= 128 &&
             (s->mot_l != grande || s->mot_s != pequeno)) {
             u8 r[128];
             memset(r, 0, sizeof r);
