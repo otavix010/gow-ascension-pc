@@ -1296,14 +1296,20 @@ extern "C" void gowa_probe(unsigned int addr, ppu_context* ctx)
      * (rodada 24 do notebook, ibmfc). Parada aqui por mais de <ms>, a PPU reacende o aviso (readyCount = 4)
      * dos três a cada 100 ms: um aviso a mais só faz o PM conferir a fila e voltar. 0 desliga. */
     if (addr == 0x00415914u) {
-        static int s_lim = -1; static ULONGLONG s_ini, s_ult, s_kick; static long s_n;
+        static int s_lim = -1, s_log = -1; static ULONGLONG s_ini, s_ult, s_kick; static long s_n, s_nesta;
         if (s_lim < 0) { const char* e = getenv("GOWA_RESGATE_415914"); s_lim = e ? atoi(e) : 0; }
-        if (s_lim > 0) {
+        /* GOWA_ESPERA_LOG=<ms>: cada espera aqui mais longa que <ms>, ao terminar (com quantos avisos levou) */
+        if (s_log < 0) { const char* e = getenv("GOWA_ESPERA_LOG"); s_log = e ? atoi(e) : 0; }
+        if (s_lim > 0 || s_log > 0) {
             const ULONGLONG now = GetTickCount64();
-            if (now - s_ult > 50) { s_ini = now; s_kick = 0; }   /* espera nova */
+            if (now - s_ult > 50) {   /* espera nova */
+                if (s_log > 0 && s_ult && s_ult - s_ini >= (ULONGLONG)s_log)
+                    fprintf(stderr, "[espera] 0x415914 durou %llu ms (%ld avisos)\n", (unsigned long long)(s_ult - s_ini), s_nesta);
+                s_ini = now; s_kick = 0; s_nesta = 0;
+            }
             s_ult = now;
-            if (now - s_ini >= (ULONGLONG)s_lim && now - s_kick >= 100) {
-                s_kick = now;
+            if (s_lim > 0 && now - s_ini >= (ULONGLONG)s_lim && now - s_kick >= 100) {
+                s_kick = now; s_nesta++;
                 const uint32_t linha = 0x1101AD00u;   /* SPURS: bytes 0x10+n = readyCount do wid 16+n */
                 for (uint32_t w = 19; w <= 21; w++) {
                     const uint32_t ea = (linha + 0x10u + (w - 16u)) & ~3u, sh = (3u - ((w - 16u) & 3u)) * 8u;
