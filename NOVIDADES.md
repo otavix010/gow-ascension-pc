@@ -4,6 +4,14 @@ O Otavix Launcher mostra este arquivo na página "Novidades" do jogo. Cada atual
 "## <data> · <versão>" e o texto em português (### pt), inglês (### en) e, quando houver, espanhol (### es).
 As mais novas ficam em cima.
 
+## 01/11/2026 · 43491b9
+### pt
+- **Gráficos:** corrigidas as mãos amarelas e a pele manchada do Kratos em placas com pouca memória de vídeo (texturas que não eram refeitas).
+### en
+- **Graphics:** fixed Kratos' yellow hands and blotchy skin on cards with little video memory (textures that were not being redone).
+### es
+- **Gráficos:** corregidas las manos amarillas y la piel manchada de Kratos en tarjetas con poca memoria de vídeo (texturas que no se rehacían).
+
 ## 01/11/2026 · 830dab8
 ### pt
 - **Carregamento:** corrigida a trava rara na tela de carregamento; o jogo agora segue sozinho em vez de ficar parado.
