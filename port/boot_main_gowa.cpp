@@ -2537,6 +2537,31 @@ static LONG WINAPI vm_commit_veh(EXCEPTION_POINTERS* ep)
             void* page = (void*)(fault & ~(uintptr_t)0xFFFF);
             if (VirtualAlloc(page, 0x10000, MEM_COMMIT, PAGE_READWRITE))
                 return EXCEPTION_CONTINUE_EXECUTION;
+            /* GOWA (01/11, reports 590-595): o commit falha quando a RAM + arquivo de paginação
+             * acabam (ERROR_COMMITMENT_LIMIT); com o arquivo gerenciado pelo Windows ele cresce
+             * em seguida, então insistir por até ~3 s antes de deixar o crash seguir. */
+            const DWORD err = GetLastError();
+            for (int t = 0; t < 300; t++) {
+                Sleep(10);
+                if (VirtualAlloc(page, 0x10000, MEM_COMMIT, PAGE_READWRITE)) {
+                    static LONG s_rec = 0;
+                    if (InterlockedIncrement(&s_rec) <= 4)
+                        fprintf(stderr, "[memória] commit da página 0x%08llX conseguido depois de %d ms (erro %lu)\n",
+                                (unsigned long long)((uintptr_t)page - base), (t + 1) * 10, err);
+                    return EXCEPTION_CONTINUE_EXECUTION;
+                }
+            }
+            static LONG s_falha = 0;
+            if (InterlockedIncrement(&s_falha) == 1) {
+                MEMORYSTATUSEX ms; ms.dwLength = sizeof(ms); GlobalMemoryStatusEx(&ms);
+                fprintf(stderr, "[memória] SEM MEMÓRIA: commit da página 0x%08llX do guest falhou (erro %lu); "
+                        "RAM livre %llu de %llu MB, commit livre %llu de %llu MB -- aumente o arquivo de paginação "
+                        "(ou deixe-o gerenciado pelo Windows) e feche outros programas\n",
+                        (unsigned long long)((uintptr_t)page - base), err,
+                        (unsigned long long)(ms.ullAvailPhys >> 20), (unsigned long long)(ms.ullTotalPhys >> 20),
+                        (unsigned long long)(ms.ullAvailPageFile >> 20), (unsigned long long)(ms.ullTotalPageFile >> 20));
+                fflush(stderr);
+            }
         }
     }
     return EXCEPTION_CONTINUE_SEARCH;
