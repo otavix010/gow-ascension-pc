@@ -3553,6 +3553,11 @@ static ID3D12Resource* decode_guest_texture_profiled(
     static int s_texlog = -1;
     if (s_texlog < 0) s_texlog = getenv("GOWA_TEX_LOG") ? 1 : 0;
     LARGE_INTEGER tl0; if (s_texlog) QueryPerformanceCounter(&tl0);
+    /* GOWA_TEX_FALHA_TESTE=<N> (teste): decodificações falham como numa VRAM sem espaço */
+    { static int ft = -1; static u32 nft;
+      if (ft < 0) { const char* e = getenv("GOWA_TEX_FALHA_TESTE"); ft = e ? atoi(e) : 0; }
+      (void)nft;   /* falha persistente, como a VRAM cheia: as texturas com (offset>>8) % N == 0, por 30 quadros a cada 300 */
+      if (ft > 0 && ((texture->offset >> 8) % (u32)ft) == 0 && (g_ld_frames % 300u) < 30u) return NULL; }
     ID3D12Resource* result = decode_guest_texture(texture, remap);
     if (s_texlog) {
         LARGE_INTEGER tl1, tf; QueryPerformanceCounter(&tl1); QueryPerformanceFrequency(&tf);
@@ -3923,7 +3928,9 @@ static u32 texture_srv_slot(const rsx_dsp_texture* t)
                  * neste quadro, o write-watch a dava como intacta dali em diante e ela não era refeita até
                  * o jogo escrever de novo ali: a textura de outro objeto ficava nas mãos e na pele do Kratos.
                  * Volta o quadro do hash: as páginas continuam sujas e a troca é tentada de novo. */
-                if (!replacement) {
+                static int retenta = -1;   /* GOWA_TEX_RETENTA=0: o comportamento antigo (A/B) */
+                if (retenta < 0) { const char* e = getenv("GOWA_TEX_RETENTA"); retenta = !(e && *e == '0'); }
+                if (!replacement && retenta) {
                     entry->last_hash_frame = hash_antes;
                     static u32 nf;
                     if (nf++ < 16 || (nf & (nf - 1)) == 0)
