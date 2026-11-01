@@ -3848,6 +3848,20 @@ static u32 texture_srv_slot(const rsx_dsp_texture* t)
                               (unsigned long long)s_ld_ww_n[0], (unsigned long long)s_ld_ww_n[1], (unsigned long long)s_ld_ww_n[2]);
                       memset(s_ld_ww_n, 0, sizeof s_ld_ww_n); } }
               if (src && entry->content_hash && !ld_tex_paginas_sujas(src, span, entry->last_hash_frame)) {
+                  /* GOWA_TEX_WW_CHECK=<N> (01/11, mão amarela 627/630/638/642): a cada N quadros a textura que o
+                   * write-watch deu como intacta leva o hash completo mesmo assim; se mudou, uma escrita passou
+                   * sem ser vista (a textura velha fica na tela) -- o log diz onde */
+                  { static int ck = -1; static unsigned nerr;
+                    if (ck < 0) { const char* e = getenv("GOWA_TEX_WW_CHECK"); ck = e ? atoi(e) : 0; }
+                    if (ck > 0 && g_ld_frames % (u32)ck == 0) {
+                        int rd = 0;
+                        const u64 h = texture_content_hash(t, &rd);
+                        if (rd && h != entry->content_hash && nerr < 200) {
+                            nerr++;
+                            fprintf(stderr, "[texww-erro] quadro %u: textura %u:0x%08X %ux%u fmt=0x%02X span=%u mudou sem escrita vista (hash do quadro %u)\n",
+                                    g_ld_frames, t->location, t->offset, t->width, t->height, t->format & 0xFF, span, entry->last_hash_frame);
+                        }
+                    } }
                   entry->last_hash_frame = g_ld_frames;
                   goto ld_tex_intacta;
               } }
@@ -3897,12 +3911,25 @@ static u32 texture_srv_slot(const rsx_dsp_texture* t)
                               texture_source_span(t), t->width, t->height,
                               t->pitch);
               } }
+            const u32 hash_antes = entry->last_hash_frame;
             entry->last_hash_frame = g_ld_frames;
             if (readable && hash != entry->content_hash) {
                 g_ld_reuse_tex = entry->cubemap ? NULL : entry->tex;
                 ID3D12Resource* replacement =
                     decode_guest_texture_profiled(t, remap);
                 g_ld_reuse_tex = NULL;
+                /* 01/11 (mão amarela 627/630/638/642): a troca falhou (VRAM sem espaço para a textura nova,
+                 * formato que não decodifica) e a entrada segue com a textura VELHA. Marcada como conferida
+                 * neste quadro, o write-watch a dava como intacta dali em diante e ela não era refeita até
+                 * o jogo escrever de novo ali: a textura de outro objeto ficava nas mãos e na pele do Kratos.
+                 * Volta o quadro do hash: as páginas continuam sujas e a troca é tentada de novo. */
+                if (!replacement) {
+                    entry->last_hash_frame = hash_antes;
+                    static u32 nf;
+                    if (nf++ < 16 || (nf & (nf - 1)) == 0)
+                        fprintf(stderr, "[tex-troca] falhou (%u): %u:0x%08X %ux%u fmt=0x%02X; tenta de novo no próximo quadro\n",
+                                nf, t->location, t->offset, t->width, t->height, t->format & 0xFF);
+                }
                 if (replacement) {
                     ID3D12Resource* old = entry->tex;
                     entry->tex = replacement;
