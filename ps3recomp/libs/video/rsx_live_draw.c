@@ -6082,6 +6082,25 @@ static ld_cjob *s_cj_head, *s_cj_tail, *s_cj_tab;
 static volatile LONG s_cj_pend;
 static int s_cj_on = -1;
 static int g_ld_pso_pendente;
+/* 01/11 (report 678, RX 6800 XT): o D3DCOMPILER_47 caiu com acesso inválido dentro do D3DCompile de um shader do
+ * jogo aos 11 min e levou o jogo junto. Uma falha dentro do compilador vira um shader que não compila (o desenho é
+ * pulado, como num erro de compilação) em vez de fechar o jogo. */
+static HRESULT ld_d3dcompile_protegido(const char* src, SIZE_T len, const char* nome, const char* alvo,
+                                       ID3DBlob** blob, ID3DBlob** err)
+{
+    __try {
+        return D3DCompile(src, len, nome, NULL, NULL, "main", alvo, 0, 0, blob, err);
+    } __except (GetExceptionCode() == EXCEPTION_ACCESS_VIOLATION ? EXCEPTION_EXECUTE_HANDLER : EXCEPTION_CONTINUE_SEARCH) {
+        static volatile LONG n;
+        if (InterlockedIncrement(&n) <= 16)
+            fprintf(stderr, "[shader] o compilador da Microsoft falhou (acesso inválido) em %s (%u bytes); shader pulado\n",
+                    nome, (unsigned)len);
+        *blob = NULL;
+        if (err) *err = NULL;
+        return E_FAIL;
+    }
+}
+
 static DWORD WINAPI ld_cjob_worker(LPVOID a)
 {
     (void)a;
@@ -6096,8 +6115,8 @@ static DWORD WINAPI ld_cjob_worker(LPVOID a)
         if (j->stage == 'S')
             j->hr = g.dev->lpVtbl->CreateGraphicsPipelineState(g.dev, &j->pd, &IID_ID3D12PipelineState, (void**)&j->pso);
         else
-        j->hr = D3DCompile(j->src, j->len, j->stage == 'V' ? "xvs" : "xps", NULL, NULL, "main",
-                           j->stage == 'V' ? "vs_5_0" : "ps_5_0", 0, 0, &j->blob, &j->err);
+        j->hr = ld_d3dcompile_protegido(j->src, j->len, j->stage == 'V' ? "xvs" : "xps",
+                                        j->stage == 'V' ? "vs_5_0" : "ps_5_0", &j->blob, &j->err);
         InterlockedExchange(&j->done, 1);
     }
     return 0;
@@ -6242,9 +6261,7 @@ static ID3D12PipelineState* build_pso(
             { LARGE_INTEGER e0, e1; QueryPerformanceCounter(&e0);
             if (ld_cjob_on()) vs = ld_cjob_take('V', vs_hlsl, vs_length, vs_hash, &vs_hr, &err);
             else
-            vs_hr = D3DCompile(
-                vs_hlsl, vs_length, "xvs", NULL, NULL, "main",
-                "vs_5_0", 0, 0, &vs, &err);
+            vs_hr = ld_d3dcompile_protegido(vs_hlsl, vs_length, "xvs", "vs_5_0", &vs, &err);
               QueryPerformanceCounter(&e1); g_eng_hlsl_qpc += e1.QuadPart - e0.QuadPart; g_eng_hlsl_n++; }
 #if defined(YZ_PERF_PROFILE)
             g_ld_profile.total.vs_compile_qpc +=
@@ -6310,9 +6327,7 @@ static ID3D12PipelineState* build_pso(
             { LARGE_INTEGER e0, e1; QueryPerformanceCounter(&e0);
             if (ld_cjob_on()) ps = ld_cjob_take('P', ps_hlsl, ps_length, ps_hash, &ps_hr, &err);
             else
-            ps_hr = D3DCompile(
-                ps_hlsl, ps_length, "xps", NULL, NULL, "main",
-                "ps_5_0", 0, 0, &ps, &err);
+            ps_hr = ld_d3dcompile_protegido(ps_hlsl, ps_length, "xps", "ps_5_0", &ps, &err);
               QueryPerformanceCounter(&e1); g_eng_hlsl_qpc += e1.QuadPart - e0.QuadPart; g_eng_hlsl_n++; }
 #if defined(YZ_PERF_PROFILE)
             g_ld_profile.total.ps_compile_qpc +=
