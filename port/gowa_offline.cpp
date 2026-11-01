@@ -1288,6 +1288,38 @@ extern "C" void gowa_tm_end(unsigned int lr)
 /* Sonda de depuração inserida no código lifted por scripts/sonda.py. */
 extern "C" void gowa_probe(unsigned int addr, ppu_context* ctx)
 {
+    /* GOWA_RESGATE_415914=<ms> (01/11, trava da carga do cap. 16): a thread principal espera em 0x415914 o
+     * contador do slot (0xA03240 + 4*slot) zerar. Os 3 slots são os workloads 19/20/21 do SPURS, encadeados
+     * (o anterior zera o contador do seguinte), e todos esperam o mesmo contador 0xA03224, rearmado a cada
+     * quadro para o wid da vez. Quando um wid acorda antes de a PPU escrever a corrente dele (bloco 0 vazio),
+     * ele gasta o aviso e desiste; quando ela aparece, 0xA03224 já é de outro wid e ninguém o acorda de novo
+     * (rodada 24 do notebook, ibmfc). Parada aqui por mais de <ms>, a PPU reacende o aviso (readyCount = 4)
+     * dos três a cada 100 ms: um aviso a mais só faz o PM conferir a fila e voltar. 0 desliga. */
+    if (addr == 0x00415914u) {
+        static int s_lim = -1; static ULONGLONG s_ini, s_ult, s_kick; static long s_n;
+        if (s_lim < 0) { const char* e = getenv("GOWA_RESGATE_415914"); s_lim = e ? atoi(e) : 0; }
+        if (s_lim > 0) {
+            const ULONGLONG now = GetTickCount64();
+            if (now - s_ult > 50) { s_ini = now; s_kick = 0; }   /* espera nova */
+            s_ult = now;
+            if (now - s_ini >= (ULONGLONG)s_lim && now - s_kick >= 100) {
+                s_kick = now;
+                const uint32_t linha = 0x1101AD00u;   /* SPURS: bytes 0x10+n = readyCount do wid 16+n */
+                for (uint32_t w = 19; w <= 21; w++) {
+                    const uint32_t ea = (linha + 0x10u + (w - 16u)) & ~3u, sh = (3u - ((w - 16u) & 3u)) * 8u;
+                    for (int t = 0; t < 64; t++) {
+                        const uint32_t v = vm_read32(ea);
+                        if ((v >> sh) & 0xFFu) break;
+                        ctx->reserve_addr = ea; ctx->reserve_value = v; PPU_CTX_SYNC(ctx);
+                        if (ppu_stwcx32(ea, v, v | (4u << sh))) break;
+                    }
+                }
+                ctx->reserve_addr = 0;
+                fprintf(stderr, "[resgate] 0x415914 parada há %llu ms (contadores %08X %08X %08X): aviso aos wids 19-21 (%ld)\n",
+                        (unsigned long long)(now - s_ini), vm_read32(0xA03240u), vm_read32(0xA03244u), vm_read32(0xA03248u), ++s_n);
+            }
+        }
+    }
     /* GOWA_PROBE_COUNT=1: só conta passagens por endereço e imprime o total a
      * cada ~5 s (para medir em qual laço de espera uma thread gasta o tempo). */
     { static int s_cnt = -1; if (s_cnt < 0) s_cnt = getenv("GOWA_PROBE_COUNT") ? 1 : 0;
