@@ -379,6 +379,19 @@ Etapa '1_ferramentas' {
             try { Expand-Archive -Path $zip -DestinationPath (Join-Path $R 'dl\ffmpeg9') -Force; break }
             catch {
                 Remove-Item $zip -ErrorAction SilentlyContinue
+                # reports 632/637 (01/11): "chegou incompleto" numa pasta funda -- o zip estava inteiro (o sha256 do
+                # espelho bateu) e quem falhou foi a extração: o arquivo mais fundo do FFmpeg tem 88 caracteres depois
+                # de dl\ffmpeg9\, e o Windows para em 260
+                $longo = (Join-Path $R 'dl\ffmpeg9').Length + 89
+                if ($longo -ge 260 -or $_.Exception -is [IO.PathTooLongException]) {
+                    throw ("o FFmpeg baixou inteiro, mas não coube na pasta do jogo: o caminho dela é longo demais para o " +
+                           "Windows ($($R.Length) caracteres em $R). Instale o jogo numa pasta curta, como C:\OtavixPorts, " +
+                           "e gere de novo.")
+                }
+                if ($doEspelho) {
+                    throw ("o FFmpeg baixou inteiro (conferido), mas não foi extraído: $($_.Exception.Message). Confira o " +
+                           "espaço livre no disco e se o antivírus não está bloqueando a pasta do jogo, e gere de novo.")
+                }
                 if ($vez -ge 2) {
                     throw ("o FFmpeg chegou incompleto ou corrompido duas vezes ($FFMPEG_URL). Confira a internet " +
                            "e se o antivírus não está bloqueando o download, e gere de novo.")
