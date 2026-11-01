@@ -4,6 +4,23 @@ O Otavix Launcher mostra este arquivo na página "Novidades" do jogo. Cada atual
 "## <data> · <versão>" e o texto em português (### pt), inglês (### en) e, quando houver, espanhol (### es).
 As mais novas ficam em cima.
 
+## 01/11/2026 · 2c172ea
+### pt
+- **Memória:** quando o Windows demora a liberar memória, o jogo espera em vez de fechar. Se ela faltar de vez, o log (`jogo.log`) mostra "[memória] SEM MEMÓRIA"; nesse caso aumente o arquivo de paginação do Windows (ou deixe-o gerenciado pelo sistema) e feche outros programas antes de jogar.
+- **Geração:** uma pasta de compilação antiga, feita com outro compilador, agora é refeita com o do Visual Studio instalado (corrige o erro STL1000 com o Visual Studio 18).
+- **Coerência:** as escritas vetoriais do processador principal agora respeitam as reservas das SPUs, como no console.
+- A geração refaz a tradução do código do PPU uma vez, por isso demora mais que o normal.
+### en
+- **Memory:** when Windows is slow to free memory, the game now waits instead of closing. If memory runs out for good, the log (`jogo.log`) shows "[memória] SEM MEMÓRIA"; in that case increase the Windows paging file (or let the system manage it) and close other programs before playing.
+- **Generation:** an old build folder made with another compiler is now rebuilt with the installed Visual Studio's compiler (fixes the STL1000 error with Visual Studio 18).
+- **Coherence:** vector writes from the main processor now respect the SPUs' reservations, as on the console.
+- Generation translates the PPU code again once, so it takes longer than usual.
+### es
+- **Memoria:** cuando Windows tarda en liberar memoria, el juego espera en lugar de cerrarse. Si la memoria se agota del todo, el registro (`jogo.log`) muestra "[memória] SEM MEMÓRIA"; en ese caso aumente el archivo de paginación de Windows (o déjelo administrado por el sistema) y cierre otros programas antes de jugar.
+- **Generación:** una carpeta de compilación antigua, hecha con otro compilador, ahora se rehace con el del Visual Studio instalado (corrige el error STL1000 con Visual Studio 18).
+- **Coherencia:** las escrituras vectoriales del procesador principal ahora respetan las reservas de las SPU, como en la consola.
+- La generación vuelve a traducir el código de la PPU una vez, por eso tarda más de lo normal.
+
 ## 31/10/2026 · 7dcbe7c
 ### pt
 - **Travamento na tela de carregamento:** corrigida uma disputa entre o processador principal e as SPUs ao limpar a fila de trabalhos, que podia deixar o jogo parado na carga.
