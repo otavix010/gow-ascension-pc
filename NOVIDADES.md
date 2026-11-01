@@ -4,6 +4,20 @@ O Otavix Launcher mostra este arquivo na página "Novidades" do jogo. Cada atual
 "## <data> · <versão>" e o texto em português (### pt), inglês (### en) e, quando houver, espanhol (### es).
 As mais novas ficam em cima.
 
+## 01/11/2026 · 830dab8
+### pt
+- **Carregamento:** corrigida a trava rara na tela de carregamento; o jogo agora segue sozinho em vez de ficar parado.
+- **Controles:** clones de PS4, controles USB/DirectInput e Switch Pro agora funcionam, além dos de Xbox, DualSense e DualShock 4. Se os botões vierem trocados, envie a linha "[controle] HID genérico" do `jogo.log`.
+- **Geração:** mensagem clara quando o caminho da pasta do jogo é longo demais para extrair o FFmpeg (sugere `C:\OtavixPorts`).
+### en
+- **Loading:** fixed the rare hang on the loading screen; the game now continues on its own instead of staying stuck.
+- **Controllers:** PS4 clones, generic USB/DirectInput controllers and the Switch Pro now work, besides Xbox, DualSense and DualShock 4 controllers. If the buttons come swapped, send the "[controle] HID genérico" line from `jogo.log`.
+- **Generation:** clear message when the game folder path is too long to extract FFmpeg (suggests `C:\OtavixPorts`).
+### es
+- **Carga:** corregido el cuelgue raro en la pantalla de carga; el juego ahora continúa solo en lugar de quedarse parado.
+- **Mandos:** los clones de PS4, los mandos USB/DirectInput y el Switch Pro ahora funcionan, además de los de Xbox, DualSense y DualShock 4. Si los botones vienen cambiados, envíe la línea "[controle] HID genérico" del `jogo.log`.
+- **Generación:** mensaje claro cuando la ruta de la carpeta del juego es demasiado larga para extraer FFmpeg (sugiere `C:\OtavixPorts`).
+
 ## 01/11/2026 · 2c172ea
 ### pt
 - **Memória:** quando o Windows demora a liberar memória, o jogo espera em vez de fechar. Se ela faltar de vez, o log (`jogo.log`) mostra "[memória] SEM MEMÓRIA"; nesse caso aumente o arquivo de paginação do Windows (ou deixe-o gerenciado pelo sistema) e feche outros programas antes de jogar.
