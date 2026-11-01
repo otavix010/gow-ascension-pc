@@ -2618,6 +2618,13 @@ int main(int argc, char** argv)
         SetEnvironmentVariableA("GOWA_SIG_BACKPRESSURE", "11037280:3:5000,15E66100:5:2000");   /* + taskset do inflate (wid 5) */
     if (!GetEnvironmentVariableA("GOWA_REPORT_PACE_MS", NULL, 0))
         SetEnvironmentVariableA("GOWA_REPORT_PACE_MS", "0");
+    /*  GOWA_RESGATE_415914=2000 (01/11) -- a trava rara da carga (~1 em 30 no notebook, cap. 16): a thread
+     *  principal parada na espera do slot (0x415914) reacende o aviso dos workloads 19-21 (gowa_offline.cpp).
+     *  As esperas normais ali vão até ~3 s na carga e terminam sozinhas; um aviso a mais só faz o PM conferir a
+     *  fila (1 ms: 722 avisos numa carga, nada muda). Na trava real (notebook, rodada 18) o primeiro aviso
+     *  desfez o impasse. GOWA_RESGATE_415914=0 desliga. */
+    if (!GetEnvironmentVariableA("GOWA_RESGATE_415914", NULL, 0))
+        SetEnvironmentVariableA("GOWA_RESGATE_415914", "2000");
     /*  SPU_INTERP_UNLIFTED=1 -- código SPU sem tradução (plugins copiados em
      *  tempo de execução) roda no interpretador e volta ao nativo.
      *  GOWA_JOBLIFT_SKIP=7B6680 -- módulos de job que ficam interpretados:
