@@ -64,6 +64,9 @@ GANCHOS = [
          nat='fn_0000B2D0_nativo'),
     dict(tipo='entrada', pasta='gowajm_0072DF80', fn='gowajm_0072DF80_spu_func_0000B3D0__b', cab='fn_0000B3D0.h',
          nat='fn_0000B3D0_nativo'),
+    # BFB8 (E4, 01/11): a função inteira -- monta a estrutura de estado do lote a partir do descritor
+    dict(tipo='entrada', pasta='gowajm_0072DF80', fn='gowajm_0072DF80_spu_func_0000BFB8__b', cab='fn_0000BFB8.h',
+         nat='fn_0000BFB8_nativo'),
 ]
 # laços de um bloco só com os registradores em variáveis locais (laco_local.py: o cabeçalho port/edge/ll_*.h é gerado
 # aqui, do próprio módulo): o núcleo faz o laço inteiro e salta para <rótulo>_fim, depois do desvio; vem antes do vk
