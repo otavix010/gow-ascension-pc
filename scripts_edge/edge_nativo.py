@@ -141,6 +141,9 @@ GANCHOS = [
     # plugin 0x751450 (E4, 02/11): o laço 0x303D8 até o fim (posição em campos de bits + 1 vetor smallest-three, 9 bytes)
     dict(tipo='entrada', pasta='gowapl_00751450', fn='gowapl_00751450_spu_func_000303D8', cab='pl_00751450.h',
          nat='pl_00751450_nativo'),
+    # plugin 0x755A20 (E4, 02/11): o laço 0x302B8 até o fim (posição + 1 vetor smallest-three + cor RGBA u8, 19 bytes)
+    dict(tipo='entrada', pasta='gowapl_00755A20', fn='gowapl_00755A20_spu_func_000302B8', cab='pl_00755A20.h',
+         nat='pl_00755A20_nativo'),
     # 9090/9458 (E4, 02/11): o desenho no buffer de comandos (0x1714, 0x181C endereço/formato do índice, 0x1808) e a
     # decisão seguinte (9888, 9958 = buffer cheio, ou 9570); vivos nas saídas por scripts_edge/vivos.py
     dict(tipo='multi', pasta='gowajm_0072DF80', fn='gowajm_0072DF80_spu_func_00009090__b', cab='fn_00009090_9458.h',
