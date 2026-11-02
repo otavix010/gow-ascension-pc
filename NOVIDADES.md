@@ -4,6 +4,14 @@ O Otavix Launcher mostra este arquivo na página "Novidades" do jogo. Cada atual
 "## <data> · <versão>" e o texto em português (### pt), inglês (### en) e, quando houver, espanhol (### es).
 As mais novas ficam em cima.
 
+## 02/11/2026 · 8ddaf1a
+### pt
+- **Desempenho:** mais partes do processamento gráfico do PS3 (EDGE) rodam como código nativo do PC; nos testes, o trabalho delas caiu pela metade e o uso do processador no jogo caiu cerca de 9%.
+### en
+- **Performance:** more of the PS3 graphics processing (EDGE) now runs as native PC code; in testing, its work was cut in half and in-game processor use dropped by about 9%.
+### es
+- **Rendimiento:** más partes del procesamiento gráfico de la PS3 (EDGE) se ejecutan como código nativo de PC; en las pruebas, su trabajo se redujo a la mitad y el uso del procesador en el juego bajó cerca de un 9%.
+
 ## 01/11/2026 · 03fee28
 ### pt
 - **Estabilidade:** o jogo não fecha mais quando o compilador de shaders do Windows falha num shader; o efeito afetado é pulado.
