@@ -4,6 +4,14 @@ O Otavix Launcher mostra este arquivo na página "Novidades" do jogo. Cada atual
 "## <data> · <versão>" e o texto em português (### pt), inglês (### en) e, quando houver, espanhol (### es).
 As mais novas ficam em cima.
 
+## 02/11/2026 · 6207b51
+### pt
+- **Instalação:** a opção "Automático" da versão do executável passa a usar sempre a build portátil (AVX2), a mais testada; a nativa (AVX-512) continua disponível por escolha. Quem já tinha gerado no Automático com a nativa passa à portátil na próxima atualização.
+### en
+- **Installation:** the "Automatic" executable version option now always uses the portable build (AVX2), the most tested one; the native build (AVX-512) remains available by choice. Players who generated with Automatic on the native build switch to the portable one on the next update.
+### es
+- **Instalación:** la opción "Automático" de la versión del ejecutable pasa a usar siempre la build portátil (AVX2), la más probada; la nativa (AVX-512) sigue disponible por elección. Quien ya había generado en Automático con la nativa pasa a la portátil en la próxima actualización.
+
 ## 02/11/2026 · 0b4037a
 ### pt
 - **Instalação:** a compilação do decodificador de áudio ATRAC não falha mais em alguns discos (erro "AV_RB32/AV_RL32 não declarados").
