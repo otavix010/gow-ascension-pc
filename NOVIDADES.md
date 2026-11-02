@@ -4,6 +4,17 @@ O Otavix Launcher mostra este arquivo na página "Novidades" do jogo. Cada atual
 "## <data> · <versão>" e o texto em português (### pt), inglês (### en) e, quando houver, espanhol (### es).
 As mais novas ficam em cima.
 
+## 02/11/2026 · 2cca492
+### pt
+- **Instalação:** a geração não para mais quando o Windows nega o privilégio para criar links físicos (projeto em drive externo); o jogo passa a ler o disco de onde ele está.
+- **Instalação:** em processadores que o Windows informa sem nome, o gerador volta a explicar a falta de AVX2 em vez de parar com um erro.
+### en
+- **Installation:** generation no longer stops when Windows denies the privilege to create hard links (project on an external drive); the game now reads the disc from where it is.
+- **Installation:** on processors that Windows reports without a name, the generator once again explains the missing AVX2 instead of stopping with an error.
+### es
+- **Instalación:** la generación ya no se detiene cuando Windows niega el privilegio para crear enlaces físicos (proyecto en una unidad externa); el juego pasa a leer el disco desde donde está.
+- **Instalación:** en procesadores que Windows informa sin nombre, el generador vuelve a explicar la falta de AVX2 en lugar de detenerse con un error.
+
 ## 02/11/2026 · 9870923
 ### pt
 - **Desempenho:** mais partes do processamento gráfico do PS3 (EDGE) voltam a rodar como código nativo do PC, agora com a correção de um erro de conta encontrado na revisão; nos nossos testes, as lutas ficaram mais fluidas e com o fps mais estável.
