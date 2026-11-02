@@ -238,47 +238,59 @@ static inline unsigned d250_dois(const uint8_t* in, uint8_t* out, __m256 CX, __m
 }
 /* 8 vértices (2 grupos) em SoA, como o original faz com 4: cada faixa é um vértice, na ordem v0 v2 v4 v6 | v1 v3 v5 v7
  * (a da transposição). Grava os 8 e devolve a máscara (bit = vértice) dos que precisam do caminho exato. */
+#if defined(SPU_SX_DAZ)
+/* 02/11: MXCSR.DAZ na thread da SPU: operandos e intermediários que só vão para outra conta de float dispensam o +0
+ * (como no fn_0000F538.h); ficam com ele o W (frest/fi inteiros e a comparação com 0) e as saídas */
+#define D250_ZI(x) (x)
+#else
+#define D250_ZI(x) d250_z8(x)
+#endif
 static inline unsigned d250_oito(const uint8_t* in, uint8_t* out, const d250_k* k)
 {
-    const __m256 A = d250_z8(_mm256_castsi256_ps(d250_bswap8(_mm256_loadu_si256((const __m256i*)(in)))));
-    const __m256 B = d250_z8(_mm256_castsi256_ps(d250_bswap8(_mm256_loadu_si256((const __m256i*)(in + 32)))));
-    const __m256 C = d250_z8(_mm256_castsi256_ps(d250_bswap8(_mm256_loadu_si256((const __m256i*)(in + 64)))));
-    const __m256 D = d250_z8(_mm256_castsi256_ps(d250_bswap8(_mm256_loadu_si256((const __m256i*)(in + 96)))));
+    const __m256 A = D250_ZI(_mm256_castsi256_ps(d250_bswap8(_mm256_loadu_si256((const __m256i*)(in)))));
+    const __m256 B = D250_ZI(_mm256_castsi256_ps(d250_bswap8(_mm256_loadu_si256((const __m256i*)(in + 32)))));
+    const __m256 C = D250_ZI(_mm256_castsi256_ps(d250_bswap8(_mm256_loadu_si256((const __m256i*)(in + 64)))));
+    const __m256 D = D250_ZI(_mm256_castsi256_ps(d250_bswap8(_mm256_loadu_si256((const __m256i*)(in + 96)))));
     const __m256 t0 = _mm256_unpacklo_ps(A, B), t1 = _mm256_unpackhi_ps(A, B), t2 = _mm256_unpacklo_ps(C, D), t3 = _mm256_unpackhi_ps(C, D);
     const __m256 X = _mm256_shuffle_ps(t0, t2, _MM_SHUFFLE(1, 0, 1, 0)), Y = _mm256_shuffle_ps(t0, t2, _MM_SHUFFLE(3, 2, 3, 2));
     const __m256 Z = _mm256_shuffle_ps(t1, t3, _MM_SHUFFLE(1, 0, 1, 0));
-#define D250_S(w) d250_z8(_mm256_castsi256_ps(_mm256_set1_epi32((int)(w))))
-    __m256i ruim = _mm256_setzero_si256();
+#define D250_S(w) D250_ZI(_mm256_castsi256_ps(_mm256_set1_epi32((int)(w))))
+    /* fora do alcance (|r| >= 0x7F7FFFFF) pelo máximo dos módulos */
+    const __m256i mod = _mm256_set1_epi32(0x7FFFFFFF);
+#define D250_M(v) mx = _mm256_max_epu32(mx, _mm256_and_si256(_mm256_castps_si256(v), mod))
+    __m256i mx = _mm256_setzero_si256();
     __m256 c[4];
     for (int i = 0; i < 4; i++) {
         __m256 v = _mm256_fmadd_ps(X, D250_S(k->cx[i]), D250_S(k->cw[i]));
-        ruim = _mm256_or_si256(ruim, d250_ruim8(v));
-        v = d250_z8(_mm256_fmadd_ps(Y, D250_S(k->cy[i]), d250_z8(v))); ruim = _mm256_or_si256(ruim, d250_ruim8(v));
-        v = d250_z8(_mm256_fmadd_ps(Z, D250_S(k->cz[i]), v)); ruim = _mm256_or_si256(ruim, d250_ruim8(v));
+        D250_M(v);
+        v = _mm256_fmadd_ps(Y, D250_S(k->cy[i]), D250_ZI(v)); D250_M(v);
+        v = d250_z8(_mm256_fmadd_ps(Z, D250_S(k->cz[i]), v)); D250_M(v);
         c[i] = v;
     }
     const __m256 W = c[3];
-    const __m256 y0 = d250_z8(d250_rec8(W));
-    ruim = _mm256_or_si256(ruim, d250_ruim8(y0));
-    const __m256 t = d250_z8(_mm256_fnmadd_ps(y0, W, _mm256_set1_ps(1.0f)));
-    ruim = _mm256_or_si256(ruim, d250_ruim8(t));
-    const __m256 inv = d250_z8(_mm256_fmadd_ps(t, y0, y0));
-    ruim = _mm256_or_si256(ruim, d250_ruim8(inv));
+    const __m256 y0 = D250_ZI(d250_rec8(W));
+    D250_M(y0);
+    const __m256 t = D250_ZI(_mm256_fnmadd_ps(y0, W, _mm256_set1_ps(1.0f)));
+    D250_M(t);
+    const __m256 inv = D250_ZI(_mm256_fmadd_ps(t, y0, y0));
+    D250_M(inv);
     const __m256 sg = _mm256_castsi256_ps(_mm256_and_si256(_mm256_castps_si256(W), _mm256_set1_epi32((int)0x80000000u)));
     __m256 s[3];
     __m256i cod = _mm256_and_si256(_mm256_castps_si256(_mm256_cmp_ps(W, _mm256_setzero_ps(), _CMP_GT_OQ)), _mm256_set1_epi32(2));
     for (int i = 0; i < 3; i++) {
-        __m256 n = d250_z8(_mm256_mul_ps(c[i], inv));
-        ruim = _mm256_or_si256(ruim, d250_ruim8(n));
+        __m256 n = D250_ZI(_mm256_mul_ps(c[i], inv));
+        D250_M(n);
         n = _mm256_xor_ps(n, sg);
         s[i] = d250_z8(_mm256_fmadd_ps(n, D250_S(k->esc[i]), D250_S(k->des[i])));
-        ruim = _mm256_or_si256(ruim, d250_ruim8(s[i]));
+        D250_M(s[i]);
         const __m256i gx = _mm256_castps_si256(_mm256_cmp_ps(s[i], D250_S(k->max[i]), _CMP_GT_OQ));
         const __m256i nx = _mm256_castps_si256(_mm256_cmp_ps(D250_S(k->min[i]), s[i], _CMP_GT_OQ));
         cod = _mm256_or_si256(cod, _mm256_and_si256(gx, _mm256_set1_epi32((int)(0x80u >> (2 * i)))));
         cod = _mm256_or_si256(cod, _mm256_and_si256(nx, _mm256_set1_epi32((int)(0x40u >> (2 * i)))));
     }
 #undef D250_S
+#undef D250_M
+    const __m256i ruim = _mm256_cmpgt_epi32(mx, _mm256_set1_epi32(0x7F7FFFFE));
     /* de volta a um vértice por 16 bytes: (sx, sy, código, 0) */
     const __m256 C4 = _mm256_castsi256_ps(cod), Z0 = _mm256_setzero_ps();
     const __m256 u0 = _mm256_unpacklo_ps(s[0], s[1]), u1 = _mm256_unpackhi_ps(s[0], s[1]);

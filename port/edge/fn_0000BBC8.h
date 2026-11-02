@@ -42,13 +42,14 @@ static inline int bbc8_oito(uint8_t* p)
 {
     __m256 x, y, z, w;
     a880_soa(p, &x, &y, &z, &w);
-    __m256i ruim = a880_ruim8(w);   /* w * 1,0 = w (com o expoente 255 o PC não representa) */
+    w = a880_z8(w);                 /* w * 1,0 = w, gravado: com o +0 */
+    __m256i ruim = a880_ruim8(w);   /* (com o expoente 255 o PC não representa) */
 #define BBC8_R(v) ruim = _mm256_or_si256(ruim, a880_ruim8(v))
     const __m256 xx = _mm256_mul_ps(x, x);
     BBC8_R(xx);
-    const __m256 t = _mm256_fmadd_ps(y, y, a880_z8(xx));
+    const __m256 t = _mm256_fmadd_ps(y, y, A880_ZI(xx));
     BBC8_R(t);
-    const __m256 L = a880_z8(_mm256_fmadd_ps(z, z, a880_z8(t)));
+    const __m256 L = a880_z8(_mm256_fmadd_ps(z, z, A880_ZI(t)));   /* L vai para o frsqest inteiro */
     BBC8_R(L);
     const __m256 s = a880_rsq8(L);
     BBC8_R(s);
