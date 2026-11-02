@@ -4,6 +4,20 @@ O Otavix Launcher mostra este arquivo na página "Novidades" do jogo. Cada atual
 "## <data> · <versão>" e o texto em português (### pt), inglês (### en) e, quando houver, espanhol (### es).
 As mais novas ficam em cima.
 
+## 02/11/2026 · 9870923
+### pt
+- **Desempenho:** mais partes do processamento gráfico do PS3 (EDGE) voltam a rodar como código nativo do PC, agora com a correção de um erro de conta encontrado na revisão; nos nossos testes, as lutas ficaram mais fluidas e com o fps mais estável.
+- **Opção nova:** "Processamento gráfico nativo (EDGE)", na página Jogo. Se o cenário ficar preto, riscado ou com peças fora do lugar, desligue para usar a versão traduzida (mais lenta) e conte para nós pelo relato; não precisa gerar o jogo de novo.
+- **Áreas novas:** enquanto os shaders de uma área nova compilam, o jogo não repete mais buscas no disco a cada desenho.
+### en
+- **Performance:** more of the PS3 graphics processing (EDGE) runs as native PC code again, now with a fix for a calculation error found in review; in our testing, fights became smoother with a steadier frame rate.
+- **New option:** "Native graphics processing (EDGE)", on the Game page. If the scenery turns black, streaked or has pieces out of place, turn it off to use the translated version (slower) and tell us through a report; no need to make the game again.
+- **New areas:** while a new area's shaders compile, the game no longer repeats disk lookups on every draw.
+### es
+- **Rendimiento:** más partes del procesamiento gráfico de la PS3 (EDGE) vuelven a ejecutarse como código nativo de PC, ahora con la corrección de un error de cálculo encontrado en la revisión; en nuestras pruebas, los combates quedaron más fluidos y con los fps más estables.
+- **Opción nueva:** "Procesamiento gráfico nativo (EDGE)", en la página Juego. Si el escenario se ve negro, con rayas o con piezas fuera de lugar, desactívalo para usar la versión traducida (más lenta) y cuéntanoslo en un reporte; no hace falta generar el juego de nuevo.
+- **Áreas nuevas:** mientras se compilan los shaders de un área nueva, el juego ya no repite búsquedas en el disco en cada dibujo.
+
 ## 02/11/2026 · f4fead2
 ### pt
 - **Controle:** o DualSense e o DualShock 4 agora vibram também quando conectados por Bluetooth (antes só vibravam pelo cabo USB).
