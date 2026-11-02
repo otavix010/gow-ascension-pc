@@ -9,8 +9,8 @@
  * zeros + os últimos 8 bytes e zeros até o próximo múltiplo de 16 (lido na bancada, como no 0x758B20). Não escreve
  * pilha nem contexto; sai com r3 = 0. Só o caso comum (destino e fluxos alinhados em 16, os quatro atributos
  * presentes); o resto volta 0. Não roda nas gravações: conferido na bancada sintética (as duas builds).
- * GOWA_EDGE_NATIVO=0 desliga. Gancho 'entrada' só na 0x30000 (a entrada direta em +0x30 que apareceu numa fase 1
- * antiga fica com o traduzido). */
+ * GOWA_EDGE_NATIVO=0 desliga. Ganchos 'entrada' na 0x30000 e na 0x30030 (o job chama direto em +0x30: ali o nativo
+ * só vale se os registradores que o 0x30000 prepara estão como ele os deixaria). */
 #ifndef GOWA_PL_00755F80_H
 #define GOWA_PL_00755F80_H
 #include "pl_0074C580.h"
@@ -78,6 +78,26 @@ static __attribute__((noinline)) int pl_00755F80_nativo(spu_context* ctx)
     static volatile long c[2];
     const int r = pl_00755F80_corpo(ctx);
     gowa_edge_conta("pl755F80", c, r);
+    return r;
+}
+/* a entrada +0x30 (o job chama direto nela): vale se os registradores que o 0x30000 prepara estão como ele os deixaria */
+static inline int pl755f_q(spu_context* ctx, int r, uint32_t a)
+{
+    const u128 q = spu_ls_read128(ctx, a);
+    return !memcmp(&q, &ctx->gpr[r], 16);
+}
+static __attribute__((noinline)) int pl_00755F80_n30(spu_context* ctx)
+{
+    static volatile long c[2];
+    const u128* g = ctx->gpr;
+    int ok = pl755f_q(ctx, 67, g[3]._u32[0] + 0x160u) && pl755f_q(ctx, 62, (uint32_t)(0x303F0 + g_spu_hot_reloc)) &&
+             pl755f_q(ctx, 61, (uint32_t)(0x30400 + g_spu_hot_reloc)) && pl755f_q(ctx, 72, (uint32_t)(0x30410 + g_spu_hot_reloc)) &&
+             pl755f_q(ctx, 69, (uint32_t)(0x30420 + g_spu_hot_reloc)) && pl755f_q(ctx, 44, (uint32_t)(0x30430 + g_spu_hot_reloc));
+    for (int i = 0; i < 4 && ok; i++)
+        ok = g[31]._u32[i] == g[3]._u32[i] + 16u && g[52]._u32[i] == g[4]._u32[i] + 1u && g[51]._u32[i] == 0x46FFFF00u &&
+             g[60]._u32[i] == 0xBF000000u && g[71]._u32[i] == 0u;
+    const int r = ok ? pl_00755F80_corpo(ctx) : 0;
+    gowa_edge_conta("pl755F80/30", c, r);
     return r;
 }
 #endif
