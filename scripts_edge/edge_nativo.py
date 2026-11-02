@@ -92,6 +92,9 @@ GANCHOS = [
     # CC98/CCD0 (E4, 02/11): os registros de 16 bytes {C0, w & 0xFF0, C2, palavra} das entradas não nulas, no topo CD1C
     dict(tipo='depois_rotulo', pasta='gowajm_0072DF80', fn='gowajm_0072DF80_spu_func_0000CC98__b', cab='fn_0000CC98_ccd0.h',
          nat='fn_0000CC98_ccd0_nativo', rotulo='loc_0000CD1C'),
+    # 73E0/83E8 (E4, 02/11): o w do fluxo A sobre o fluxo B, no lugar, 128 bytes por volta; o rótulo do fim vem do laço local
+    dict(tipo='antes', pasta='gowajm_0072DF80', fn='gowajm_0072DF80_spu_func_000073E0__b', cab='fn_000073E0_83e8.h',
+         nat='fn_000073E0_83e8_nativo', rotulo='loc_000083E8', destino='loc_000083E8_fim'),
 ]
 # laços de um bloco só com os registradores em variáveis locais (laco_local.py: o cabeçalho port/edge/ll_*.h é gerado
 # aqui, do próprio módulo): o núcleo faz o laço inteiro e salta para <rótulo>_fim, depois do desvio; vem antes do vk
