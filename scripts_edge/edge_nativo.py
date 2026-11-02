@@ -70,6 +70,10 @@ GANCHOS = [
     # 8930/8988 (E4, 01/11): a primeira compactação dos registros de 8 bytes, as voltas comuns até antes da última
     dict(tipo='antes', pasta='gowajm_0072DF80', fn='gowajm_0072DF80_spu_func_00008930__b', cab='fn_00008930_8988.h',
          nat='fn_00008930_8988_nativo', rotulo='loc_00008988', destino='loc_00008988'),
+    # DCC0/E134 (E4, 01/11): decodificação delta em 8 faixas de 16 bits, no lugar, em SSE; salta para o fim do laço
+    # (o rótulo do fim vem do laço local)
+    dict(tipo='antes', pasta='gowajm_0072DF80', fn='gowajm_0072DF80_spu_func_0000DCC0__b', cab='fn_0000DCC0_e134.h',
+         nat='fn_0000DCC0_e134_nativo', rotulo='loc_0000E134', destino='loc_0000E134_fim'),
 ]
 # laços de um bloco só com os registradores em variáveis locais (laco_local.py: o cabeçalho port/edge/ll_*.h é gerado
 # aqui, do próprio módulo): o núcleo faz o laço inteiro e salta para <rótulo>_fim, depois do desvio; vem antes do vk
