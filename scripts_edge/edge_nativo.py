@@ -67,6 +67,10 @@ GANCHOS = [
     # BFB8 (E4, 01/11): a função inteira -- monta a estrutura de estado do lote a partir do descritor
     dict(tipo='entrada', pasta='gowajm_0072DF80', fn='gowajm_0072DF80_spu_func_0000BFB8__b', cab='fn_0000BFB8.h',
          nat='fn_0000BFB8_nativo'),
+    # BBC8 (E4, 02/11): a função inteira -- normaliza no lugar os vetores de um fluxo (xyz * fi(frsqest(L)), w * 1,0),
+    # 8 por volta; volta com valor fora do alcance do float do PC refeita pelas primitivas do runtime
+    dict(tipo='entrada', pasta='gowajm_0072DF80', fn='gowajm_0072DF80_spu_func_0000BBC8__b', cab='fn_0000BBC8.h',
+         nat='fn_0000BBC8_nativo'),
     # 8930/8988 (E4, 01/11): a primeira compactação dos registros de 8 bytes, as voltas comuns até antes da última
     dict(tipo='antes', pasta='gowajm_0072DF80', fn='gowajm_0072DF80_spu_func_00008930__b', cab='fn_00008930_8988.h',
          nat='fn_00008930_8988_nativo', rotulo='loc_00008988', destino='loc_00008988'),
