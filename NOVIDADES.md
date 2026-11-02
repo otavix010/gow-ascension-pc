@@ -4,6 +4,14 @@ O Otavix Launcher mostra este arquivo na página "Novidades" do jogo. Cada atual
 "## <data> · <versão>" e o texto em português (### pt), inglês (### en) e, quando houver, espanhol (### es).
 As mais novas ficam em cima.
 
+## 02/11/2026 · 46fa730
+### pt
+- **Correção:** desfeita a atualização anterior do processamento gráfico (EDGE), que deixava o cenário preto ou riscado em alguns PCs; o jogo volta à versão anterior enquanto investigamos.
+### en
+- **Fix:** the previous graphics processing (EDGE) update was rolled back, as it left the scenery black or streaked on some PCs; the game returns to the previous version while we investigate.
+### es
+- **Corrección:** se deshizo la actualización anterior del procesamiento gráfico (EDGE), que dejaba el escenario negro o con rayas en algunos PC; el juego vuelve a la versión anterior mientras investigamos.
+
 ## 02/11/2026 · 8ddaf1a
 ### pt
 - **Desempenho:** mais partes do processamento gráfico do PS3 (EDGE) rodam como código nativo do PC; nos testes, o trabalho delas caiu pela metade e o uso do processador no jogo caiu cerca de 9%.
