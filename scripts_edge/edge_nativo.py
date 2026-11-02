@@ -174,10 +174,11 @@ GANCHOS = [
     dict(tipo='entrada', pasta='gowapl_0074BA80', fn='gowapl_0074BA80_spu_func_00030000', cab='pl_0074BA80.h', nat='pl_0074BA80_nativo'),
     # plugin 0x755F80 (E4, 02/11): inteiro -- vértice de 36 bytes (posição + int16 x 4 + 11:11:10 + atributo 31); na
     # 0x30000 e na 0x30030 (onde o job chama direto, conferindo o que o 0x30000 prepararia); bancada sintética
-    # DESLIGADO 02/11 (diverge num job real do chefe da Heca900, confere_h975 j0165, com a conta igual nas 58 chamadas
-    # reais: mecanismo não achado; volta ao traduzido até entender)
-    #dict(tipo='entrada', pasta='gowapl_00755F80', fn='gowapl_00755F80_spu_func_00030000', cab='pl_00755F80.h', nat='pl_00755F80_nativo'),
-    #dict(tipo='entrada', pasta='gowapl_00755F80', fn='gowapl_00755F80_spu_func_00030030', cab='pl_00755F80.h', nat='pl_00755F80_n30'),
+    # 02/11 15h: RELIGADO -- o j0165 do confere_h975 só difere no rascunho do LS (pilha e 0x1590, o mesmo padrão dos jobs
+    # que diferem sem nativo); a memória gravada pelos jobs é igual byte a byte com e sem nativo nas gravações
+    # confere_h975 e confere_cut (cutscene depois do bordel), 1200 jobs
+    dict(tipo='entrada', pasta='gowapl_00755F80', fn='gowapl_00755F80_spu_func_00030000', cab='pl_00755F80.h', nat='pl_00755F80_nativo'),
+    dict(tipo='entrada', pasta='gowapl_00755F80', fn='gowapl_00755F80_spu_func_00030030', cab='pl_00755F80.h', nat='pl_00755F80_n30'),
     # plugin 0x751B20 (E4, 02/11): o laço 0x30358 -- posição + 2 vetores smallest-three + cor (o 0x752710 com a cor do
     # 0x755A20); não roda nas gravações: conferido na bancada sintética (as duas builds)
     dict(tipo='entrada', pasta='gowapl_00751B20', fn='gowapl_00751B20_spu_func_00030358', cab='pl_00751B20.h', nat='pl_00751B20_nativo'),
