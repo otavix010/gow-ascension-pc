@@ -3,7 +3,8 @@
  * r13 = os 4 últimos bytes). 8 quadwords (128 bytes) por volta, J voltas (r17 -= 8 enquanto > 0), lendo um bloco à
  * frente: o bloco 0 de A e de B já está nos registradores (r33.. e r24..), o bloco j de A em r84 + 128j, o de B em
  * r103 + 128j. Os registradores saem como o laço os deixa, inclusive os da faixa preservada (r81, r83, r84, r90-r98):
- * o último bloco gravado, o bloco seguinte já lido e os ponteiros. A e B sobrepostos voltam 0 (fica o traduzido).
+ * o último bloco gravado, o bloco seguinte já lido e os ponteiros. Se o que se grava em B encosta no que se lê de A,
+ * volta 0 (fica o traduzido).
  * GOWA_EDGE_NATIVO=0 desliga. Gancho 'antes' do rótulo loc_000083E8, saltando para o fim do laço (edge_nativo.py). */
 #ifndef GOWA_FN_000073E0_83E8_H
 #define GOWA_FN_000073E0_83E8_H
@@ -31,7 +32,8 @@ static int fn_000073E0_83e8_corpo(spu_context* ctx)
     const uint32_t B = g[14]._u32[0] & SPU_LS_MASK, A = g[84]._u32[0] & SPU_LS_MASK;   /* blocos 1.. de A: r84 + 128j */
     if (J > 0x200u || (B & 15u) || (A & 15u) || g[15]._u32[0] != g[14]._u32[0] + 128u || g[16]._u32[0] != g[84]._u32[0] + 128u) return 0;
     if (B + 128u * (J + 1u) > SPU_LS_SIZE || A + 128u * (J + 1u) > SPU_LS_SIZE) return 0;
-    if (A < B + 128u * (J + 1u) && B < A + 128u * (J + 1u)) return 0;
+    /* o que se grava ([B, B + 128J)) não pode encostar no que se lê de A (os blocos 1..J; o 0 está nos registradores) */
+    if (A + 128u < B + 128u * J && B < A + 128u * (J + 1u)) return 0;
     const u128 m = g[13];
     /* bloco 0: dos registradores */
     static const int ra[8] = { 33, 30, 29, 28, 27, 26, 25, 32 }, rb[8] = { 24, 23, 22, 21, 20, 19, 18, 31 };
