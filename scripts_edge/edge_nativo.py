@@ -157,6 +157,9 @@ GANCHOS = [
     # plugin 0x75B470 (E4, 02/11): o laço 0x30154 -- o copiador do 0x75AF20 com vértice de 22 bytes (não roda nas
     # gravações: conferido na bancada sintética, laço traduzido x nativo sobre as mesmas LS)
     dict(tipo='entrada', pasta='gowapl_0075B470', fn='gowapl_0075B470_spu_func_00030154', cab='pl_0075AF20.h', nat='pl_0075B470_nativo'),
+    # plugin 0x75A380 (E4, 02/11): atributos do vértice (pl_atributos.h), gancho na 0x30064 (não roda nas gravações:
+    # conferido na bancada sintética)
+    dict(tipo='entrada', pasta='gowapl_0075A380', fn='gowapl_0075A380_spu_func_00030064', cab='pl_atributos.h', nat='pl_0075A380_nativo'),
     # 9090/9458 (E4, 02/11): o desenho no buffer de comandos (0x1714, 0x181C endereço/formato do índice, 0x1808) e a
     # decisão seguinte (9888, 9958 = buffer cheio, ou 9570); vivos nas saídas por scripts_edge/vivos.py
     dict(tipo='multi', pasta='gowajm_0072DF80', fn='gowajm_0072DF80_spu_func_00009090__b', cab='fn_00009090_9458.h',

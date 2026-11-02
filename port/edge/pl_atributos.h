@@ -1,5 +1,5 @@
 /* GOWA (02/11, EDGE nativo, marco E4): os plugins do EDGE que descrevem os atributos do vértice para o RSX (0x756880,
- * 0x75CBC0, 0x757DD0, 0x7538C0, 0x756C40, 0x75B9B0, 0x75BB70, 0x75CA80), inteiros. Para o atributo i (índice a = byte em r9 + i), um registro de 16 bytes no buffer de
+ * 0x75CBC0, 0x757DD0, 0x7538C0, 0x756C40, 0x75B9B0, 0x75BB70, 0x75CA80, 0x75A380), inteiros. Para o atributo i (índice a = byte em r9 + i), um registro de 16 bytes no buffer de
  * comandos, a partir do cursor (palavra em r5 + 8, sem alinhamento):
  *     0x00041740 + 4a (SET_VERTEX_DATA_ARRAY_FORMAT), formato_i, 0x00041680 + 4a (..._OFFSET), (r7 + desl_i) | (r6 << 31)
  * O cursor anda 16 por registro (o original o grava antes de cada um). O original monta cada registro desalinhado por
@@ -100,5 +100,8 @@ PL_ATRIB(pl_00756C40_nativo, "pl756C40", 7, -1, 0x3232u, 0x3216u, 0x3244u, 0x323
 PL_ATRIB(pl_0075B9B0_nativo, "pl75B9B0", 3, -1, 0x1C32u, 0x1C16u, 0x1C32u, 0u, 12u, 16u)
 PL_ATRIB(pl_0075BB70_nativo, "pl75BB70", 3, -1, 0x1832u, 0x1841u, 0x1816u, 0u, 12u, 20u)
 PL_ATRIB(pl_0075CA80_nativo, "pl75CA80", 2, -1, 0x1032u, 0x1016u, 0u, 12u)
+/* 02/11: o 0x75A380 (dividido em 0x30000 + 0x30064, r9 + 13 em r59; gancho na 0x30064). Não roda nas gravações de
+ * hoje (a entrada +0x64 veio de uma fase 1 de 29/10): conferido na bancada sintética. */
+PL_ATRIB(pl_0075A380_nativo, "pl75A380", 4, 59, 0x2432u, 0x2441u, 0x2416u, 0x2432u, 0u, 12u, 20u, 24u)
 #undef PL_ATRIB
 #endif

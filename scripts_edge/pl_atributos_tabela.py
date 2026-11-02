@@ -12,7 +12,7 @@ si = importlib.util.module_from_spec(spec); spec.loader.exec_module(si)
 pasta = sys.argv[1]
 s = open(os.path.join(aqui, '..', 'port', 'spu', pasta, 'spu_recomp.c.sem_promocao'), encoding='latin-1').read()
 corpo = ''
-for fn in ('00030000', '0003000C'):
+for fn in ("00030000", "0003000C", "00030064"):
     cab = f'void {pasta}_spu_func_{fn}(spu_context* ctx) {{' + chr(10)
     if cab not in s:
         continue
