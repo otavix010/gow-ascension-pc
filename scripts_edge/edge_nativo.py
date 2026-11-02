@@ -89,6 +89,9 @@ GANCHOS = [
          nat='fn_00009090_9620_nativo', rotulo='loc_00009620', destino='loc_00009620_fim'),
     dict(tipo='antes', pasta='gowajm_0072DF80', fn='gowajm_0072DF80_spu_func_00009090__b', cab='fn_00009090_lacos.h',
          nat='fn_00009090_96e0_nativo', rotulo='loc_000096E0', destino='loc_000096E0_fim'),
+    # CC98/CCD0 (E4, 02/11): os registros de 16 bytes {C0, w & 0xFF0, C2, palavra} das entradas não nulas, no topo CD1C
+    dict(tipo='depois_rotulo', pasta='gowajm_0072DF80', fn='gowajm_0072DF80_spu_func_0000CC98__b', cab='fn_0000CC98_ccd0.h',
+         nat='fn_0000CC98_ccd0_nativo', rotulo='loc_0000CD1C'),
 ]
 # laços de um bloco só com os registradores em variáveis locais (laco_local.py: o cabeçalho port/edge/ll_*.h é gerado
 # aqui, do próprio módulo): o núcleo faz o laço inteiro e salta para <rótulo>_fim, depois do desvio; vem antes do vk
