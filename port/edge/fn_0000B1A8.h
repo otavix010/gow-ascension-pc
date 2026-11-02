@@ -11,6 +11,7 @@
 #include <string.h>
 #include <stdio.h>
 #include <intrin.h>
+#include "edge_comum.h"
 
 #ifndef GOWA_EDGE_NATIVO_ON_DEF
 #define GOWA_EDGE_NATIVO_ON_DEF
@@ -22,18 +23,6 @@ static int gowa_edge_nativo_on(void)
 }
 #endif
 
-#ifndef GOWA_EDGE_CONTA_DEF
-#define GOWA_EDGE_CONTA_DEF
-/* GOWA_EDGE_CONTA=1: quantas chamadas cada nativo do E4 cobriu e quantas devolveu ao traduzido (a cada potência de 2) */
-static void gowa_edge_conta(const char* nome, volatile long* n, int feito)
-{
-    static int on = -1;
-    if (on < 0) on = getenv("GOWA_EDGE_CONTA") != NULL;
-    if (!on) return;
-    const long k = _InterlockedIncrement(&n[feito ? 0 : 1]);
-    if ((k & (k - 1)) == 0) fprintf(stderr, "[edge-conta] %s: %ld feitas, %ld devolvidas\n", nome, n[0], n[1]);
-}
-#endif
 
 static int fn_0000B1A8_corpo(spu_context* ctx);
 static __attribute__((noinline)) int fn_0000B1A8_nativo(spu_context* ctx)
