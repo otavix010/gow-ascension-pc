@@ -77,6 +77,10 @@ GANCHOS = [
     # DCC0/E30C (E4, 01/11): cópia desalinhada de 16 em 16 bytes (memmove para frente); o rótulo do fim vem do laço local
     dict(tipo='antes', pasta='gowajm_0072DF80', fn='gowajm_0072DF80_spu_func_0000DCC0__b', cab='fn_0000DCC0_e30c.h',
          nat='fn_0000DCC0_e30c_nativo', rotulo='loc_0000E30C', destino='loc_0000E30C_fim'),
+    # CC98/CDBC (E4, 02/11): a varredura das entradas de tamanho variável, as voltas que continuam (logo depois do
+    # rótulo: pega a entrada e as voltas que vêm da correção)
+    dict(tipo='depois_rotulo', pasta='gowajm_0072DF80', fn='gowajm_0072DF80_spu_func_0000CC98__b', cab='fn_0000CC98_cdbc.h',
+         nat='fn_0000CC98_cdbc_nativo', rotulo='loc_0000CDBC'),
 ]
 # laços de um bloco só com os registradores em variáveis locais (laco_local.py: o cabeçalho port/edge/ll_*.h é gerado
 # aqui, do próprio módulo): o núcleo faz o laço inteiro e salta para <rótulo>_fim, depois do desvio; vem antes do vk
@@ -237,6 +241,14 @@ def main():
                 d = corpo.index(f'goto {g["fim"]};', k + len(gancho))
                 d = corpo.index('\n', d) + 1
                 corpo = corpo[:d] + f'{g["fim"]}_fim: {MARCA}\n' + corpo[d:]
+        elif g['tipo'] == 'depois_rotulo':   # 02/11 (E4): logo depois do rótulo; o nativo avança e o traduzido segue
+            rot = f'{g["rotulo"]}:\n'
+            assert corpo.count(rot) == 1, (g['fn'], g['rotulo'])
+            gancho = f'        if ({g["nat"]}(ctx)) {{}} {MARCA}\n'
+            if gancho in corpo:
+                print(f'{g["fn"]} {g["rotulo"]} depois: já aplicado'); continue
+            k = corpo.index(rot) + len(rot)
+            corpo = corpo[:k] + gancho + corpo[k:]
         elif g['tipo'] == 'laco_local':
             rot = f'{g["rotulo"]}:\n'
             assert corpo.count(rot) == 1, (g['fn'], g['rotulo'])
