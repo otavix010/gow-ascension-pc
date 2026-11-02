@@ -198,6 +198,10 @@ GANCHOS = [
     dict(tipo='entrada', pasta='gowapl_0075B470', fn='gowapl_0075B470_spu_func_00030018', cab='pl_0075AF20.h', nat='pl_0075B470_n18'),
     dict(tipo='entrada', pasta='gowapl_0075B710', fn='gowapl_0075B710_spu_func_00030000', cab='pl_0075AF20.h', nat='pl_0075B710_inteiro'),
     dict(tipo='entrada', pasta='gowapl_0075B710', fn='gowapl_0075B710_spu_func_00030018', cab='pl_0075AF20.h', nat='pl_0075B710_n18'),
+    # plugin 0x75C570 inteiro (E4, 02/11): na 0x30000 e na 0x30010 (onde o job chama direto); se recusar, segue a
+    # preparação traduzida e o gancho do laço 0x300D0
+    dict(tipo='entrada', pasta='gowapl_0075C570', fn='gowapl_0075C570_spu_func_00030000', cab='pl_0075C570.h', nat='pl_0075C570_inteiro'),
+    dict(tipo='entrada', pasta='gowapl_0075C570', fn='gowapl_0075C570_spu_func_00030010', cab='pl_0075C570.h', nat='pl_0075C570_n10'),
     # 9090/9458 (E4, 02/11): o desenho no buffer de comandos (0x1714, 0x181C endereço/formato do índice, 0x1808) e a
     # decisão seguinte (9888, 9958 = buffer cheio, ou 9570); vivos nas saídas por scripts_edge/vivos.py
     dict(tipo='multi', pasta='gowajm_0072DF80', fn='gowajm_0072DF80_spu_func_00009090__b', cab='fn_00009090_9458.h',

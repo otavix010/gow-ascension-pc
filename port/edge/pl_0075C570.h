@@ -13,6 +13,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <immintrin.h>
+#include "edge_comum.h"
 
 #ifndef GOWA_EDGE_NATIVO_ON_DEF
 #define GOWA_EDGE_NATIVO_ON_DEF
@@ -77,5 +78,53 @@ static __attribute__((noinline)) int pl_0075C570_nativo(spu_context* ctx)
     for (int i = 0; i < 4; i++) { g[10]._u32[i] += 24u * J; g[14]._u32[i] += 24u * J; g[12]._u32[i] += 32u * J; }
     g[17] = spu_ls_read128(ctx, out + 24u * J);
     return 1;
+}
+
+/* 02/11: o plugin inteiro, da 0x30000 ou da 0x30010 (onde o job também chama direto; ali vale se r18 = r4 + 1,
+ * r30 = a lista, r2 = 0 e r28 = a constante 0x30140, o que o 0x30000 deixa). O fluxo de entrada é o do atributo 1
+ * (o primeiro byte 1 da lista em r3 + 0x160; ponteiro na vaga, em r3 + 0x10); n = r4, aos pares; saída em r5 (sem
+ * alinhamento), 12 bytes por vértice (o xyz). O original grava em quadwords alinhados, preservando o que vem antes de
+ * r5; depois do fim (E = r5 + 12m) fica um quadword com 8 zeros + os últimos 8 bytes, cortado em
+ * ((E + 8) & ~15) + 16, e zeros no que sobrar (lido na bancada). Não escreve pilha nem contexto; r3 = 0. */
+static int pl_0075C570_inteiro_corpo(spu_context* ctx, int na10)
+{
+    if (!gowa_edge_nativo_on()) return 0;
+    u128* g = ctx->gpr;
+    uint8_t* ls = SPU_LS_BASE(ctx);
+    const uint32_t r3 = g[3]._u32[0] & SPU_LS_MASK, n = g[4]._u32[0], r5 = g[5]._u32[0] & SPU_LS_MASK;
+    if ((r3 & 15u) || r3 + 0x170u > SPU_LS_SIZE || !n || n > 4096u) return 0;
+    if (na10) {
+        const u128 l = spu_ls_read128(ctx, r3 + 0x160u), c = spu_ls_read128(ctx, (uint32_t)(0x30140 + g_spu_hot_reloc));
+        if (memcmp(&l, &g[30], 16) || memcmp(&c, &g[28], 16)) return 0;
+        for (int i = 0; i < 4; i++) if (g[18]._u32[i] != g[4]._u32[i] + 1u || g[2]._u32[i]) return 0;
+    }
+    int k = 0;
+    while (k < 16 && ls[r3 + 0x160u + (uint32_t)k] != 1u) k++;
+    if (k == 16) return 0;
+    const uint32_t a = r3 + 16u + 4u * (uint32_t)k;
+    const uint32_t in = (((uint32_t)ls[a] << 24) | ((uint32_t)ls[a + 1] << 16) | ((uint32_t)ls[a + 2] << 8) | ls[a + 3]) & SPU_LS_MASK;
+    const uint32_t m = (n + 1u) & ~1u, fim = r5 + 12u * m, fimq = ((fim + 8u) & ~15u) + 16u;
+    if ((in & 15u) || in + 16u * m + 64u > SPU_LS_SIZE || fimq > SPU_LS_SIZE) return 0;
+    if ((r5 < in + 16u * m + 64u && in < fimq) || (r5 < r3 + 0x170u && r3 < fimq)) return 0;
+    for (uint32_t i = 0; i < m; i++) memcpy(ls + r5 + 12u * i, ls + in + 16u * i, 12);
+    uint8_t cauda[24] = {0};
+    memcpy(cauda + 8, ls + fim - 8u, 8);
+    memcpy(ls + fim, cauda, fimq - fim);
+    g[3] = spu_il(0);
+    return 1;
+}
+static __attribute__((noinline)) int pl_0075C570_inteiro(spu_context* ctx)
+{
+    static volatile long c[2];
+    const int r = pl_0075C570_inteiro_corpo(ctx, 0);
+    gowa_edge_conta("pl75C570i", c, r);
+    return r;
+}
+static __attribute__((noinline)) int pl_0075C570_n10(spu_context* ctx)
+{
+    static volatile long c[2];
+    const int r = pl_0075C570_inteiro_corpo(ctx, 1);
+    gowa_edge_conta("pl75C570i/10", c, r);
+    return r;
 }
 #endif
