@@ -13,6 +13,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <immintrin.h>
+#include "edge_comum.h"
 
 #ifndef GOWA_EDGE_NATIVO_ON_DEF
 #define GOWA_EDGE_NATIVO_ON_DEF
@@ -29,7 +30,15 @@ static inline int pl755_igual(u128 a, uint32_t w0, uint32_t w1, uint32_t w2, uin
     return a._u32[0] == w0 && a._u32[1] == w1 && a._u32[2] == w2 && a._u32[3] == w3;
 }
 
+static int pl_00755540_corpo(spu_context* ctx);
 static __attribute__((noinline)) int pl_00755540_nativo(spu_context* ctx)
+{
+    static volatile long n[2];
+    const int r = pl_00755540_corpo(ctx);
+    gowa_edge_conta("pl755", n, r);
+    return r;
+}
+static int pl_00755540_corpo(spu_context* ctx)
 {
     if (!gowa_edge_nativo_on()) return 0;
     u128* g = ctx->gpr;
