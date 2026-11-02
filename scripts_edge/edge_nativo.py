@@ -122,6 +122,9 @@ GANCHOS = [
     # saltando para loc_0000F3FC
     dict(tipo='multi', pasta='gowajm_0072DF80', fn='gowajm_0072DF80_spu_func_0000E550__b', cab='fn_0000E550_f104.h',
          nat='fn_0000E550_f104_nativo', vk='/*VK 0000E550/0000F104*/', rotulo='loc_0000F104', destinos=['loc_0000F3FC']),
+    # plugin 0x756880 (E4, 02/11): inteiro -- os 7 registros de formato/deslocamento dos atributos do vértice de 54 bytes
+    dict(tipo='entrada', pasta='gowapl_00756880', fn='gowapl_00756880_spu_func_0003000C', cab='pl_00756880.h',
+         nat='pl_00756880_nativo'),
     # 9090/9458 (E4, 02/11): o desenho no buffer de comandos (0x1714, 0x181C endereço/formato do índice, 0x1808) e a
     # decisão seguinte (9888, 9958 = buffer cheio, ou 9570); vivos nas saídas por scripts_edge/vivos.py
     dict(tipo='multi', pasta='gowajm_0072DF80', fn='gowajm_0072DF80_spu_func_00009090__b', cab='fn_00009090_9458.h',
