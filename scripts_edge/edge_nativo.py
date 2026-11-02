@@ -83,6 +83,12 @@ GANCHOS = [
          nat='fn_0000CC98_cdbc_nativo', rotulo='loc_0000CDBC'),
     # plugin 0x75B710 (E4, 02/11): posições float3 de pares de 36 bytes -> float4 com w = 1,0; o laço 0x30154 inteiro
     dict(tipo='entrada', pasta='gowapl_0075B710', fn='gowapl_0075B710_spu_func_00030154', cab='pl_0075B710.h', nat='pl_0075B710_nativo'),
+    # 9090 (E4, 02/11): os dois laços internos que enchem o buffer com palavras 0xFF000000 | endereço (9620: 2047 por
+    # chamada); os rótulos do fim vêm dos laços locais
+    dict(tipo='antes', pasta='gowajm_0072DF80', fn='gowajm_0072DF80_spu_func_00009090__b', cab='fn_00009090_lacos.h',
+         nat='fn_00009090_9620_nativo', rotulo='loc_00009620', destino='loc_00009620_fim'),
+    dict(tipo='antes', pasta='gowajm_0072DF80', fn='gowajm_0072DF80_spu_func_00009090__b', cab='fn_00009090_lacos.h',
+         nat='fn_00009090_96e0_nativo', rotulo='loc_000096E0', destino='loc_000096E0_fim'),
 ]
 # laços de um bloco só com os registradores em variáveis locais (laco_local.py: o cabeçalho port/edge/ll_*.h é gerado
 # aqui, do próprio módulo): o núcleo faz o laço inteiro e salta para <rótulo>_fim, depois do desvio; vem antes do vk
