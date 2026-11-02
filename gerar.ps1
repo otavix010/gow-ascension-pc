@@ -399,7 +399,9 @@ Etapa '1_ferramentas' {
                 Msg 'o FFmpeg chegou incompleto; baixando de novo'
             }
         }
-        Remove-Item $zip
+        # report 714 (02/11): apagar o zip deu acesso negado (antivírus com o arquivo preso) e a geração parou; o
+        # FFmpeg já está extraído, então o zip que sobrar não atrapalha
+        Remove-Item $zip -ErrorAction SilentlyContinue
     }
 }
 $VS = Achar-VS
