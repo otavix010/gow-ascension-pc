@@ -248,6 +248,13 @@ static inline int ec08_um(spu_context* ctx, uint32_t s, uint32_t m_out, uint32_t
     return 1;
 }
 
+#if defined(SPU_SX_DAZ)
+/* 02/11: MXCSR.DAZ na thread da SPU: operandos e intermediários que só vão para outra conta de float dispensam o +0
+ * (como no fn_0000F538.h); ficam as saídas gravadas */
+#define EC08_ZI(x) (x)
+#else
+#define EC08_ZI(x) ec08_z8(x)
+#endif
 /* 30/10: caminho rápido. A paleta de ossos da chamada é conferida e copiada uma vez (bytes invertidos, linha l do
  * osso b em pal[l][b]); se todo M for ±0 ou tiver |M| em [2^-40, 2^41) e o k91 estiver em [2^-12, 2^4), os pesos
  * ficam em [2^-12, 2^12] (ou 0) com grão >= 2^-35 e os produtos e somas da mistura são múltiplos de 2^-98: nenhum
@@ -302,7 +309,8 @@ static inline int ec08_rapido(spu_context* ctx, uint32_t s, uint32_t m_out, uint
     uint8_t* ls = SPU_LS_BASE(ctx);
     if ((p_out & 15u) || p_out + 32u * (uint32_t)np > SPU_LS_SIZE) return 0;
     __m256 G0[2], G1[2], G2[2], t[2];
-    __m256i ruim = _mm256_setzero_si256();
+    const __m256i mod = _mm256_set1_epi32(0x7FFFFFFF);
+    __m256i mx = _mm256_setzero_si256();   /* fora do alcance (|r| >= 0x7F7FFFFF) pelo máximo dos módulos */
     for (int k = 0; k < np; k++) {
         const uint8_t* q0 = ls + ((s + 16u * (uint32_t)k) & SPU_LS_MASK);
         const uint8_t* q1 = ls + ((s + 16u * (uint32_t)k + 8u) & SPU_LS_MASK);
@@ -329,17 +337,18 @@ static inline int ec08_rapido(spu_context* ctx, uint32_t s, uint32_t m_out, uint
         __m256 T = _mm256_blend_ps(_mm256_permutevar8x32_ps(L[0], i3), _mm256_permutevar8x32_ps(L[1], i3), 0x22);
         T = _mm256_blend_ps(T, _mm256_permutevar8x32_ps(L[2], i3), 0x44);
         T = _mm256_blend_ps(T, _mm256_setzero_ps(), 0x88);
-        const __m256 P = ec08_z8(_mm256_castsi256_ps(ec08_bswap8(_mm256_loadu_si256((const __m256i*)(ls + p_out + 32u * (uint32_t)k)))));
+        const __m256 P = EC08_ZI(_mm256_castsi256_ps(ec08_bswap8(_mm256_loadu_si256((const __m256i*)(ls + p_out + 32u * (uint32_t)k)))));
         const __m256 P1 = _mm256_permutevar8x32_ps(P, _mm256_setr_epi32(1, 2, 0, 3, 5, 6, 4, 7));
         const __m256 P2 = _mm256_permutevar8x32_ps(P, _mm256_setr_epi32(2, 0, 1, 3, 6, 4, 5, 7));
-        __m256 u = _mm256_fmadd_ps(P, ec08_z8(g0), ec08_z8(T));
-        ruim = _mm256_or_si256(ruim, ec08_ruim8(u));
-        u = _mm256_fmadd_ps(P1, ec08_z8(g1), ec08_z8(u));
-        ruim = _mm256_or_si256(ruim, ec08_ruim8(u)); u = ec08_z8(u);
-        u = _mm256_fmadd_ps(P2, ec08_z8(g2), u);
-        ruim = _mm256_or_si256(ruim, ec08_ruim8(u));
+        __m256 u = _mm256_fmadd_ps(P, EC08_ZI(g0), EC08_ZI(T));
+        mx = _mm256_max_epu32(mx, _mm256_and_si256(_mm256_castps_si256(u), mod));
+        u = _mm256_fmadd_ps(P1, EC08_ZI(g1), EC08_ZI(u));
+        mx = _mm256_max_epu32(mx, _mm256_and_si256(_mm256_castps_si256(u), mod));
+        u = _mm256_fmadd_ps(P2, EC08_ZI(g2), EC08_ZI(u));
+        mx = _mm256_max_epu32(mx, _mm256_and_si256(_mm256_castps_si256(u), mod));
         t[k] = ec08_z8(u); G0[k] = g0; G1[k] = g1; G2[k] = g2;
     }
+    const __m256i ruim = _mm256_cmpgt_epi32(mx, _mm256_set1_epi32(0x7F7FFFFE));
     if (!_mm256_testz_si256(ruim, ruim)) return 0;
     for (int k = 0; k < np; k++) {
         const __m256i X0 = ec08_bswap8(_mm256_castps_si256(G0[k])), X1 = ec08_bswap8(_mm256_castps_si256(G1[k])), X2 = ec08_bswap8(_mm256_castps_si256(G2[k]));
@@ -459,8 +468,27 @@ static __attribute__((noinline)) int fn_0000E550_ec08_feito(spu_context* ctx)
 #endif
     for (uint32_t j = j0; j + 1 < n; j++)
         ec08_par(ctx, s0 + 16u * j, m0 + 96u * j, p0 + 32u * j, base, k91, k84, k97);
-    /* a última volta fica com o laço traduzido */
     const uint32_t j = n - 1;
+    static int ult = -1;
+    if (ult < 0) { const char* e = getenv("GOWA_EC08_ULTIMO"); ult = !(e && *e == '0'); }
+    if (ult) {
+        /* 02/11 (E4): o último par também, e salta para depois do laço (loc_0000EDE8). Ali, dos registradores que o
+         * laço escreve, só r4, r80, r83 e r86 são lidos (scripts_edge/vivos.py --abi): r4 e r80 = o que a última volta
+         * pré-busca do par n (como o ec08_vivos: o quadword em s0 + 16n, lido antes das gravações dela), r83 = o
+         * quadword que ela grava em r86 + 16, r86 += 32 por volta. GOWA_EC08_ULTIMO=0 volta ao jeito de antes. */
+        const u128 q = spu_ls_read128(ctx, s0 + 16u * n);
+#if EC08_VETOR == 2
+        if (!vet2 || !ec08_um(ctx, s0 + 16u * j, m0 + 96u * j, p0 + 32u * j, base, k91, k84, k97))
+#endif
+            ec08_par(ctx, s0 + 16u * j, m0 + 96u * j, p0 + 32u * j, base, k91, k84, k97);
+        const u128 v33 = spu_andhi(q, 255);
+        r[4] = spu_roti(spu_a(spu_shli(v33, 5), spu_shli(v33, 4)), 16);
+        r[80] = spu_cuflt(spu_shufb(q, r[81], r[77]), 155);
+        r[83] = spu_ls_read128(ctx, p0 + 32u * j + 16u);
+        for (int i = 0; i < 4; i++) r[86]._u32[i] += 32u * n;
+        return 2;
+    }
+    /* a última volta fica com o laço traduzido */
     ec08_vivos(ctx, s0 + 16u * j, p0 + 32u * j);
     /* os ponteiros e o contador andam por ai (as 4 faixas), j voltas */
     for (int i = 0; i < 4; i++) {

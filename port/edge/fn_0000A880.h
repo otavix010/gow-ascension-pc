@@ -163,12 +163,21 @@ static inline __m256i a880_bswap8(__m256i v)
     return _mm256_shuffle_epi8(v, _mm256_setr_epi8(3, 2, 1, 0, 7, 6, 5, 4, 11, 10, 9, 8, 15, 14, 13, 12,
                                                    3, 2, 1, 0, 7, 6, 5, 4, 11, 10, 9, 8, 15, 14, 13, 12));
 }
+#if defined(SPU_SX_DAZ)
+/* 02/11: MXCSR.DAZ na thread da SPU: um operando denormal já vale zero, e o sinal de um zero intermediário não chega
+ * ao resultado (arredondando para zero); o +0 fica só onde o valor sai (gravado) ou entra em conta inteira (frsqest,
+ * comparação por inteiro). Como no fn_0000F538.h. */
+#define A880_ZI(x) (x)
+#else
+#define A880_ZI(x) a880_z8(x)
+#endif
+/* carga SoA sem o +0 (A880_ZI): quem grava um componente direto (o w da BBC8) aplica o a880_z8 nele */
 static inline void a880_soa(const uint8_t* p, __m256* x, __m256* y, __m256* z, __m256* w)
 {
-    const __m256 A = a880_z8(_mm256_castsi256_ps(a880_bswap8(_mm256_loadu_si256((const __m256i*)p))));
-    const __m256 B = a880_z8(_mm256_castsi256_ps(a880_bswap8(_mm256_loadu_si256((const __m256i*)(p + 32)))));
-    const __m256 C = a880_z8(_mm256_castsi256_ps(a880_bswap8(_mm256_loadu_si256((const __m256i*)(p + 64)))));
-    const __m256 D = a880_z8(_mm256_castsi256_ps(a880_bswap8(_mm256_loadu_si256((const __m256i*)(p + 96)))));
+    const __m256 A = A880_ZI(_mm256_castsi256_ps(a880_bswap8(_mm256_loadu_si256((const __m256i*)p))));
+    const __m256 B = A880_ZI(_mm256_castsi256_ps(a880_bswap8(_mm256_loadu_si256((const __m256i*)(p + 32)))));
+    const __m256 C = A880_ZI(_mm256_castsi256_ps(a880_bswap8(_mm256_loadu_si256((const __m256i*)(p + 64)))));
+    const __m256 D = A880_ZI(_mm256_castsi256_ps(a880_bswap8(_mm256_loadu_si256((const __m256i*)(p + 96)))));
     const __m256 t0 = _mm256_unpacklo_ps(A, B), t1 = _mm256_unpackhi_ps(A, B), t2 = _mm256_unpacklo_ps(C, D), t3 = _mm256_unpackhi_ps(C, D);
     *x = _mm256_shuffle_ps(t0, t2, _MM_SHUFFLE(1, 0, 1, 0)); *y = _mm256_shuffle_ps(t0, t2, _MM_SHUFFLE(3, 2, 3, 2));
     *z = _mm256_shuffle_ps(t1, t3, _MM_SHUFFLE(1, 0, 1, 0)); *w = _mm256_shuffle_ps(t1, t3, _MM_SHUFFLE(3, 2, 3, 2));
@@ -207,37 +216,42 @@ static inline unsigned a880_oito(const uint8_t* pa, const uint8_t* pb, uint8_t* 
     __m256 ax, ay, az, aw, bx, by, bz, bw;
     a880_soa(pa, &ax, &ay, &az, &aw); a880_soa(pb, &bx, &by, &bz, &bw);
     (void)aw;
-    __m256i ruim = _mm256_setzero_si256();
-#define A880_R(v) ruim = _mm256_or_si256(ruim, a880_ruim8(v))
+    /* fora do alcance (|r| >= 0x7F7FFFFF) pelo máximo dos módulos; m2 = só os que contam com d > épsilon */
+    const __m256i mod = _mm256_set1_epi32(0x7FFFFFFF);
+    __m256i m1 = _mm256_setzero_si256(), m2 = _mm256_setzero_si256();
+#define A880_R(v) m1 = _mm256_max_epu32(m1, _mm256_and_si256(_mm256_castps_si256(v), mod))
+#define A880_R2(v) m2 = _mm256_max_epu32(m2, _mm256_and_si256(_mm256_castps_si256(v), mod))
     /* c_i = b_i * a_(i+1) - a_i * b_(i+1) (o AoS com a.yzxx, b.yzxx), i = 0, 1, 2 */
     __m256 p0 = _mm256_mul_ps(bx, ay), p1 = _mm256_mul_ps(by, az), p2 = _mm256_mul_ps(bz, ax);
     A880_R(p0); A880_R(p1); A880_R(p2);
-    const __m256 c0 = a880_z8(_mm256_fnmadd_ps(ax, by, a880_z8(p0)));
-    const __m256 c1 = a880_z8(_mm256_fnmadd_ps(ay, bz, a880_z8(p1)));
-    const __m256 c2 = a880_z8(_mm256_fnmadd_ps(az, bx, a880_z8(p2)));
+    const __m256 c0 = A880_ZI(_mm256_fnmadd_ps(ax, by, A880_ZI(p0)));
+    const __m256 c1 = A880_ZI(_mm256_fnmadd_ps(ay, bz, A880_ZI(p1)));
+    const __m256 c2 = A880_ZI(_mm256_fnmadd_ps(az, bx, A880_ZI(p2)));
     A880_R(c0); A880_R(c1); A880_R(c2);
-    /* n = (c1, c2, c0) * b.w */
+    /* n = (c1, c2, c0) * b.w (sai direto quando d <= épsilon: com o +0) */
     const __m256 nx = a880_z8(_mm256_mul_ps(bw, c1)), ny = a880_z8(_mm256_mul_ps(bw, c2)), nz = a880_z8(_mm256_mul_ps(bw, c0));
     A880_R(nx); A880_R(ny); A880_R(nz);
-    const __m256 sx = a880_z8(_mm256_mul_ps(nx, nx)), sy = a880_z8(_mm256_mul_ps(ny, ny)), sz = a880_z8(_mm256_mul_ps(nz, nz));
+    const __m256 sx = A880_ZI(_mm256_mul_ps(nx, nx)), sy = A880_ZI(_mm256_mul_ps(ny, ny)), sz = A880_ZI(_mm256_mul_ps(nz, nz));
     A880_R(sx); A880_R(sy); A880_R(sz);
     const __m256 q = _mm256_add_ps(sx, sy);
     A880_R(q);
-    const __m256 d = a880_z8(_mm256_add_ps(a880_z8(q), sz));
+    const __m256 d = a880_z8(_mm256_add_ps(A880_ZI(q), sz));   /* d vai para comparação e frsqest inteiros */
     A880_R(d);
-#undef A880_R
     const __m256 gt = _mm256_castsi256_ps(_mm256_cmpgt_epi32(_mm256_castps_si256(d), _mm256_set1_epi32(0x0DA2425F)));
     const __m256 y = a880_rsq8(d);
     const __m256 t = _mm256_mul_ps(y, y);
-    __m256i r2 = a880_ruim8(t);
-    const __m256 u = a880_z8(_mm256_fnmadd_ps(d, a880_z8(t), _mm256_set1_ps(1.0f)));
-    r2 = _mm256_or_si256(r2, a880_ruim8(u));
-    const __m256 h = a880_z8(_mm256_mul_ps(a880_z8(y), _mm256_set1_ps(0.5f)));
-    const __m256 y2 = a880_z8(_mm256_fmadd_ps(u, h, a880_z8(y)));
-    r2 = _mm256_or_si256(r2, _mm256_or_si256(a880_ruim8(y2), a880_ruim8(y)));
+    A880_R2(t);
+    const __m256 u = A880_ZI(_mm256_fnmadd_ps(d, A880_ZI(t), _mm256_set1_ps(1.0f)));
+    A880_R2(u);
+    const __m256 h = A880_ZI(_mm256_mul_ps(A880_ZI(y), _mm256_set1_ps(0.5f)));
+    const __m256 y2 = A880_ZI(_mm256_fmadd_ps(u, h, A880_ZI(y)));
+    A880_R2(y2); A880_R2(y);
     const __m256 ox = a880_z8(_mm256_mul_ps(nx, y2)), oy = a880_z8(_mm256_mul_ps(ny, y2)), oz = a880_z8(_mm256_mul_ps(nz, y2));
-    r2 = _mm256_or_si256(r2, _mm256_or_si256(a880_ruim8(ox), _mm256_or_si256(a880_ruim8(oy), a880_ruim8(oz))));
-    ruim = _mm256_or_si256(ruim, _mm256_and_si256(r2, _mm256_castps_si256(gt)));   /* com d <= épsilon sai n */
+    A880_R2(ox); A880_R2(oy); A880_R2(oz);
+#undef A880_R
+#undef A880_R2
+    const __m256i lim = _mm256_set1_epi32(0x7F7FFFFE);
+    const __m256i ruim = _mm256_or_si256(_mm256_cmpgt_epi32(m1, lim), _mm256_and_si256(_mm256_cmpgt_epi32(m2, lim), _mm256_castps_si256(gt)));   /* com d <= épsilon sai n */
     const __m256 rx = _mm256_blendv_ps(nx, ox, gt), ry = _mm256_blendv_ps(ny, oy, gt), rz = _mm256_blendv_ps(nz, oz, gt);
     const __m256 Z0 = _mm256_setzero_ps();
     const __m256 u0 = _mm256_unpacklo_ps(rx, ry), u1 = _mm256_unpackhi_ps(rx, ry), u2 = _mm256_unpacklo_ps(rz, Z0), u3 = _mm256_unpackhi_ps(rz, Z0);

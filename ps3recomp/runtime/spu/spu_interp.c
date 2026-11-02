@@ -612,7 +612,9 @@ static __attribute__((noinline)) void gowa_interp_entry_note(const spu_context* 
     const long long now = (long long)ppu_timebase_now();
     long long last = s_last;
     if (!last) { __atomic_compare_exchange_n(&s_last, &last, now, 0, __ATOMIC_RELAXED, __ATOMIC_RELAXED); return; }
-    if (now - last < 10LL * 79800000LL ||
+    static long long s_int = -1;   /* GOWA_INTERP_ENTRY_LOG_MS: o intervalo em ms (10 s sem ele) */
+    if (s_int < 0) { const char* e = getenv("GOWA_INTERP_ENTRY_LOG_MS"); s_int = (e ? atoll(e) : 10000LL) * 79800LL; }
+    if (now - last < s_int ||
         !__atomic_compare_exchange_n(&s_last, &last, now, 0, __ATOMIC_RELAXED, __ATOMIC_RELAXED)) return;
     uint64_t tot = 0;
     for (int i = 0; i < GOWA_IEL_N; i++) tot += s_iel[i].steps;

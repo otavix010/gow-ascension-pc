@@ -417,6 +417,21 @@ int replay(const char* dir)
             if (dif_mem) diz(" (1a em 0x%08X)", dif_mem_ea);
             diz(" | LS %u dif", dif_ls);
             if (dif_ls) diz(" (1a em 0x%05X, sp 0x%05X)", dif_ls_a, fim->gpr[1]._u32[0] & SPU_LS_MASK);
+            /* 02/11: GOWA_CONF_LS_DETALHE=1 lista as faixas da LS que diferem (até 8) */
+            static const int ls_det = getenv("GOWA_CONF_LS_DETALHE") != nullptr;
+            if (dif_ls && ls_det) {
+                int nf = 0;
+                for (uint32_t k = 0; k < SPU_LS_SIZE && nf < 8; k++) {
+                    if (ctx->ls_store[k] == fim->ls_store[k]) continue;
+                    uint32_t e = k;
+                    while (e + 1 < SPU_LS_SIZE && (ctx->ls_store[e + 1] != fim->ls_store[e + 1] || (e + 17 < SPU_LS_SIZE &&
+                           memcmp(&ctx->ls_store[e + 1], &fim->ls_store[e + 1], 16)))) e++;
+                    diz(" [0x%05X..0x%05X: aqui %02X%02X%02X%02X, gravado %02X%02X%02X%02X]", k, e, ctx->ls_store[k],
+                        ctx->ls_store[k + 1], ctx->ls_store[k + 2], ctx->ls_store[k + 3], fim->ls_store[k], fim->ls_store[k + 1],
+                        fim->ls_store[k + 2], fim->ls_store[k + 3]);
+                    k = e; nf++;
+                }
+            }
             diz(" | regs %u dif", dif_reg);
             if (dif_reg) diz(" (r%d)", reg1);
             if (dif_tmp) diz(" + %u temporários", dif_tmp);

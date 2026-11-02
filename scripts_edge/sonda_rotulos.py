@@ -2,7 +2,7 @@
 D640: loc_0000D6C0 até loc_0000DB70). Só no código gerado da bancada; restaurar o original depois.
 GOWA_PL_FOTO=<N>, GOWA_PL_FOTO_DIR como em sonda_fn.py.
 
-uso: python -I sonda_rotulos.py <pasta> <função> <rótulo de entrada> <rótulo de saída>"""
+uso: python -I sonda_rotulos.py <pasta> <função> <rótulo de entrada | __INICIO__> <rótulo de saída[,outro...]>"""
 import os
 import sys
 
@@ -23,8 +23,14 @@ fim = s.index('\n}\n', i)
 corpo = s[i:fim]
 a = f'{r_in}:\n'
 b = f'{r_out}:\n'
-assert corpo.count(a) == 1 and corpo.count(b) == 1, (corpo.count(a), corpo.count(b))
-corpo = corpo.replace(a, a + '        pl_foto(ctx, 0);   /* SONDA */\n').replace(b, b + '        pl_foto(ctx, 1);   /* SONDA */\n')
+saidas = [f'{r}:\n' for r in r_out.split(',')]   # 02/11: várias saídas separadas por vírgula
+assert (r_in == '__INICIO__' or corpo.count(a) == 1) and all(corpo.count(x) == 1 for x in saidas), (corpo.count(a), corpo.count(b))
+if r_in == '__INICIO__':   # 02/11: a foto de entrada no começo da função
+    corpo = '        pl_foto(ctx, 0);   /* SONDA */\n' + corpo
+else:
+    corpo = corpo.replace(a, a + '        pl_foto(ctx, 0);   /* SONDA */\n')
+for x in saidas:
+    corpo = corpo.replace(x, x + '        pl_foto(ctx, 1);   /* SONDA */\n')
 s = s[:i] + corpo + s[fim:]
 open(p, 'w', encoding='latin-1', newline='').write(s)
 print('ok')

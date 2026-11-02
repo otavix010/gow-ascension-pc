@@ -56,3 +56,8 @@ __pycache__/
 # gerado pelo gerar.ps1
 /jogar.cmd
 port/build.txt
+scripts_edge/banc/*.exe
+scripts_edge/banc/*.bin
+scripts_edge/banc/*.obj
+scripts_edge/banc/*.lib
+scripts_edge/banc/*.exp
