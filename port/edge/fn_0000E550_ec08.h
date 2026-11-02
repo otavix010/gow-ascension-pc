@@ -468,8 +468,27 @@ static __attribute__((noinline)) int fn_0000E550_ec08_feito(spu_context* ctx)
 #endif
     for (uint32_t j = j0; j + 1 < n; j++)
         ec08_par(ctx, s0 + 16u * j, m0 + 96u * j, p0 + 32u * j, base, k91, k84, k97);
-    /* a última volta fica com o laço traduzido */
     const uint32_t j = n - 1;
+    static int ult = -1;
+    if (ult < 0) { const char* e = getenv("GOWA_EC08_ULTIMO"); ult = !(e && *e == '0'); }
+    if (ult) {
+        /* 02/11 (E4): o último par também, e salta para depois do laço (loc_0000EDE8). Ali, dos registradores que o
+         * laço escreve, só r4, r80, r83 e r86 são lidos (scripts_edge/vivos.py --abi): r4 e r80 = o que a última volta
+         * pré-busca do par n (como o ec08_vivos: o quadword em s0 + 16n, lido antes das gravações dela), r83 = o
+         * quadword que ela grava em r86 + 16, r86 += 32 por volta. GOWA_EC08_ULTIMO=0 volta ao jeito de antes. */
+        const u128 q = spu_ls_read128(ctx, s0 + 16u * n);
+#if EC08_VETOR == 2
+        if (!vet2 || !ec08_um(ctx, s0 + 16u * j, m0 + 96u * j, p0 + 32u * j, base, k91, k84, k97))
+#endif
+            ec08_par(ctx, s0 + 16u * j, m0 + 96u * j, p0 + 32u * j, base, k91, k84, k97);
+        const u128 v33 = spu_andhi(q, 255);
+        r[4] = spu_roti(spu_a(spu_shli(v33, 5), spu_shli(v33, 4)), 16);
+        r[80] = spu_cuflt(spu_shufb(q, r[81], r[77]), 155);
+        r[83] = spu_ls_read128(ctx, p0 + 32u * j + 16u);
+        for (int i = 0; i < 4; i++) r[86]._u32[i] += 32u * n;
+        return 2;
+    }
+    /* a última volta fica com o laço traduzido */
     ec08_vivos(ctx, s0 + 16u * j, p0 + 32u * j);
     /* os ponteiros e o contador andam por ai (as 4 faixas), j voltas */
     for (int i = 0; i < 4; i++) {

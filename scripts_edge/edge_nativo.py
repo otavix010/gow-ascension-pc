@@ -6,8 +6,8 @@ O código traduzido é gerado a cada geração, então os ganchos são aplicados
   registradores em ctx->gpr e o traduzido segue com eles);
 - 'antes': logo antes de um rótulo (roda uma vez, antes do laço), `if (<nativo>(ctx)) goto <destino>;`;
 - 'depois_rotulo': logo depois de um rótulo, `if (<nativo>(ctx)) {}` (o nativo avança e o traduzido segue);
-- 'multi': logo depois de um rótulo (pos='antes': logo antes), o nativo devolve 0 (segue o traduzido) ou k e salta
-  para destinos[k-1].
+- 'multi': logo depois de um rótulo (pos='antes': logo antes; vk=...: antes do núcleo vk), o nativo devolve 0
+  (segue o traduzido) ou k e salta para destinos[k-1].
 O nativo devolve 0 quando o caso não é coberto, e o código traduzido segue como antes.
 
 uso: python -I edge_nativo.py aplicar|tirar [raiz do port]"""
@@ -31,8 +31,10 @@ GANCHOS = [
     dict(tipo='antes', pasta='gowajm_0072DF80', fn='gowajm_0072DF80_spu_func_0000D640__b', cab='fn_0000D640.h',
          nat='fn_0000D640_laco_nativo', rotulo='loc_0000D92C', destino='loc_0000DB70'),
     # E550 (skinning): o laço EC08 menos a última volta; entra antes do núcleo vk dele e salta para o laço
-    dict(tipo='antes_vk', pasta='gowajm_0072DF80', fn='gowajm_0072DF80_spu_func_0000E550__b', cab='fn_0000E550_ec08.h',
-         nat='fn_0000E550_ec08_nativo', vk='/*VK 0000E550/0000EC08*/', destino='loc_0000EC08'),
+    # 02/11 (E4): devolve 2 quando fez também o último par -> depois do laço (loc_0000EDE8)
+    dict(tipo='multi', pasta='gowajm_0072DF80', fn='gowajm_0072DF80_spu_func_0000E550__b', cab='fn_0000E550_ec08.h',
+         nat='fn_0000E550_ec08_nativo', vk='/*VK 0000E550/0000EC08*/', rotulo='loc_0000EC08',
+         destinos=['loc_0000EC08', 'loc_0000EDE8']),
     # DCC0/E3C4 (reconstrução dos triângulos): o laço inteiro em SIMD com as tabelas do jogo (o escalar perdia do laço
     # local por um desvio imprevisível por triângulo); saltando para depois do laço
     dict(tipo='antes', pasta='gowajm_0072DF80', fn='gowajm_0072DF80_spu_func_0000DCC0__b', cab='fn_0000DCC0_e3c4.h',
@@ -295,7 +297,11 @@ def main():
             gancho = f'        {{ const int _k = {g["nat"]}(ctx); {saidas} }} {MARCA}\n'
             if gancho in corpo:
                 print(f'{g["fn"]} {g["rotulo"]} multi: já aplicado'); continue
-            k = corpo.index(rot) + (0 if g.get('pos') == 'antes' else len(rot))
+            if g.get('vk'):   # antes do núcleo vk do laço (que fica logo antes do rótulo)
+                k = corpo.index(g['vk'])
+                k = corpo.rindex(chr(10), 0, k) + 1
+            else:
+                k = corpo.index(rot) + (0 if g.get('pos') == 'antes' else len(rot))
             corpo = corpo[:k] + gancho + corpo[k:]
         elif g['tipo'] == 'laco_local':
             rot = f'{g["rotulo"]}:\n'
