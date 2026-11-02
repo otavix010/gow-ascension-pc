@@ -21,6 +21,18 @@ si = importlib.util.module_from_spec(spec); spec.loader.exec_module(si)
 MARCA = '/* GOWA_EDGE_NATIVO */'
 
 
+def _rotqmbii(a, i7):
+    """o quadword (palavra 0 = a mais alta) deslocado à direita por (-i7) & 7 bits, entrando zeros"""
+    sh = (-i7) & 7
+    if not sh: return list(a)
+    return [((a[i] >> sh) | ((a[i - 1] << (32 - sh)) & 0xFFFFFFFF if i else 0)) & 0xFFFFFFFF for i in range(4)]
+
+
+si.OPS.setdefault('rotqmbii', _rotqmbii)
+si.OPS.setdefault('xori', lambda a, i: [(w ^ (si.sx(i, 10) & 0xFFFFFFFF)) & 0xFFFFFFFF for w in a])
+si.OPS.setdefault('cwx', lambda a, b: si.ctl_insercao((a[0] + b[0]) & 12, 4))
+
+
 def ganchos(fn):
     src = open(os.path.join(raiz, 'scripts_edge', 'edge_nativo.py'), encoding='utf-8').read()
     i = src.index('GANCHOS = ['); j = src.index('\n]\n', i)
@@ -29,6 +41,10 @@ def ganchos(fn):
         if g['fn'] != fn: continue
         if g['tipo'] == 'multi':
             out.append((g['rotulo'], g['nat'], g['destinos'], bool(g.get('vk')) or g.get('pos') == 'antes'))
+        elif g['tipo'] == 'depois_rotulo':   # logo depois do rótulo, toda vez; o nativo avança e o traduzido segue
+            out.append((g['rotulo'], g['nat'], [None], False))
+        elif g['tipo'] == 'entrada':   # a função inteira: no começo; feito = SPU_RET
+            out.append(('__INICIO__', g['nat'], ['loc_FIM'], True))
         elif g['tipo'] in ('antes', 'antes_vk'):
             rot = g.get('rotulo') or 'loc_9' + g['vk'][4:].split('/')[1][:8][1:]
             out.append((rot, g['nat'], [g['destino']], True))
@@ -49,7 +65,11 @@ def programa(fn, r_in=None, r_out=None):
     i = s.index(cab) + len(cab)
     corpo = s[i:s.index('\n}\n', i)]
     if r_in:
-        corpo = corpo[corpo.index(f'\n{r_in}:\n'):corpo.index(f'\n{r_out}:\n')]
+        ini = 0 if r_in == '__INICIO__' else corpo.index(f'\n{r_in}:\n')
+        if ',' in r_out:   # várias saídas: até o fim da função, parando na primeira saída alcançada
+            corpo = corpo[ini:]
+        else:
+            corpo = corpo[ini:corpo.index(f'\n{r_out}:\n')]
     linhas = []
     for l in corpo.split('\n'):
         t = l.strip()
@@ -63,23 +83,42 @@ def programa(fn, r_in=None, r_out=None):
             continue
         if t.startswith('SPU_TAILX('):
             linhas.append('SPU_RET(ctx);'); continue
-        linhas.append(t)
+        if 'spu_drain_call' in t or 'spu_indirect_branch' in t or 'spu_rdch' in t or 'spu_wrch' in t:   # chamada, desvio indireto, canal: o oráculo não segue (fora do trecho)
+            linhas.append('goto loc_EEEEEEEE;'); continue
+        if t.endswith(' { SPU_RET(ctx); }') and t.startswith('if ('):   # retorno condicional: desvio para o fim
+            linhas.append(t[:-len(' { SPU_RET(ctx); }')] + ' goto loc_FFFFFFFF;'); continue
+        # a leitura que pode cair no contexto (0x1C0, remapeamento do número da SPU): aqui uma leitura comum
+        linhas.append(t.replace('spu_ls_read128_kcx(', 'spu_ls_read128('))
     prog, rot = si.compila('\n'.join(linhas))
     rot.setdefault('loc_FIM', len(prog))
+    rot['loc_FFFFFFFF'] = len(prog)
+    if r_out and ',' in r_out:   # as saídas viram desvios para o fim
+        for r in r_out.split(','):
+            i = rot[r]
+            prog.insert(i, ('goto', 'loc_FIM'))
+            for k in rot:
+                if rot[k] > i: rot[k] += 1
+        rot['loc_FIM'] = rot['loc_FFFFFFFF'] = len(prog)
+    rot['loc_EEEEEEEE'] = len(prog) + 1   # roda acusa
     return prog, rot
 
 
 def roda(prog, rot, m, ganchos_pc=None, chama=None, limite=2 * 10 ** 7):
     """como si.roda; em ganchos_pc[pc] (só chegando em sequência se o gancho é 'antes') chama o nativo"""
-    pc, n, saltou = 0, 0, False
-    while pc < len(prog):
-        if ganchos_pc and pc in ganchos_pc:
+    pc, n, saltou, feito_aqui = 0, 0, False, -1
+    while pc < len(prog) or pc == len(prog) + 1:
+        if pc == len(prog) + 1: raise RuntimeError('chegou numa chamada fora do trecho')
+        if ganchos_pc and pc in ganchos_pc and feito_aqui != pc:
             nat, destinos, so_seq = ganchos_pc[pc]
             if not (so_seq and saltou):
                 k = chama(nat, m)
+                if k and destinos[k - 1] is None:   # 'depois_rotulo': segue o traduzido daqui
+                    feito_aqui = pc
+                    continue
                 if k:
                     pc = rot.get(fim_rot(destinos[k - 1]), len(prog)); saltou = True
                     continue
+        feito_aqui = -1
         n += 1
         if n > limite: raise RuntimeError('laço sem fim?')
         ins = prog[pc]; pc += 1; saltou = False
@@ -135,6 +174,7 @@ def main():
     vivos = [int(x) for x in os.environ['BJ_VIVOS'].split(',')] if os.environ.get('BJ_VIVOS') else list(range(128))
     gs = ganchos(fn)
     gpc = {}
+    rot['__INICIO__'] = 0
     for rotulo, nat, destinos, so_seq in gs:
         if rotulo not in rot:
             print('rótulo do gancho não achado:', rotulo, nat); continue
