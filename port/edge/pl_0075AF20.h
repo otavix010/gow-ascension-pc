@@ -28,29 +28,33 @@ static inline int plaf20_igual(u128 a, uint32_t w0, uint32_t w1, uint32_t w2, ui
     return a._u32[0] == w0 && a._u32[1] == w1 && a._u32[2] == w2 && a._u32[3] == w3;
 }
 
-static int pl_0075AF20_corpo(spu_context* ctx)
+/* o laço dos copiadores: os registradores mudam de plugin para plugin (a mesma conta). passo = bytes por vértice;
+ * b = o controle do embaralhamento do vértice B: os bytes desde passo (passo < 16) ou passo - 16 da janela seguinte. */
+typedef struct { uint8_t passo, off, off2, out, out16, in, w, id, b, sel, tres; } plcopia_regs;
+
+static int plcopia_laco(spu_context* ctx, const plcopia_regs* q)
 {
     if (!gowa_edge_nativo_on()) return 0;
     u128* g = ctx->gpr;
-    const uint32_t off = g[9]._u32[0];
-    if (!off || (off & 31u) || (0u - off) > 0x20000u || g[7]._u32[0] != off) return 0;
-    /* os controles do embaralhamento: identidade em r19, o vértice B (bytes 15..30) em r17, w em r20 */
-    if (!plaf20_igual(g[19], 0x00010203u, 0x04050607u, 0x08090A0Bu, 0x0C0D0E0Fu) ||
-        !plaf20_igual(g[17], 0x0F101112u, 0x13141516u, 0x1718191Au, 0x1B1C1D1Eu) ||
-        !plaf20_igual(g[20], 0, 0, 0, 0xFFFFFFFFu) || !plaf20_igual(g[18], 0x03030303u, 0x03030303u, 0x03030303u, 0x03030303u))
+    const uint32_t passo = q->passo, off = g[q->off]._u32[0];
+    if (!off || (off & 31u) || (0u - off) > 0x20000u || g[q->off2]._u32[0] != off) return 0;
+    const uint32_t bi = (passo < 16u ? passo : passo - 16u) * 0x01010101u;
+    if (!plaf20_igual(g[q->id], 0x00010203u, 0x04050607u, 0x08090A0Bu, 0x0C0D0E0Fu) ||
+        !plaf20_igual(g[q->b], bi + 0x00010203u, bi + 0x04050607u, bi + 0x08090A0Bu, bi + 0x0C0D0E0Fu) ||
+        !plaf20_igual(g[q->sel], 0, 0, 0, 0xFFFFFFFFu) || !plaf20_igual(g[q->tres], 0x03030303u, 0x03030303u, 0x03030303u, 0x03030303u))
         return 0;
-    const uint32_t n = (0u - off) / 32u, ent = (g[14]._u32[0] - 60u) & SPU_LS_MASK, out = (g[8]._u32[0] + off) & SPU_LS_MASK;
-    const uint32_t tam = 30u * n + 60u + 48u;   /* o original lê duas voltas à frente */
-    if (g[11]._u32[0] != g[8]._u32[0] + 16u) return 0;
+    const uint32_t n = (0u - off) / 32u, ent = (g[q->in]._u32[0] - 4u * passo) & SPU_LS_MASK, out = (g[q->out]._u32[0] + off) & SPU_LS_MASK;
+    const uint32_t tam = 2u * passo * n + 4u * passo + 64u;   /* o original lê duas voltas à frente */
+    if (g[q->out16]._u32[0] != g[q->out]._u32[0] + 16u) return 0;
     if ((out & 15u) || ent + tam > SPU_LS_SIZE || out + 32u * n > SPU_LS_SIZE) return 0;
     if (out < ent + tam && ent < out + 32u * n) return 0;
     uint8_t* ls = SPU_LS_BASE(ctx);
     uint32_t w;
-    memcpy(&w, &g[13]._u32[3], 4);
+    memcpy(&w, &g[q->w]._u32[3], 4);
     w = __builtin_bswap32(w);
     for (uint32_t i = 0; i < 2u * n; i++) {
         uint8_t* d = ls + out + 16u * i;
-        memcpy(d, ls + ent + 15u * i, 12);
+        memcpy(d, ls + ent + passo * i, 12);
         memcpy(d + 12, &w, 4);
     }
     g[3] = spu_il(0);
@@ -60,9 +64,21 @@ static int pl_0075AF20_corpo(spu_context* ctx)
 
 static __attribute__((noinline)) int pl_0075AF20_nativo(spu_context* ctx)
 {
+    static const plcopia_regs q = { 15, 9, 7, 8, 11, 14, 13, 19, 17, 20, 18 };
     static volatile long c[2];
-    const int r = pl_0075AF20_corpo(ctx);
+    const int r = plcopia_laco(ctx, &q);
     gowa_edge_conta("pl75AF20", c, r);
+    return r;
+}
+
+/* 02/11: o 0x75B470 (vértice de 22 bytes; laço 0x30154). Não roda nas gravações: conferido na bancada sintética
+ * (o laço traduzido e este sobre as mesmas LS e registradores, preparação traduzida). */
+static __attribute__((noinline)) int pl_0075B470_nativo(spu_context* ctx)
+{
+    static const plcopia_regs q = { 22, 11, 9, 8, 10, 15, 17, 20, 18, 21, 19 };
+    static volatile long c[2];
+    const int r = plcopia_laco(ctx, &q);
+    gowa_edge_conta("pl75B470", c, r);
     return r;
 }
 #endif
