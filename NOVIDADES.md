@@ -4,6 +4,14 @@ O Otavix Launcher mostra este arquivo na página "Novidades" do jogo. Cada atual
 "## <data> · <versão>" e o texto em português (### pt), inglês (### en) e, quando houver, espanhol (### es).
 As mais novas ficam em cima.
 
+## 02/11/2026 · 0b4037a
+### pt
+- **Instalação:** a compilação do decodificador de áudio ATRAC não falha mais em alguns discos (erro "AV_RB32/AV_RL32 não declarados").
+### en
+- **Installation:** compiling the ATRAC audio decoder no longer fails on some drives ("AV_RB32/AV_RL32 undeclared" error).
+### es
+- **Instalación:** la compilación del decodificador de audio ATRAC ya no falla en algunos discos (error "AV_RB32/AV_RL32 no declarados").
+
 ## 02/11/2026 · 2cca492
 ### pt
 - **Instalação:** a geração não para mais quando o Windows nega o privilégio para criar links físicos (projeto em drive externo); o jogo passa a ler o disco de onde ele está.
