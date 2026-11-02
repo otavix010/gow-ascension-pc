@@ -194,6 +194,7 @@ GANCHOS = [
     # copiadores inteiros (E4, 02/11): 0x75AF20 na 0x30000; 0x75B470 e 0x75B710 na 0x30000 e na 0x30018 (onde o job
     # chama direto); se recusarem, seguem a preparação traduzida e os ganchos dos laços
     dict(tipo='entrada', pasta='gowapl_0075AF20', fn='gowapl_0075AF20_spu_func_00030000', cab='pl_0075AF20.h', nat='pl_0075AF20_inteiro'),
+    dict(tipo='entrada', pasta='gowapl_0075AF20', fn='gowapl_0075AF20_spu_func_00030010', cab='pl_0075AF20.h', nat='pl_0075AF20_n10'),
     dict(tipo='entrada', pasta='gowapl_0075B470', fn='gowapl_0075B470_spu_func_00030000', cab='pl_0075AF20.h', nat='pl_0075B470_inteiro'),
     dict(tipo='entrada', pasta='gowapl_0075B470', fn='gowapl_0075B470_spu_func_00030018', cab='pl_0075AF20.h', nat='pl_0075B470_n18'),
     dict(tipo='entrada', pasta='gowapl_0075B710', fn='gowapl_0075B710_spu_func_00030000', cab='pl_0075AF20.h', nat='pl_0075B710_inteiro'),

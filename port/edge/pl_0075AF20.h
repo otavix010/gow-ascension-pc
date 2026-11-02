@@ -87,7 +87,8 @@ static __attribute__((noinline)) int pl_0075B470_nativo(spu_context* ctx)
  * daquela vaga em r3 + 0x5C; a saída é esse ponteiro: por vértice os 12 primeiros bytes da entrada (r4, passo) e
  * w = a palavra 3 da constante em T + 0xD0, aos pares (n = r5). Na 0x30018 (onde o job chama o 0x75B470 e o 0x75B710
  * direto) o r1 já desceu e o antigo já está gravado; conferido com o que o 0x30000 deixa nos registradores (r44 = 1,
- * r45 = a lista, r25 = r4 + 2 * passo, r57 = a constante em T). Sai com r3 = 0 e o r1 de volta. */
+ * r45 = a lista, r25 = r4 + 2 * passo, r57 = a constante em T); o 0x75AF20 é chamado em +0x10 (na carga). Sai com
+ * r3 = 0 e o r1 de volta. */
 static inline uint32_t plcopia_palavra(const uint8_t* ls, uint32_t a)
 {
     const uint32_t q = a & SPU_LS_MASK & ~15u;
@@ -95,7 +96,7 @@ static inline uint32_t plcopia_palavra(const uint8_t* ls, uint32_t a)
     for (uint32_t i = 0; i < 4; i++) v = (v << 8) | ls[q + ((a + i) & 15u)];
     return v;
 }
-static int plcopia_inteiro(spu_context* ctx, uint32_t passo, uint32_t T, int na18)
+static int plcopia_inteiro(spu_context* ctx, uint32_t passo, uint32_t T, int na18)   /* na18: 1 = 0x30018, 2 = 0x30010 do 0x75AF20 */
 {
     if (!gowa_edge_nativo_on()) return 0;
     u128* g = ctx->gpr;
@@ -103,7 +104,11 @@ static int plcopia_inteiro(spu_context* ctx, uint32_t passo, uint32_t T, int na1
     const uint32_t r1 = (g[1]._u32[0] + (na18 ? 224u : 0u)) & SPU_LS_MASK, r3 = g[3]._u32[0] & SPU_LS_MASK,
                    r4 = g[4]._u32[0] & SPU_LS_MASK, n = g[5]._u32[0], fq = (r1 - 224u) & ~15u;
     if ((r3 & 15u) || r3 + 0x170u > SPU_LS_SIZE || r1 < 0x200u || r1 > SPU_LS_SIZE || !n || n > 4096u) return 0;
-    if (na18) {
+    if (na18 == 2) {   /* o 0x30000 do 0x75AF20 só faz r42 = 1, grava o r1, r1 -= 224 e r43 = a lista */
+        const u128 l = spu_ls_read128(ctx, r3 + 0x160u);
+        if (spu_ls_read32(ctx, fq) != r1 || memcmp(&l, &g[43], 16)) return 0;
+        for (int i = 0; i < 4; i++) if (g[42]._u32[i] != 1u) return 0;
+    } else if (na18) {
         const u128 l = spu_ls_read128(ctx, r3 + 0x160u), c = spu_ls_read128(ctx, (uint32_t)((int32_t)T + g_spu_hot_reloc));
         if (spu_ls_read32(ctx, fq) != r1 || memcmp(&l, &g[45], 16) || memcmp(&c, &g[57], 16)) return 0;
         for (int i = 0; i < 4; i++) if (g[44]._u32[i] != 1u || g[25]._u32[i] != g[4]._u32[i] + 2u * passo) return 0;
@@ -136,6 +141,7 @@ static int plcopia_inteiro(spu_context* ctx, uint32_t passo, uint32_t T, int na1
 }
 #define PLCOPIA_INTEIRO(nome, rot, passo, T, na18)                  static __attribute__((noinline)) int nome(spu_context* ctx)     {                                                                   static volatile long c[2];                                      const int r = plcopia_inteiro(ctx, (passo), (T), (na18));         gowa_edge_conta(rot, c, r);                                     return r;                                                   }
 PLCOPIA_INTEIRO(pl_0075AF20_inteiro, "pl75AF20i", 15u, 0x301D0u, 0)
+PLCOPIA_INTEIRO(pl_0075AF20_n10, "pl75AF20i/10", 15u, 0x301D0u, 2)
 PLCOPIA_INTEIRO(pl_0075B470_inteiro, "pl75B470i", 22u, 0x301C0u, 0)
 PLCOPIA_INTEIRO(pl_0075B470_n18, "pl75B470i/18", 22u, 0x301C0u, 1)
 PLCOPIA_INTEIRO(pl_0075B710_inteiro, "pl75B710i", 18u, 0x301C0u, 0)
