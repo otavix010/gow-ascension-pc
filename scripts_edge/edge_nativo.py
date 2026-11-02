@@ -74,6 +74,9 @@ GANCHOS = [
     # (o rótulo do fim vem do laço local)
     dict(tipo='antes', pasta='gowajm_0072DF80', fn='gowajm_0072DF80_spu_func_0000DCC0__b', cab='fn_0000DCC0_e134.h',
          nat='fn_0000DCC0_e134_nativo', rotulo='loc_0000E134', destino='loc_0000E134_fim'),
+    # DCC0/E30C (E4, 01/11): cópia desalinhada de 16 em 16 bytes (memmove para frente); o rótulo do fim vem do laço local
+    dict(tipo='antes', pasta='gowajm_0072DF80', fn='gowajm_0072DF80_spu_func_0000DCC0__b', cab='fn_0000DCC0_e30c.h',
+         nat='fn_0000DCC0_e30c_nativo', rotulo='loc_0000E30C', destino='loc_0000E30C_fim'),
 ]
 # laços de um bloco só com os registradores em variáveis locais (laco_local.py: o cabeçalho port/edge/ll_*.h é gerado
 # aqui, do próprio módulo): o núcleo faz o laço inteiro e salta para <rótulo>_fim, depois do desvio; vem antes do vk
