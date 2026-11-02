@@ -113,6 +113,9 @@ GANCHOS = [
     # para o primeiro; o laço inteiro, saltando para loc_0000E0E4 (só o r10 do laço é lido depois)
     dict(tipo='antes', pasta='gowajm_0072DF80', fn='gowajm_0072DF80_spu_func_0000DCC0__b', cab='fn_0000DCC0_de6c.h',
          nat='fn_0000DCC0_de6c_nativo', rotulo='loc_0000DE6C', destino='loc_0000E0E4'),
+    # DCC0/DFF0 (E4, 02/11): o mesmo desempacotamento para largura 9..16; antes do vk do laço, saltando para E0E4
+    dict(tipo='antes_vk', pasta='gowajm_0072DF80', fn='gowajm_0072DF80_spu_func_0000DCC0__b', cab='fn_0000DCC0_dff0.h',
+         nat='fn_0000DCC0_dff0_nativo', vk='/*VK 0000DCC0/0000DFF0*/', destino='loc_0000E0E4'),
     # 9090/9458 (E4, 02/11): o desenho no buffer de comandos (0x1714, 0x181C endereço/formato do índice, 0x1808) e a
     # decisão seguinte (9888, 9958 = buffer cheio, ou 9570); vivos nas saídas por scripts_edge/vivos.py
     dict(tipo='multi', pasta='gowajm_0072DF80', fn='gowajm_0072DF80_spu_func_00009090__b', cab='fn_00009090_9458.h',
