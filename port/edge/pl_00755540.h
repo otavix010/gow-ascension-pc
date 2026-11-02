@@ -58,7 +58,7 @@ static int pl_00755540_corpo(spu_context* ctx)
         const uint32_t s = g[34]._u32[c];
         if (s < 8u || s > 31u || g[17]._u32[c] != s - 32u) return 0;
         vies[c] = (int32_t)g[31]._u32[c];
-        if (vies[c] > (1 << 20) || vies[c] < -(1 << 20)) return 0;
+        if (vies[c] >= (1 << 23) || vies[c] <= -(1 << 23)) return 0;
         esc[c] = 1.0;
         for (uint32_t k = s; k < 32u; k++) esc[c] *= 0.5;
     }

@@ -15,13 +15,22 @@
 #include <string.h>
 #include <immintrin.h>
 #include "pl_00752710.h"   /* pl752_contas, pl752_sel, pl752_u128 */
+#include "edge_comum.h"
 
 static inline int pl74e_igual(u128 a, uint32_t w0, uint32_t w1, uint32_t w2, uint32_t w3)
 {
     return a._u32[0] == w0 && a._u32[1] == w1 && a._u32[2] == w2 && a._u32[3] == w3;
 }
 
+static int pl_0074EF90_corpo(spu_context* ctx);
 static __attribute__((noinline)) int pl_0074EF90_nativo(spu_context* ctx)
+{
+    static volatile long n[2];
+    const int r = pl_0074EF90_corpo(ctx);
+    gowa_edge_conta("pl74EF90", n, r);
+    return r;
+}
+static int pl_0074EF90_corpo(spu_context* ctx)
 {
 #if PL752_VETOR && (defined(__SSE4_1__) || defined(__AVX2__))
     if (!gowa_edge_nativo_on()) return 0;
@@ -53,7 +62,7 @@ static __attribute__((noinline)) int pl_0074EF90_nativo(spu_context* ctx)
         const uint32_t s = g[67]._u32[c];
         if (s < 8u || s > 31u || g[66]._u32[c] != s - 32u) return 0;
         vies[c] = (int32_t)g[63]._u32[c];
-        if (vies[c] > (1 << 20) || vies[c] < -(1 << 20)) return 0;
+        if (vies[c] >= (1 << 23) || vies[c] <= -(1 << 23)) return 0;
         esc[c] = 1.0;
         for (uint32_t k = s; k < 32u; k++) esc[c] *= 0.5;
     }
