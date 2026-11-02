@@ -64,6 +64,39 @@ static inline int bbc8_oito(uint8_t* p)
     _mm256_storeu_si256((__m256i*)(p + 96), a880_bswap8(_mm256_castps_si256(_mm256_shuffle_ps(u1, u3, _MM_SHUFFLE(3, 2, 3, 2)))));
     return 1;
 }
+#elif A880_VETOR == 1
+/* 02/11: build com AVX-512 (sem o MXCSR em RZ): 4 vértices por zmm (AoS), arredondamento para zero embutido em cada
+ * conta; x, y, z repetidos nas faixas de cada vértice dão L em todas as faixas. Mesma ordem do original. */
+static inline int bbc8_quatro(uint8_t* p)
+{
+    const __m512 v = _mm512_castsi512_ps(a880_bswap(_mm512_loadu_si512(p)));
+    const __m512 vx = _mm512_permute_ps(v, 0x00), vy = _mm512_permute_ps(v, 0x55), vz = _mm512_permute_ps(v, 0xAA);
+    const __m512i mod = _mm512_set1_epi32(0x7FFFFFFF);
+#define BBC8_M(x) mx = _mm512_max_epu32(mx, _mm512_and_si512(_mm512_castps_si512(x), mod))
+    __m512i mx = _mm512_and_si512(_mm512_castps_si512(v), mod);   /* w * 1,0 = w */
+    const __m512 xx = _mm512_mul_round_ps(vx, vx, A880_RZ);
+    BBC8_M(xx);
+    const __m512 t = _mm512_fmadd_round_ps(vy, vy, xx, A880_RZ);
+    BBC8_M(t);
+    const __m512 L = a880_z(_mm512_fmadd_round_ps(vz, vz, t, A880_RZ));   /* L vai para o frsqest inteiro */
+    BBC8_M(L);
+    const __m512 sc = _mm512_mask_blend_ps(0x8888, a880_rsq(L), _mm512_set1_ps(1.0f));
+    BBC8_M(sc);
+    const __m512 o = a880_z(_mm512_mul_round_ps(v, sc, A880_RZ));
+    BBC8_M(o);
+#undef BBC8_M
+    if (_mm512_cmpgt_epi32_mask(mx, _mm512_set1_epi32(0x7F7FFFFE))) return 0;
+    _mm512_storeu_si512(p, a880_bswap(_mm512_castps_si512(o)));
+    return 1;
+}
+static inline int bbc8_oito(uint8_t* p)
+{
+    uint8_t tmp[128];
+    memcpy(tmp, p, 128);
+    if (!bbc8_quatro(tmp) || !bbc8_quatro(tmp + 64)) return 0;   /* nada gravado na LS: a volta inteira vai ao exato */
+    memcpy(p, tmp, 128);
+    return 1;
+}
 #endif
 
 static int fn_0000BBC8_corpo(spu_context* ctx);
@@ -78,7 +111,7 @@ static __attribute__((noinline)) int fn_0000BBC8_nativo(spu_context* ctx)
 
 static int fn_0000BBC8_corpo(spu_context* ctx)
 {
-#if A880_VETOR == 2
+#if A880_VETOR == 2 || A880_VETOR == 1
     if (!gowa_edge_nativo_on()) return 0;
     u128* g = ctx->gpr;
     const uint32_t p = g[3]._u32[0], cont = g[4]._u32[0];

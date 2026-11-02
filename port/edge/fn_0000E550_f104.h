@@ -67,6 +67,39 @@ static inline int f104_dois(const uint8_t* v, const uint8_t* m, uint8_t* o)
     _mm256_storeu_si256((__m256i*)o, f104_bswap8(z));
     return 1;
 }
+#elif defined(SPU_SX_DAZ) && defined(__AVX512F__) && defined(__AVX512BW__)
+/* 02/11: build com AVX-512 (sem o MXCSR em RZ): 4 vértices por zmm, arredondamento para zero embutido em cada conta;
+ * as linhas da matriz de cada vértice nas faixas dele. Um grupo inteiro (4 vértices de um fluxo) por vez. */
+#define F104_VETOR 2
+static inline __m512i f104_bswap16(__m512i v)
+{
+    return _mm512_shuffle_epi8(v, _mm512_broadcast_i32x4(_mm_setr_epi8(3, 2, 1, 0, 7, 6, 5, 4, 11, 10, 9, 8, 15, 14, 13, 12)));
+}
+static inline __m512 f104_ld4(const uint8_t* m, int linha)
+{
+    __m512i r = _mm512_castsi128_si512(_mm_loadu_si128((const __m128i*)(m + 16 * linha)));
+    r = _mm512_inserti32x4(r, _mm_loadu_si128((const __m128i*)(m + 48 + 16 * linha)), 1);
+    r = _mm512_inserti32x4(r, _mm_loadu_si128((const __m128i*)(m + 96 + 16 * linha)), 2);
+    r = _mm512_inserti32x4(r, _mm_loadu_si128((const __m128i*)(m + 144 + 16 * linha)), 3);
+    return _mm512_castsi512_ps(f104_bswap16(r));
+}
+static inline int f104_quatro(const uint8_t* v, const uint8_t* m, uint8_t* o)
+{
+    const __m512 x = _mm512_castsi512_ps(f104_bswap16(_mm512_loadu_si512(v)));
+    const __m512 R0 = f104_ld4(m, 0), R1 = f104_ld4(m, 1), R2 = f104_ld4(m, 2);
+    const __m512i mod = _mm512_set1_epi32(0x7FFFFFFF);
+    __m512 t = _mm512_mul_round_ps(x, R0, _MM_FROUND_TO_ZERO | _MM_FROUND_NO_EXC);
+    __m512i mx = _mm512_and_si512(_mm512_castps_si512(t), mod);
+    t = _mm512_fmadd_round_ps(_mm512_permute_ps(x, _MM_SHUFFLE(3, 0, 2, 1)), R1, t, _MM_FROUND_TO_ZERO | _MM_FROUND_NO_EXC);
+    mx = _mm512_max_epu32(mx, _mm512_and_si512(_mm512_castps_si512(t), mod));
+    t = _mm512_fmadd_round_ps(_mm512_permute_ps(x, _MM_SHUFFLE(3, 1, 0, 2)), R2, t, _MM_FROUND_TO_ZERO | _MM_FROUND_NO_EXC);
+    mx = _mm512_max_epu32(mx, _mm512_and_si512(_mm512_castps_si512(t), mod));
+    if (_mm512_cmpgt_epi32_mask(mx, _mm512_set1_epi32(0x7F7FFFFE))) return 0;
+    const __m512i ti = _mm512_castps_si512(t);   /* expoente 0 -> +0 na saída */
+    const __m512i z = _mm512_maskz_mov_epi32(_mm512_test_epi32_mask(ti, _mm512_set1_epi32(0x7F800000)), ti);
+    _mm512_storeu_si512(o, f104_bswap16(z));
+    return 1;
+}
 #else
 #define F104_VETOR 0
 #endif
@@ -104,9 +137,15 @@ static int fn_0000E550_f104_corpo(spu_context* ctx)
         }
         for (int fl = 0; fl < 2; fl++) {
             const uint32_t p = fl ? pb : pa;
+#if F104_VETOR == 2
+            { uint8_t o4[64];
+              if (f104_quatro(ls + p, ls + pm, o4)) { memcpy(ls + p, o4, 64); continue; } }
+#endif
             for (int h = 0; h < 2; h++) {
                 uint8_t o[32];
+#if F104_VETOR == 1
                 if (f104_dois(ls + p + 32u * (uint32_t)h, ls + pm + 96u * (uint32_t)h, o)) { memcpy(ls + p + 32u * (uint32_t)h, o, 32); continue; }
+#endif
                 for (int k = 0; k < 2; k++) {
                     const uint32_t pv = p + 32u * (uint32_t)h + 16u * (uint32_t)k, mv = pm + 96u * (uint32_t)h + 48u * (uint32_t)k;
                     const u128 r = f104_exato(spu_ls_read128(ctx, pv), spu_ls_read128(ctx, mv), spu_ls_read128(ctx, mv + 16u),
