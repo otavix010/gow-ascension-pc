@@ -1,8 +1,9 @@
 #!/bin/bash
 # Bancada sintética dos plugins do EDGE (02/11): o plugin traduzido SEM ganchos x o nativo sobre as mesmas LS.
 # Prepara as cópias sem ganchos (port/spu/gowapl_*/limpo_banc.c, fora do CMake e do git) e as imagens dos plugins.
-# Depois: cmd //c "scripts_edge\banc\cc.cmd banc_<ID>" (portátil, MXCSR em DAZ + RZ) ou cc_nat.cmd (-march=native,
-# só DAZ) dentro de scripts_edge/banc, e ./banc_<ID>.exe <casos>. BANC_V=1 lista todas as diferenças.
+# Depois, dentro de scripts_edge/banc: cmd //c "$(cygpath -w $PWD/cc.cmd) banc_<ID>" (portátil, MXCSR em DAZ + RZ)
+# ou cc_nat.cmd (-march=native, só DAZ; gera banc_<ID>_nat.exe), e ./banc_<ID>.exe <casos>. BANC_V=1 lista todas as
+# diferenças.
 set -e
 G=$(cd "$(dirname "$0")/../.." && pwd)
 cd "$G"
