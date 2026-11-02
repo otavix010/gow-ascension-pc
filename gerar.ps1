@@ -9,7 +9,7 @@
     3. prepara a libsre a partir do firmware oficial;
     4. traduz o código da PPU;
     5. traduz o código das SPUs;
-    6. compila (escolhe sozinho a build com ou sem AVX-512 para a sua CPU);
+    6. compila (a build portátil, AVX2; a nativa com AVX-512 só se escolhida);
     7. deixa o jogar.cmd pronto.
   Os logs de cada etapa ficam em out\gerar\.
 
@@ -1185,7 +1185,7 @@ Etapa '5_spu' {
 
 # ---------------------------------------------------------------------------- compilar
 # A versão da build (30/10, pedido do usuário): GOWA_BUILD=auto|portatil|nativa (a opção do launcher; o -Build da
-# linha de comando, se dado, vale mais). auto = a detecção: AVX-512 -> nativa (-march=native), senão portátil
+# linha de comando, se dado, vale mais). auto = portátil (desde 02/11; antes: AVX-512 -> nativa), nativa só por escolha
 # (x86-64-v3); processador sem nome comercial -> portátil. Trocar de versão recompila (as etapas 6 e 7 voltam).
 # Se a nativa não compilar, a geração cai para a portátil com aviso. O resultado vai para port\build.txt
 # (escolhida/usada/pasta/exe/motivo, uma chave=valor por linha): o launcher abre esse exe e manda no report.
@@ -1195,10 +1195,10 @@ if ($escolha -eq 'avx512') { $escolha = 'nativa' }
 if ($escolha -notin @('auto', 'portatil', 'nativa')) { Msg "GOWA_BUILD='$escolha' não existe (auto, portatil, nativa): usando auto"; $escolha = 'auto' }
 $motivo = ''
 if ($escolha -eq 'auto') {
-    $def = (cmd /c "echo.| `"$llvm\clang.exe`" -march=native -dM -E -x c - 2>nul") -join "`n"
-    if ($def -match '__AVX512F__' -and $def -match '__AVX512BW__' -and $def -match '__AVX512VL__' -and $def -match '__AVX512DQ__') {
-        $alvo = 'nativa'; $motivo = 'automático: o processador tem AVX-512'
-    } else { $alvo = 'portatil'; $motivo = 'automático: sem AVX-512' }
+    # 02/11 (pedido do usuário): o automático é sempre a portátil (AVX2), a build que quase todos os jogadores usam e a
+    # que a tradução valida; a nativa (AVX-512) fica só por escolha, até ser validada à parte (reports 728/743: riscos
+    # e manchas num Ryzen 9700X com a nativa, também sem o EDGE nativo). Todo processador com AVX-512 roda a AVX2.
+    $alvo = 'portatil'; $motivo = 'automático: portátil (AVX2)'
     # reports 461/462: "Genuine Intel(R) CPU 0000 @ 2.60GHz" (amostra de engenharia, não se identifica) anuncia AVX-512
     # e o -march=native liga o que a CPUID diz; o jogo fechou com 0xC000001D (instrução ilegal) logo que as SPUs
     # começaram. Processador que não diz o nome comercial fica com a build portátil (AVX2), a que todos os outros usam.
