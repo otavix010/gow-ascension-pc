@@ -1218,7 +1218,9 @@ $bdir = Pasta-Build $alvo
 $infoBuild = Join-Path $R 'port\build.txt'
 $antes = @{}
 if (Test-Path $infoBuild) { foreach ($l in (Get-Content -LiteralPath $infoBuild -Encoding UTF8)) { if ($l -match '^(\w+)=(.*)$') { $antes[$matches[1]] = $matches[2] } } }
-if ($antes['escolhida'] -eq $escolha -and $antes['pasta'] -and (Test-Path (Join-Path $R "port\$($antes['pasta'])\gowa.exe"))) {
+# (só a nativa aceita outra pasta: a portátil que a substituiu; um Automático que antes dava a nativa passa à portátil)
+if ($antes['escolhida'] -eq $escolha -and $antes['pasta'] -and ($antes['pasta'] -eq $bdir -or $alvo -eq 'nativa') -and
+    (Test-Path (Join-Path $R "port\$($antes['pasta'])\gowa.exe"))) {
     $bdir = $antes['pasta']; $alvo = if ($bdir -eq 'build_native') { 'nativa' } else { 'portatil' }
     if ($antes['motivo']) { $motivo = $antes['motivo'] }
 } elseif (-not (Test-Path (Join-Path $R "port\$bdir\gowa.exe")) -or ($antes['pasta'] -and $antes['pasta'] -ne $bdir)) {
