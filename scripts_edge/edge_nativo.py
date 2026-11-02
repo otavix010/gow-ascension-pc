@@ -4,7 +4,9 @@ O código traduzido é gerado a cada geração, então os ganchos são aplicados
 - 'entrada': na entrada da função, `if (<nativo>(ctx)) { SPU_RET(ctx); }`;
 - 'entrada_segue': na entrada da função, `if (<nativo>(ctx)) { RELOAD; }` (o nativo faz parte do laço, ajusta os
   registradores em ctx->gpr e o traduzido segue com eles);
-- 'antes': logo antes de um rótulo (roda uma vez, antes do laço), `if (<nativo>(ctx)) goto <destino>;`.
+- 'antes': logo antes de um rótulo (roda uma vez, antes do laço), `if (<nativo>(ctx)) goto <destino>;`;
+- 'depois_rotulo': logo depois de um rótulo, `if (<nativo>(ctx)) {}` (o nativo avança e o traduzido segue);
+- 'multi': logo depois de um rótulo, o nativo devolve 0 (segue o traduzido) ou k e salta para destinos[k-1].
 O nativo devolve 0 quando o caso não é coberto, e o código traduzido segue como antes.
 
 uso: python -I edge_nativo.py aplicar|tirar [raiz do port]"""
@@ -107,6 +109,10 @@ GANCHOS = [
          nat='fn_000073E0_7670_nativo', rotulo='loc_00007670', destino='loc_00007670'),
     dict(tipo='antes', pasta='gowajm_0072DF80', fn='gowajm_0072DF80_spu_func_000073E0__b', cab='fn_000073E0_lacos.h',
          nat='fn_000073E0_7828_nativo', rotulo='loc_00007828', destino='loc_00007828'),
+    # 9090/9458 (E4, 02/11): o desenho no buffer de comandos (0x1714, 0x181C endereço/formato do índice, 0x1808) e a
+    # decisão seguinte (9888, 9958 = buffer cheio, ou 9570); vivos nas saídas por scripts_edge/vivos.py
+    dict(tipo='multi', pasta='gowajm_0072DF80', fn='gowajm_0072DF80_spu_func_00009090__b', cab='fn_00009090_9458.h',
+         nat='fn_00009090_9458_nativo', rotulo='loc_00009458', destinos=['loc_00009570', 'loc_00009888', 'loc_00009958']),
 ]
 # laços de um bloco só com os registradores em variáveis locais (laco_local.py: o cabeçalho port/edge/ll_*.h é gerado
 # aqui, do próprio módulo): o núcleo faz o laço inteiro e salta para <rótulo>_fim, depois do desvio; vem antes do vk
@@ -273,6 +279,15 @@ def main():
             gancho = f'        if ({g["nat"]}(ctx)) {{}} {MARCA}\n'
             if gancho in corpo:
                 print(f'{g["fn"]} {g["rotulo"]} depois: já aplicado'); continue
+            k = corpo.index(rot) + len(rot)
+            corpo = corpo[:k] + gancho + corpo[k:]
+        elif g['tipo'] == 'multi':   # 02/11 (E4): logo depois do rótulo; o nativo devolve 0 (segue o traduzido) ou k: destinos[k-1]
+            rot = f'{g["rotulo"]}:\n'
+            assert corpo.count(rot) == 1, (g['fn'], g['rotulo'])
+            saidas = ' '.join(f'if (_k == {n + 1}) goto {d};' for n, d in enumerate(g['destinos']))
+            gancho = f'        {{ const int _k = {g["nat"]}(ctx); {saidas} }} {MARCA}\n'
+            if gancho in corpo:
+                print(f'{g["fn"]} {g["rotulo"]} multi: já aplicado'); continue
             k = corpo.index(rot) + len(rot)
             corpo = corpo[:k] + gancho + corpo[k:]
         elif g['tipo'] == 'laco_local':
