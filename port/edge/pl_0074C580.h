@@ -94,14 +94,12 @@ static inline __m256i pl_fma_cflts8(__m256 x, const double* m8, const double* a8
     v = _mm512_min_pd(_mm512_max_pd(v, _mm512_set1_pd(-2147483648.0)), _mm512_set1_pd(2147483647.0));
     return _mm512_cvttpd_epi32(v);
 #else
-    /* 02/11: com o MXCSR da thread da SPU em para-zero (SPU_SX_RZ), um fma de float já arredonda uma vez para zero
-     * (o mesmo que a soma em double arredondada para zero e depois para float); x 2^k é exato (|y| < 2^32); trunca, e
-     * o cvtt dá 0x80000000 fora do alcance: o lado positivo vira 0x7FFFFFFF. As constantes são floats exatos. */
-    const __m256 m = _mm256_set_m128(_mm256_cvtpd_ps(_mm256_loadu_pd(m8 + 4)), _mm256_cvtpd_ps(_mm256_loadu_pd(m8)));
-    const __m256 a = _mm256_set_m128(_mm256_cvtpd_ps(_mm256_loadu_pd(a8 + 4)), _mm256_cvtpd_ps(_mm256_loadu_pd(a8)));
-    const __m256 t = _mm256_mul_ps(_mm256_fmadd_ps(x, m, a), _mm256_set1_ps((float)escala));
-    return _mm256_blendv_epi8(_mm256_cvttps_epi32(t), _mm256_set1_epi32(0x7FFFFFFF),
-                              _mm256_castps_si256(_mm256_cmp_ps(t, _mm256_set1_ps(2147483648.0f), _CMP_GE_OQ)));
+    const __m256d sl = _mm256_add_pd(_mm256_mul_pd(_mm256_cvtps_pd(_mm256_castps256_ps128(x)), _mm256_loadu_pd(m8)), _mm256_loadu_pd(a8));
+    const __m256d sh = _mm256_add_pd(_mm256_mul_pd(_mm256_cvtps_pd(_mm256_extractf128_ps(x, 1)), _mm256_loadu_pd(m8 + 4)), _mm256_loadu_pd(a8 + 4));
+    const __m256d e = _mm256_set1_pd(escala), lo = _mm256_set1_pd(-2147483648.0), hi = _mm256_set1_pd(2147483647.0);
+    const __m256d vl = _mm256_min_pd(_mm256_max_pd(_mm256_mul_pd(_mm256_cvtps_pd(_mm256_cvtpd_ps(sl)), e), lo), hi);
+    const __m256d vh = _mm256_min_pd(_mm256_max_pd(_mm256_mul_pd(_mm256_cvtps_pd(_mm256_cvtpd_ps(sh)), e), lo), hi);
+    return _mm256_set_m128i(_mm256_cvttpd_epi32(vh), _mm256_cvttpd_epi32(vl));
 #endif
 }
 /* meia precisão como o plugin (inteiros: sf 0x38000000, >> 13, satura e zera pelos 16 bits altos) */
