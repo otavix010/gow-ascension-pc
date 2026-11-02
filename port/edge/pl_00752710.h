@@ -20,6 +20,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <immintrin.h>
+#include "edge_comum.h"
 
 #ifndef GOWA_EDGE_NATIVO_ON_DEF
 #define GOWA_EDGE_NATIVO_ON_DEF
@@ -139,7 +140,16 @@ static inline void pl752_pos(uint8_t* ls, uint32_t dst, const uint8_t* src)
 }
 #endif
 
+static int pl_00752710_corpo(spu_context* ctx);
 static int pl_00752710_nativo(spu_context* ctx)
+{
+    static volatile long n[2];
+    const int r = pl_00752710_corpo(ctx);
+    gowa_edge_conta("pl752", n, r);
+    return r;
+}
+
+static int pl_00752710_corpo(spu_context* ctx)
 {
 #if PL752_VETOR
     if (!gowa_edge_nativo_on()) return 0;
@@ -147,7 +157,11 @@ static int pl_00752710_nativo(spu_context* ctx)
     uint8_t* ls = SPU_LS_BASE(ctx);
     const uint32_t r5 = g[5]._u32[0];
     /* só na primeira volta do laço (o que a preparação deixou): offset = -r5, atraso dos vetores = 0 */
-    if (!r5 || (r5 & 31u) || r5 > 0x10000u || g[26]._u32[0] != (uint32_t)(0u - r5) || g[7]._u32[0] != 0u) return 0;
+    if (!r5 || (r5 & 31u) || r5 > 0x10000u || g[26]._u32[0] != (uint32_t)(0u - r5) || g[7]._u32[0] != 0u) {
+        static volatile long d; if (getenv("GOWA_EDGE_CONTA") && _InterlockedIncrement(&d) <= 8)
+            fprintf(stderr, "[pl752-recusa] r5=0x%X r26=0x%X r7=0x%X\n", r5, g[26]._u32[0], g[7]._u32[0]);
+        return 0;
+    }
     const uint32_t P = r5 / 32u;
     const uint32_t inp = (g[35]._u32[0] - 72u) & SPU_LS_MASK;
     const uint32_t b0 = (g[61]._u32[0] - r5) & SPU_LS_MASK, b1 = (g[50]._u32[0] - r5) & SPU_LS_MASK, b2 = (g[51]._u32[0] - r5) & SPU_LS_MASK;
