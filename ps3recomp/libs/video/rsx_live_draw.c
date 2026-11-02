@@ -6164,6 +6164,17 @@ static ID3DBlob* ld_cjob_take(char stage, const char* src, u32 len, u64 hash, HR
     ReleaseSRWLockExclusive(&s_cj_lock);
     return blob;
 }
+/* 02/11: o shader já está na fila de compilação? Enquanto está, o cache de disco não tem o arquivo e cada desenho
+ * que o pedia fazia um fopen sem achar na thread de desenho (na primeira passada pelo bordel: ~35 mil). */
+static int ld_cjob_na_fila(char stage, u64 hash, u32 len)
+{
+    if (s_cj_on <= 0) return 0;
+    int achou = 0;
+    AcquireSRWLockShared(&s_cj_lock);
+    for (ld_cjob* j = s_cj_tab; j && !achou; j = j->tnext) achou = j->stage == stage && j->hash == hash && j->len == len;
+    ReleaseSRWLockShared(&s_cj_lock);
+    return achou;
+}
 /* O PSO pronto (*hr do CreateGraphicsPipelineState) ou NULL com *hr = E_PENDING. Chave: a
  * descrição sem os ponteiros, o layout e o DXBC dos dois estágios. */
 static ID3D12PipelineState* ld_pjob_take(const D3D12_GRAPHICS_PIPELINE_STATE_DESC* pd, ID3DBlob* vs, ID3DBlob* ps, HRESULT* hr)
@@ -6248,7 +6259,8 @@ static ID3D12PipelineState* build_pso(
 #if defined(YZ_PERF_PROFILE)
         g_ld_profile.total.vs_blob_misses++;
 #endif
-        vs = shader_disk_cache_load('V', vs_hlsl, vs_length, vs_hash);
+        vs = ld_cjob_na_fila('V', vs_hash, vs_length) ? NULL
+           : shader_disk_cache_load('V', vs_hlsl, vs_length, vs_hash);
         if (vs) {
             shader_blob_cache_insert_accounted(
                 &g.vs_blobs, vs_hlsl, vs_length, vs_hash, vs,
@@ -6314,7 +6326,8 @@ static ID3D12PipelineState* build_pso(
 #if defined(YZ_PERF_PROFILE)
         g_ld_profile.total.ps_blob_misses++;
 #endif
-        ps = shader_disk_cache_load('P', ps_hlsl, ps_length, ps_hash);
+        ps = ld_cjob_na_fila('P', ps_hash, ps_length) ? NULL
+           : shader_disk_cache_load('P', ps_hlsl, ps_length, ps_hash);
         if (ps) {
             shader_blob_cache_insert_accounted(
                 &g.ps_blobs, ps_hlsl, ps_length, ps_hash, ps,
