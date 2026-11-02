@@ -224,6 +224,7 @@ OPS = {
     'orbi': lambda a, i: w4(bytes(x | (i & 0xFF) for x in b16(a))),
     'andbi': lambda a, i: w4(bytes(x & (i & 0xFF) for x in b16(a))),
     'shlqbyi': lambda a, n: shl_bytes(a, n & 31),
+    'shlqby': lambda a, b: shl_bytes(a, b[0] & 31),
     'rotqbyi': lambda a, n: rot_bytes(a, n),
     'rotqby': lambda a, b: rot_bytes(a, b[0]),
     'rotqmby': lambda a, b: shr_bytes(a, (-b[0]) & 31),

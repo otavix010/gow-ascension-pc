@@ -1,13 +1,14 @@
 /* GOWA (02/11, EDGE nativo, marco E4): os plugins do EDGE que descrevem os atributos do vértice para o RSX (0x756880,
- * 0x75CBC0, 0x757DD0), inteiros. Para o atributo i (índice a = byte em r9 + i), um registro de 16 bytes no buffer de
+ * 0x75CBC0, 0x757DD0, 0x7538C0, 0x756C40, 0x75B9B0, 0x75BB70, 0x75CA80), inteiros. Para o atributo i (índice a = byte em r9 + i), um registro de 16 bytes no buffer de
  * comandos, a partir do cursor (palavra em r5 + 8, sem alinhamento):
  *     0x00041740 + 4a (SET_VERTEX_DATA_ARRAY_FORMAT), formato_i, 0x00041680 + 4a (..._OFFSET), (r7 + desl_i) | (r6 << 31)
  * O cursor anda 16 por registro (o original o grava antes de cada um). O original monta cada registro desalinhado por
  * ler-misturar-gravar de dois quadwords; aqui os 16n bytes direto, com o buffer, o cursor e os índices sem se encostar
  * (senão volta 0 e fica o traduzido). Funções folha sem pilha: saem com r3 = 0 (o que o original devolve); os
- * temporários ficam diferentes (só a ABI importa a quem chama). A entrada 0x30000 de cada um deixa r9 + 13 num
- * registro (o deslocamento do rotqby que tira o byte de r9): conferido. GOWA_EDGE_NATIVO=0 desliga. Gancho 'entrada'
- * na 0x3000C de cada plugin. */
+ * temporários ficam diferentes (só a ABI importa a quem chama). Nos divididos em 0x30000 + 0x3000C, a entrada deixa
+ * r9 + 13 num registro (o deslocamento do rotqby que tira o byte de r9): conferido; gancho 'entrada' na 0x3000C. Os
+ * outros (0x7538C0, 0x756C40, 0x75B9B0, 0x75BB70, 0x75CA80) são uma função só: gancho na 0x30000. As tabelas saem do
+ * próprio código pelo oráculo (scripts_edge/pl_atributos_tabela.py). GOWA_EDGE_NATIVO=0 desliga. */
 #ifndef GOWA_PL_ATRIBUTOS_H
 #define GOWA_PL_ATRIBUTOS_H
 #include <stdlib.h>
@@ -24,14 +25,14 @@ static int gowa_edge_nativo_on(void)
 }
 #endif
 
-/* n registros; rdesl = o registro em que a entrada 0x30000 deixou r9 + 13 */
+/* n registros; rdesl = o registro em que a entrada 0x30000 deixou r9 + 13 (-1: plugin inteiro numa função só) */
 static int pl_atributos(spu_context* ctx, int n, const uint32_t* fmt, const uint32_t* desl, int rdesl)
 {
     if (!gowa_edge_nativo_on()) return 0;
     u128* g = ctx->gpr;
     const uint32_t r5 = g[5]._u32[0] & SPU_LS_MASK, r9 = g[9]._u32[0] & SPU_LS_MASK, r7 = g[7]._u32[0];
     const uint32_t tam = 16u * (uint32_t)n;
-    if (g[rdesl]._u32[0] != g[9]._u32[0] + 13u) return 0;
+    if (rdesl >= 0 && g[rdesl]._u32[0] != g[9]._u32[0] + 13u) return 0;
     if (r5 + 16u > SPU_LS_SIZE || r9 + (uint32_t)n > SPU_LS_SIZE || ((r5 + 8u) & 3u)) return 0;
     const uint32_t cur = spu_ls_read32(ctx, r5 + 8u) & SPU_LS_MASK;
     if (cur + tam + 16u > SPU_LS_SIZE) return 0;
@@ -82,4 +83,22 @@ static __attribute__((noinline)) int pl_00757DD0_nativo(spu_context* ctx)
     gowa_edge_conta("pl757DD0", c, r);
     return r;
 }
+#define PL_ATRIB(nome, rot, n, rd, ...)                                     \
+    static __attribute__((noinline)) int nome(spu_context* ctx)             \
+    {                                                                       \
+        static const uint32_t t[2 * (n)] = { __VA_ARGS__ };                 \
+        static volatile long c[2];                                          \
+        const int r = pl_atributos(ctx, (n), t, t + (n), (rd));             \
+        gowa_edge_conta(rot, c, r);                                         \
+        return r;                                                           \
+    }
+/* formatos, depois deslocamentos */
+PL_ATRIB(pl_007538C0_nativo, "pl7538C0", 8, -1, 0x3A32u, 0x3A41u, 0x3A16u, 0x3A44u, 0x3A32u, 0x3A33u, 0x3A33u, 0x3A33u,
+         0u, 12u, 20u, 24u, 28u, 40u, 46u, 52u)
+PL_ATRIB(pl_00756C40_nativo, "pl756C40", 7, -1, 0x3232u, 0x3216u, 0x3244u, 0x3232u, 0x3233u, 0x3233u, 0x3233u,
+         0u, 12u, 16u, 20u, 32u, 38u, 44u)
+PL_ATRIB(pl_0075B9B0_nativo, "pl75B9B0", 3, -1, 0x1C32u, 0x1C16u, 0x1C32u, 0u, 12u, 16u)
+PL_ATRIB(pl_0075BB70_nativo, "pl75BB70", 3, -1, 0x1832u, 0x1841u, 0x1816u, 0u, 12u, 20u)
+PL_ATRIB(pl_0075CA80_nativo, "pl75CA80", 2, -1, 0x1032u, 0x1016u, 0u, 12u)
+#undef PL_ATRIB
 #endif
