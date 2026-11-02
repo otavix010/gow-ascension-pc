@@ -81,6 +81,8 @@ GANCHOS = [
     # rótulo: pega a entrada e as voltas que vêm da correção)
     dict(tipo='depois_rotulo', pasta='gowajm_0072DF80', fn='gowajm_0072DF80_spu_func_0000CC98__b', cab='fn_0000CC98_cdbc.h',
          nat='fn_0000CC98_cdbc_nativo', rotulo='loc_0000CDBC'),
+    # plugin 0x75B710 (E4, 02/11): posições float3 de pares de 36 bytes -> float4 com w = 1,0; o laço 0x30154 inteiro
+    dict(tipo='entrada', pasta='gowapl_0075B710', fn='gowapl_0075B710_spu_func_00030154', cab='pl_0075B710.h', nat='pl_0075B710_nativo'),
 ]
 # laços de um bloco só com os registradores em variáveis locais (laco_local.py: o cabeçalho port/edge/ll_*.h é gerado
 # aqui, do próprio módulo): o núcleo faz o laço inteiro e salta para <rótulo>_fim, depois do desvio; vem antes do vk
