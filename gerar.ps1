@@ -452,7 +452,9 @@ function Conferir-Processador {
     $march = if ($env:GOWA_TESTE_MARCH) { $env:GOWA_TESTE_MARCH } else { 'native' }
     $def = (cmd /c "echo.| `"$(Join-Path $VS 'VC\Tools\Llvm\x64\bin\clang.exe')`" -march=$march -dM -E -x c - 2>nul") -join "`n"
     if (-not $def -or ($def -match '__AVX2__' -and $def -match '__FMA__' -and $def -match '__BMI2__')) { return }
-    $nome = (Get-CimInstance Win32_Processor -ErrorAction SilentlyContinue | Select-Object -First 1).Name.Trim()
+    # report 739 (i7-3770): o Windows devolveu o processador sem nome, e o .Trim() num nulo parava o gerador antes da mensagem
+    $nome = "$((Get-CimInstance Win32_Processor -ErrorAction SilentlyContinue | Select-Object -First 1).Name)".Trim()
+    if (-not $nome) { $nome = 'sem nome no Windows' }
     throw ("o seu processador ($nome) não tem AVX2, e o port precisa dele: Intel Core de 4ª geração (Haswell, 2013) " +
            'em diante, ou AMD Ryzen ou FX da série Excavator (2015) em diante. O jogo também pede um processador forte: ' +
            'mesmo com AVX2, os de 4 núcleos ficam abaixo de 15 fps.')
@@ -652,13 +654,15 @@ function Descrever-Atalhos([string]$p) {
 # diz que a pasta é um espelho do gerador: só uma pasta com ela é apagada (rmdir /s apaga os nomes do espelho; os
 # arquivos do disco ficam). Uma pasta de verdade sem a marca pode ser a única cópia do jogador e nunca é apagada.
 $MARCA_ESPELHO = '.otavix-espelho'
-if (-not ('LinkFisico' -as [type])) { Add-Type @"
+# Reports 747/748: o Add-Type falhou com "O cliente não tem o privilégio necessário" (projeto num drive externo). Sem a
+# classe, o espelho de links físicos não existe neste PC e a ligação do disco segue para o modo direto (Espelhar-Disco).
+if (-not ('LinkFisico' -as [type])) { try { Add-Type -ErrorAction Stop @"
 using System; using System.Runtime.InteropServices;
 public static class LinkFisico {
   [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
   public static extern bool CreateHardLink(string novo, string existente, IntPtr reservado);
 }
-"@ }
+"@ } catch { Msg "links físicos indisponíveis neste PC ($($_.Exception.Message.Trim()))" } }
 # Report 340 (29/10): o disco em outro drive, sem junção (falta de privilégio), sem link físico (não atravessa
 # drives) e sem espaço para a cópia de 34 GB. O jogo então lê o disco direto de onde ele está: vfs\disco_direto.txt
 # guarda a pasta que contém o PS3_GAME (o boot do gowa.exe aponta o /dev_bdvd para lá; o update continua no vfs), e o
@@ -691,6 +695,7 @@ function Tirar-Ligacao([string]$pg) {
     if (Test-Path -LiteralPath (Join-Path $pg $MARCA_ESPELHO)) { SemExcecao { cmd /c "rmdir /s /q `"$pg`" 2>&1" } | Out-Null }
 }
 function Espelhar-Disco([string]$de, [string]$para) {
+    if (-not ('LinkFisico' -as [type])) { throw 'links físicos indisponíveis neste PC' }
     New-Item -ItemType Directory -Force $para | Out-Null
     [IO.File]::WriteAllText((Join-Path $para $MARCA_ESPELHO), "links físicos para $de`r`n")
     $n = 0
