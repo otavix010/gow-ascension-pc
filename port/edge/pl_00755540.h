@@ -1,6 +1,6 @@
 /* GOWA (30/10, EDGE nativo, marco E3): o laço 0x30310 do plugin 0x755540 (posições comprimidas -> float4).
  *
- * Cada vértice ocupa 12 bytes no fluxo (a partir de r27 - 48; o laço lê 2 voltas à frente) e a posição são os 3
+ * Cada vértice ocupa 12 bytes no fluxo (9 no 0x754B80; a partir de r27 - 4 * passo: o laço lê 2 voltas à frente) e a posição são os 3
  * primeiros u16 (big-endian). Por componente c: v = (u16 & r33) + r31 (inteiro de 32 bits com sinal) e a saída é
  *     fa(csflt(v >> (32 - s), 155), cuflt(v << s, 123)) = v * 2^(s - 32),   s = r34, r17 = -(32 - s)
  * (as duas partes são exatas com 8 <= s <= 31 e |v| < 2^24), w = 1,0 (r35). 2 vértices por volta, 32 bytes, a partir
@@ -30,15 +30,9 @@ static inline int pl755_igual(u128 a, uint32_t w0, uint32_t w1, uint32_t w2, uin
     return a._u32[0] == w0 && a._u32[1] == w1 && a._u32[2] == w2 && a._u32[3] == w3;
 }
 
-static int pl_00755540_corpo(spu_context* ctx);
-static __attribute__((noinline)) int pl_00755540_nativo(spu_context* ctx)
-{
-    static volatile long n[2];
-    const int r = pl_00755540_corpo(ctx);
-    gowa_edge_conta("pl755", n, r);
-    return r;
-}
-static int pl_00755540_corpo(spu_context* ctx)
+/* passo = bytes por vértice no fluxo (12 no 0x755540, 9 no 0x754B80: o mesmo laço, com o controle do vértice B do par
+ * em r39 = os bytes passo..passo+11 e a entrada duas voltas atrás de r27) */
+static int pl755_laco(spu_context* ctx, uint32_t passo)
 {
     if (!gowa_edge_nativo_on()) return 0;
     u128* g = ctx->gpr;
@@ -48,7 +42,7 @@ static int pl_00755540_corpo(spu_context* ctx)
     if (!pl755_igual(g[23], 0xFFFFFFD0u, 0xFFFFFFB7u, 0, 0) || !pl755_igual(g[24], 0xFFFFFFF0u, 0xFFFFFFE0u, 0xFFFFFFD0u, 0xFFFFFFB7u) ||
         !pl755_igual(g[26], 0xFFFFFFE0u, 0xFFFFFFD0u, 0xFFFFFFB7u, 0) || !pl755_igual(g[28], 0xFFFFFFB7u, 0, 0, 0) ||
         !pl755_igual(g[33], 0xFFFFu, 0xFFFFu, 0xFFFFu, 0) || !pl755_igual(g[38], 0, 0, 0, 0xFFFFFFFFu) ||
-        !pl755_igual(g[39], 0x0C0D0E0Fu, 0x10111213u, 0x14151617u, 0xC0C0C0C0u) ||
+        !pl755_igual(g[39], passo * 0x01010101u + 0x00010203u, passo * 0x01010101u + 0x04050607u, passo * 0x01010101u + 0x08090A0Bu, 0xC0C0C0C0u) ||
         !pl755_igual(g[25], 0x00010203u, 0x04050607u, 0x08090A0Bu, 0xC0C0C0C0u) ||
         !pl755_igual(g[32], 0, 0xFFFFFFFFu, 0, 0xFFFFFFFFu) || !pl755_igual(g[37], 0, 0, 0xFFFFFFFFu, 0xFFFFFFFFu))
         return 0;
@@ -62,10 +56,10 @@ static int pl_00755540_corpo(spu_context* ctx)
         esc[c] = 1.0;
         for (uint32_t k = s; k < 32u; k++) esc[c] *= 0.5;
     }
-    const uint32_t n = (0u - off) / 32u, ent = g[27]._u32[0] - 48u, out = g[36]._u32[0] + off;
+    const uint32_t n = (0u - off) / 32u, ent = g[27]._u32[0] - 4u * passo, out = g[36]._u32[0] + off, tam = 2u * passo * n + 4u * passo + 48u;
     if (g[29]._u32[0] != g[36]._u32[0] + 16u) return 0;
-    if ((out & 15u) || ent > SPU_LS_SIZE || ent + 24u * n + 64u > SPU_LS_SIZE || out + 32u * n > SPU_LS_SIZE) return 0;
-    if (out < ent + 24u * n + 64u && ent < out + 32u * n) return 0;   /* o original lê duas voltas à frente */
+    if ((out & 15u) || ent > SPU_LS_SIZE || ent + tam > SPU_LS_SIZE || out + 32u * n > SPU_LS_SIZE) return 0;
+    if (out < ent + tam && ent < out + 32u * n) return 0;   /* o original lê duas voltas à frente */
     uint8_t* ls = SPU_LS_BASE(ctx);
     const uint32_t um = __builtin_bswap32(g[35]._u32[3]);
 #if defined(__SSE4_1__) || defined(__AVX2__)
@@ -78,7 +72,7 @@ static int pl_00755540_corpo(spu_context* ctx)
         const __m128 es = _mm_setr_ps((float)esc[0], (float)esc[1], (float)esc[2], 0.0f);
         const __m128 w1 = _mm_castsi128_ps(_mm_setr_epi32(0, 0, 0, (int)g[35]._u32[3]));
         for (uint32_t i = 0; i < 2u * n; i++) {
-            const __m128i u = _mm_shuffle_epi8(_mm_loadu_si128((const __m128i*)(ls + ent + 12u * i)), sel);
+            const __m128i u = _mm_shuffle_epi8(_mm_loadu_si128((const __m128i*)(ls + ent + passo * i)), sel);
             __m128 f = _mm_mul_ps(_mm_cvtepi32_ps(_mm_add_epi32(u, vi)), es);
             f = _mm_blend_ps(f, w1, 8);
             _mm_storeu_si128((__m128i*)(ls + out + 16u * i), _mm_shuffle_epi8(_mm_castps_si128(f), bs));
@@ -89,7 +83,7 @@ static int pl_00755540_corpo(spu_context* ctx)
     }
 #endif
     for (uint32_t i = 0; i < 2u * n; i++) {
-        const uint8_t* p = ls + ent + 12u * i;
+        const uint8_t* p = ls + ent + passo * i;
         uint32_t o[4];
         for (int c = 0; c < 3; c++) {
             const int32_t v = (int32_t)((((uint32_t)p[2 * c] << 8) | p[2 * c + 1]) + (uint32_t)vies[c]);
@@ -103,5 +97,22 @@ static int pl_00755540_corpo(spu_context* ctx)
     g[3] = spu_il(0);
     g[1] = spu_ai(g[1], 224);
     return 1;
+}
+
+static __attribute__((noinline)) int pl_00755540_nativo(spu_context* ctx)
+{
+    static volatile long n[2];
+    const int r = pl755_laco(ctx, 12u);
+    gowa_edge_conta("pl755", n, r);
+    return r;
+}
+
+/* 02/11: o 0x754B80 (vértice de 9 bytes: os 3 u16 da posição + 3 bytes que este plugin não usa) */
+static __attribute__((noinline)) int pl_00754B80_nativo(spu_context* ctx)
+{
+    static volatile long n[2];
+    const int r = pl755_laco(ctx, 9u);
+    gowa_edge_conta("pl754B80", n, r);
+    return r;
 }
 #endif
