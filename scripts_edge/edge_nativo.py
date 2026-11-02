@@ -6,7 +6,8 @@ O código traduzido é gerado a cada geração, então os ganchos são aplicados
   registradores em ctx->gpr e o traduzido segue com eles);
 - 'antes': logo antes de um rótulo (roda uma vez, antes do laço), `if (<nativo>(ctx)) goto <destino>;`;
 - 'depois_rotulo': logo depois de um rótulo, `if (<nativo>(ctx)) {}` (o nativo avança e o traduzido segue);
-- 'multi': logo depois de um rótulo, o nativo devolve 0 (segue o traduzido) ou k e salta para destinos[k-1].
+- 'multi': logo depois de um rótulo (pos='antes': logo antes), o nativo devolve 0 (segue o traduzido) ou k e salta
+  para destinos[k-1].
 O nativo devolve 0 quando o caso não é coberto, e o código traduzido segue como antes.
 
 uso: python -I edge_nativo.py aplicar|tirar [raiz do port]"""
@@ -53,10 +54,9 @@ GANCHOS = [
     # AVX-512 o AoS empatava com o vk, que fica)
     dict(tipo='antes_vk', pasta='gowajm_0072DF80', fn='gowajm_0072DF80_spu_func_0000A880__b', cab='fn_0000A880.h',
          nat='fn_0000A880_nativo', vk='/*VK 0000A880/0000A950*/', destino='loc_0000A950_fim', fim='loc_0000A950'),
-    # 8930/8B90 (compactação dos registros de 8 bytes): as voltas até antes da última entrada que não pula; o laço
-    # traduzido segue do rótulo com os registradores ajustados
-    dict(tipo='antes', pasta='gowajm_0072DF80', fn='gowajm_0072DF80_spu_func_00008930__b', cab='fn_00008930.h',
-         nat='fn_00008930_nativo', rotulo='loc_00008B90', destino='loc_00008B90'),
+    # 8930/8B90 (compactação dos registros de 8 bytes): todas as entradas (02/11: salta para 8D50 com r8/r9; antes ficava a última entrada com o laço)
+    dict(tipo='multi', pos='antes', pasta='gowajm_0072DF80', fn='gowajm_0072DF80_spu_func_00008930__b', cab='fn_00008930.h',
+         nat='fn_00008930_nativo', rotulo='loc_00008B90', destinos=['loc_00008B90', 'loc_00008D50']),
     # B1A8 (E4, 01/11): a função inteira -- um comando de carga de constante do programa de vértices (24 bytes) no
     # buffer de comandos da LS; buffer cheio (descarrega por DMA) fica com o traduzido
     dict(tipo='entrada', pasta='gowajm_0072DF80', fn='gowajm_0072DF80_spu_func_0000B1A8__b', cab='fn_0000B1A8.h',
@@ -288,7 +288,7 @@ def main():
             gancho = f'        {{ const int _k = {g["nat"]}(ctx); {saidas} }} {MARCA}\n'
             if gancho in corpo:
                 print(f'{g["fn"]} {g["rotulo"]} multi: já aplicado'); continue
-            k = corpo.index(rot) + len(rot)
+            k = corpo.index(rot) + (0 if g.get('pos') == 'antes' else len(rot))
             corpo = corpo[:k] + gancho + corpo[k:]
         elif g['tipo'] == 'laco_local':
             rot = f'{g["rotulo"]}:\n'
