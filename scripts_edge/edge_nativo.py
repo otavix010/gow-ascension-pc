@@ -163,6 +163,9 @@ GANCHOS = [
     # plugin 0x75AA40 (E4, 02/11): inteiro -- vértice de 16 bytes (posição + 11:11:10); não roda nas gravações:
     # conferido na bancada sintética (as duas builds)
     dict(tipo='entrada', pasta='gowapl_0075AA40', fn='gowapl_0075AA40_spu_func_00030000', cab='pl_0075AA40.h', nat='pl_0075AA40_nativo'),
+    # plugin 0x758B20 (E4, 02/11): inteiro -- vértice de 28 bytes (posição + 11:11:10 + atributo 31); não roda nas
+    # gravações: conferido na bancada sintética (as duas builds)
+    dict(tipo='entrada', pasta='gowapl_00758B20', fn='gowapl_00758B20_spu_func_00030000', cab='pl_00758B20.h', nat='pl_00758B20_nativo'),
     # 9090/9458 (E4, 02/11): o desenho no buffer de comandos (0x1714, 0x181C endereço/formato do índice, 0x1808) e a
     # decisão seguinte (9888, 9958 = buffer cheio, ou 9570); vivos nas saídas por scripts_edge/vivos.py
     dict(tipo='multi', pasta='gowajm_0072DF80', fn='gowajm_0072DF80_spu_func_00009090__b', cab='fn_00009090_9458.h',
