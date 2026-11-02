@@ -1,6 +1,7 @@
 /* C entry points to the (C++) ATRAC3plus decoder, for libs/codec/cellAtrac.c.
  * This bridge is ps3recomp's own (MIT); the decoder around it is LGPL-2.1. */
-#pragma once
+#ifndef AT3_AT3_BRIDGE_H
+#define AT3_AT3_BRIDGE_H   /* guarda em vez de #pragma once (report 726) */
 #include <stdint.h>
 #ifdef __cplusplus
 extern "C" {
@@ -15,3 +16,4 @@ int   at3p_decode(void* dec, float* left, float* right, int* samples,
 #ifdef __cplusplus
 }
 #endif
+#endif /* AT3_AT3_BRIDGE_H */

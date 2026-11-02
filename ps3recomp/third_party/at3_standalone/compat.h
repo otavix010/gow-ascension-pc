@@ -1,4 +1,5 @@
-#pragma once
+#ifndef AT3_COMPAT_H
+#define AT3_COMPAT_H   /* guarda em vez de #pragma once (report 726) */
 
 #include <stdlib.h>
 
@@ -79,3 +80,4 @@ void av_log(int level, const char *fmt, ...) av_printf_format(3, 4);
 #define AV_BSWAP16C(x) (((x) << 8 & 0xff00)  | ((x) >> 8 & 0x00ff))
 #define AV_BSWAP32C(x) (AV_BSWAP16C(x) << 16 | AV_BSWAP16C((x) >> 16))
 #define av_be2ne32(x) AV_BSWAP32C((x))
+#endif /* AT3_COMPAT_H */

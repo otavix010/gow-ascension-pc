@@ -1,4 +1,5 @@
-#pragma once
+#ifndef AT3_AT3_DECODERS_H
+#define AT3_AT3_DECODERS_H   /* guarda em vez de #pragma once (report 726) */
 
 #include <cstdint>
 
@@ -24,3 +25,4 @@ ATRAC3PContext *atrac3p_alloc(int channels, int *block_align);
 void atrac3p_free(ATRAC3PContext *ctx);
 void atrac3p_flush_buffers(ATRAC3PContext *ctx);
 int atrac3p_decode_frame(ATRAC3PContext *ctx, float *out_data[2], int *nb_samples, const uint8_t *buf, int buf_size);
+#endif /* AT3_AT3_DECODERS_H */

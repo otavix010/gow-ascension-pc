@@ -18,7 +18,8 @@
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 
-#pragma once
+#ifndef AT3_MEM_H
+#define AT3_MEM_H   /* guarda em vez de #pragma once (report 726) */
 
 #include <limits.h>
 #include <stdint.h>
@@ -130,3 +131,4 @@ void av_freep(void *ptr);
 /**
  * @}
  */
+#endif /* AT3_MEM_H */

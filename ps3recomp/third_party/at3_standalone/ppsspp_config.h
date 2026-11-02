@@ -1,4 +1,5 @@
-#pragma once
+#ifndef AT3_PPSSPP_CONFIG_H
+#define AT3_PPSSPP_CONFIG_H   /* guarda em vez de #pragma once (report 726) */
 /* ps3recomp shim: at3_standalone only uses PPSSPP's config for PPSSPP_ARCH(). */
 #if defined(_M_X64) || defined(__x86_64__)
 #define PPSSPP_ARCH_AMD64 1
@@ -26,3 +27,4 @@
 #define PPSSPP_ARCH_ARM_NEON 0
 #endif
 #define PPSSPP_ARCH(x) PPSSPP_ARCH_##x
+#endif /* AT3_PPSSPP_CONFIG_H */

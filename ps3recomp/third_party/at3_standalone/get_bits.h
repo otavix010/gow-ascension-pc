@@ -18,7 +18,8 @@
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 
-#pragma once
+#ifndef AT3_GET_BITS_H
+#define AT3_GET_BITS_H   /* guarda em vez de #pragma once (report 726) */
 #include <stdint.h>
 #include <limits.h>
 
@@ -477,3 +478,4 @@ DEF(unsigned int, le16, 2, AV_RL16, AV_WL16)
 DEF(unsigned int, be32, 4, AV_RB32, AV_WB32)
 DEF(unsigned int, be24, 3, AV_RB24, AV_WB24)
 DEF(unsigned int, be16, 2, AV_RB16, AV_WB16)
+#endif /* AT3_GET_BITS_H */

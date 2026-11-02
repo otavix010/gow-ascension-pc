@@ -16,7 +16,8 @@
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 
-#pragma once
+#ifndef AT3_FLOAT_DSP_H
+#define AT3_FLOAT_DSP_H   /* guarda em vez de #pragma once (report 726) */
 
 #include "compat.h"
 
@@ -51,3 +52,4 @@ inline void vector_fmul_reverse(float * av_restrict dst, const float * av_restri
     for (int i = 0; i < len; i++)
         dst[i] *= src[-i];
 }
+#endif /* AT3_FLOAT_DSP_H */

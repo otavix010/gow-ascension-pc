@@ -19,7 +19,8 @@
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 
-#pragma once
+#ifndef AT3_FFT_H
+#define AT3_FFT_H   /* guarda em vez de #pragma once (report 726) */
 
 #define CMUL(dre, dim, are, aim, bre, bim) do { \
         (dre) = (are) * (bre) - (aim) * (bim);  \
@@ -103,3 +104,4 @@ void ff_fft_end(FFTContext *s);
 
 int ff_mdct_init(FFTContext *s, int nbits, int inverse, double scale);
 void ff_mdct_end(FFTContext *s);
+#endif /* AT3_FFT_H */

@@ -16,7 +16,8 @@
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 
-#pragma once
+#ifndef AT3_INTREADWRITE_H
+#define AT3_INTREADWRITE_H   /* guarda em vez de #pragma once (report 726) */
 #include <stdint.h>
 
 #include "compat.h"
@@ -334,3 +335,4 @@ typedef union {
         ((uint8_t*)(p))[2] = (d)>>16;           \
     } while(0)
 #endif
+#endif /* AT3_INTREADWRITE_H */
