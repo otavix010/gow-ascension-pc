@@ -269,7 +269,9 @@ if _modo == 'aplicar':
     _fl = subprocess.run([sys.executable, '-I', os.path.join(os.path.dirname(os.path.abspath(__file__)), 'funcao_local.py'),
                           arquivo(_raiz, 'gowajm_0072DF80'), os.path.join(_raiz, 'port', 'edge', 'fl_jm72.h'), 'gowajm_0072DF80'],   # 'geral' (funções com chamadas, sincronizando em volta delas) PERDEU no A/B de 02/11: f1 3,6-3,9 -> 4,1-4,3 ms, cap16 5,7-6,3 -> 6,4-6,9
                          capture_output=True, text=True, check=True).stdout.split()
+    _com_gancho = {g['fn'] for g in GANCHOS}   # quem já tem nativo (ou laço local) fica com ele
     for _k in range(0, len(_fl), 2):
+        if _fl[_k] in _com_gancho: continue
         GANCHOS.append(dict(tipo='entrada', pasta='gowajm_0072DF80', fn=_fl[_k], cab='fl_jm72.h', nat='fl_' + _fl[_k + 1]))
     print(f'funções locais: {len(_fl) // 2}')
 main()   # o main troca o sys.argv (laco_local)
