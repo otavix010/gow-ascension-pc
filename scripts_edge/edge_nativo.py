@@ -99,6 +99,14 @@ GANCHOS = [
     # 73E0/83E8 (E4, 02/11): o w do fluxo A sobre o fluxo B, no lugar, 128 bytes por volta; o rótulo do fim vem do laço local
     dict(tipo='antes', pasta='gowajm_0072DF80', fn='gowajm_0072DF80_spu_func_000073E0__b', cab='fn_000073E0_83e8.h',
          nat='fn_000073E0_83e8_nativo', rotulo='loc_000083E8', destino='loc_000083E8_fim'),
+    # 73E0/75D8, 7670, 7828 (E4, 02/11): marcas na tabela pelos índices u16, tabela de deslocamentos pela soma corrente
+    # e a palavra 3 trocada pelo contador; as voltas 0..n-2 nativas, a última fica com o traduzido (salta ao rótulo)
+    dict(tipo='antes', pasta='gowajm_0072DF80', fn='gowajm_0072DF80_spu_func_000073E0__b', cab='fn_000073E0_lacos.h',
+         nat='fn_000073E0_75d8_nativo', rotulo='loc_000075D8', destino='loc_000075D8'),
+    dict(tipo='antes', pasta='gowajm_0072DF80', fn='gowajm_0072DF80_spu_func_000073E0__b', cab='fn_000073E0_lacos.h',
+         nat='fn_000073E0_7670_nativo', rotulo='loc_00007670', destino='loc_00007670'),
+    dict(tipo='antes', pasta='gowajm_0072DF80', fn='gowajm_0072DF80_spu_func_000073E0__b', cab='fn_000073E0_lacos.h',
+         nat='fn_000073E0_7828_nativo', rotulo='loc_00007828', destino='loc_00007828'),
 ]
 # laços de um bloco só com os registradores em variáveis locais (laco_local.py: o cabeçalho port/edge/ll_*.h é gerado
 # aqui, do próprio módulo): o núcleo faz o laço inteiro e salta para <rótulo>_fim, depois do desvio; vem antes do vk
