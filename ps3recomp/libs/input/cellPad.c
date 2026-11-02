@@ -829,21 +829,47 @@ static void pad_poll_sony(void)
  * (and sent it to the XInput index of a port that was the Sony's). Over USB, the DualSense's output report 0x02
  * (flag 0x01 "compatible vibration" + 0x02 "haptics select", motors in bytes 3 and 4) and the DualShock 4's 0x05
  * (flag 0x01, motors in bytes 4 and 5), as Linux's hid-playstation sends them; written only when the motors change.
- * Bluetooth (0x31/0x11, with a CRC32) is left for when it can be tried on a controller. 1 = the port is a Sony's. */
+ * 02/11 (teste do usuário com um DualSense por Bluetooth, que não vibrava): também pelo Bluetooth, os relatórios de
+ * 78 bytes do hid-playstation / hid-sony -- o DualSense 0x31 (sequência nos 4 bits altos do byte 1, etiqueta 0x10,
+ * as mesmas marcas e motores do USB três bytes adiante) e o DualShock 4 0x11 (0xC0 = HID + CRC, marca 0x01 só dos
+ * motores, motores nos bytes 6 e 7), os dois com o CRC32 de 0xA2 + os 74 primeiros bytes no fim. O primeiro passa o
+ * controle para o relatório completo (o leitor já lê o 0x31 e o 0x11). 1 = the port is a Sony's. */
+static u32 pad_crc32(u32 c, const u8* p, size_t n)
+{
+    c = ~c;
+    while (n--) { c ^= *p++; for (int k = 0; k < 8; k++) c = (c >> 1) ^ (0xEDB88320u & (0u - (c & 1u))); }
+    return ~c;
+}
 static int pad_sony_vibrar(u32 porta, u8 grande, u8 pequeno)
 {
     for (int k = 0; k < PAD_SONY_MAX; k++) {
         PadSony* s = &s_sony[k];
         if (!s->vivo || s->porta != (LONG)porta) continue;
         AcquireSRWLockExclusive(&s->lock);
-        if (!s->gen && !s->bt && s->hw && s->hw != INVALID_HANDLE_VALUE && s->out_len >= 6 && s->out_len <= 128 &&
+        if (!s->gen && s->hw && s->hw != INVALID_HANDLE_VALUE && s->out_len >= 6 && s->out_len <= 1024 &&
             (s->mot_l != grande || s->mot_s != pequeno)) {
-            u8 r[128];
+            u8 r[1024];
             memset(r, 0, sizeof r);
-            if (s->ds5) { r[0] = 0x02; r[1] = 0x03; r[3] = pequeno; r[4] = grande; }
-            else        { r[0] = 0x05; r[1] = 0x01; r[4] = pequeno; r[5] = grande; }
+            DWORD tam = (DWORD)s->out_len;
+            if (s->bt) {
+                static u8 seq;
+                if (s->ds5) { r[0] = 0x31; r[1] = (u8)((seq++ & 0x0F) << 4); r[2] = 0x10; r[3] = 0x03; r[5] = pequeno; r[6] = grande; }
+                else        { r[0] = 0x11; r[1] = 0xC0; r[3] = 0x01; r[6] = pequeno; r[7] = grande; }
+                const u8 sem = 0xA2;
+                const u32 crc = pad_crc32(pad_crc32(0, &sem, 1), r, 74);
+                r[74] = (u8)crc; r[75] = (u8)(crc >> 8); r[76] = (u8)(crc >> 16); r[77] = (u8)(crc >> 24);
+                if (tam < 78) tam = 78;
+            } else if (s->ds5) { r[0] = 0x02; r[1] = 0x03; r[3] = pequeno; r[4] = grande; }
+            else               { r[0] = 0x05; r[1] = 0x01; r[4] = pequeno; r[5] = grande; }
             DWORD n = 0;
-            if (WriteFile(s->hw, r, (DWORD)s->out_len, &n, NULL)) { s->mot_l = grande; s->mot_s = pequeno; }
+            const int ok = (tam == (DWORD)s->out_len && WriteFile(s->hw, r, tam, &n, NULL)) ||
+                           (s->bt && HidD_SetOutputReport(s->hw, r, 78));
+            if (ok) {
+                static int disse;
+                if (!disse++) fprintf(stderr, "[controle] vibração do %s pelo %s enviada (relatório 0x%02X, %lu bytes)\n",
+                                      s->ds5 ? "DualSense" : "DualShock 4", s->bt ? "Bluetooth" : "USB", r[0], (unsigned long)tam);
+                s->mot_l = grande; s->mot_s = pequeno;
+            }
             else {
                 static int avisou;
                 if (!avisou++) fprintf(stderr, "[controle] vibração do %s não foi enviada (erro %lu)\n",
