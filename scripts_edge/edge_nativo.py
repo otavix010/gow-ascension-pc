@@ -310,7 +310,7 @@ def chamada_direta(raiz):
         m = re.match(r'^(\s*)ctx->gpr\[0\] = spu_link\((0x[0-9A-F]+)\); \{ int32_t _si = \(int32_t\)ctx->image_id; ctx->host_depth\+\+; (gowajm_0072DF80_spu_func_[0-9A-F]{8}__b)\(ctx\); spu_drain_call', l)
         if m and m.group(3) in nats and MARCA not in l and not (out and out[-1].endswith(MARCA) and 'nat_dir_' in out[-1]):
             rot = f'nat_dir_{n}'
-            out.append(f'{m.group(1)}ctx->gpr[0] = spu_link({m.group(2)}); if ({nats[m.group(3)]}(ctx)) goto {rot}; {MARCA}')
+            out.append(f'{m.group(1)}ctx->gpr[0] = spu_link({m.group(2)}); if (GOWA_NAT({nats[m.group(3)]}, ctx)) goto {rot}; {MARCA}')
             out.append(l)
             out.append(f'{rot}: ; {MARCA}')
             n += 1
@@ -340,8 +340,9 @@ def main():
             import laco_local
             sys.argv = ['laco_local', p, g['fn'], g['rotulo'], os.path.join(raiz, 'port', 'edge', g['cab']), g['nat']]
             laco_local.main()
-        linha_inc = f'#include "../../../port/edge/{g["cab"]}" {MARCA}\n'
-        if linha_inc not in s:
+        # 02/11: GOWA_NAT (GOWA_EDGE_SEM desliga nativos pelo nome) vem do edge_sem.h, antes do cabeçalho do nativo
+        linha_inc = f'#include "../../../port/edge/edge_sem.h" {MARCA}\n#include "../../../port/edge/{g["cab"]}" {MARCA}\n'
+        if f'port/edge/{g["cab"]}"' not in s:
             if INC in s:
                 s = s.replace(INC, INC + linha_inc, 1)
             else:   # o módulo inclui os helpers pelo spu_recomp.h
@@ -353,17 +354,17 @@ def main():
         if g['tipo'] in ('entrada', 'entrada_segue'):
             j = corpo.index('RELOAD;\n') + len('RELOAD;\n') if 'RELOAD;\n' in corpo else 0
             if g['tipo'] == 'entrada':
-                gancho = f'        if ({g["nat"]}(ctx)) {{ SPU_RET(ctx); }} {MARCA}\n'
+                gancho = f'        if (GOWA_NAT({g["nat"]}, ctx)) {{ SPU_RET(ctx); }} {MARCA}\n'
             else:
                 assert j, (g['fn'], 'sem RELOAD')
-                gancho = f'        if ({g["nat"]}(ctx)) {{ RELOAD; }} {MARCA}\n'
+                gancho = f'        if (GOWA_NAT({g["nat"]}, ctx)) {{ RELOAD; }} {MARCA}\n'
             if corpo[j:j + len(gancho)] == gancho:
                 print(f'{g["fn"]}: já aplicado'); continue
             corpo = corpo[:j] + gancho + corpo[j:]
         elif g['tipo'] == 'antes_vk':
             k = corpo.index(g['vk'])
             k = corpo.rindex('\n', 0, k) + 1
-            gancho = f'        if ({g["nat"]}(ctx)) goto {g["destino"]}; {MARCA}\n'
+            gancho = f'        if (GOWA_NAT({g["nat"]}, ctx)) goto {g["destino"]}; {MARCA}\n'
             if gancho in corpo:
                 print(f'{g["fn"]} antes do vk: já aplicado'); continue
             corpo = corpo[:k] + gancho + corpo[k:]
@@ -374,7 +375,7 @@ def main():
         elif g['tipo'] == 'depois_rotulo':   # 02/11 (E4): logo depois do rótulo; o nativo avança e o traduzido segue
             rot = f'{g["rotulo"]}:\n'
             assert corpo.count(rot) == 1, (g['fn'], g['rotulo'])
-            gancho = f'        if ({g["nat"]}(ctx)) {{}} {MARCA}\n'
+            gancho = f'        if (GOWA_NAT({g["nat"]}, ctx)) {{}} {MARCA}\n'
             if gancho in corpo:
                 print(f'{g["fn"]} {g["rotulo"]} depois: já aplicado'); continue
             k = corpo.index(rot) + len(rot)
@@ -383,7 +384,7 @@ def main():
             rot = f'{g["rotulo"]}:\n'
             assert corpo.count(rot) == 1, (g['fn'], g['rotulo'])
             saidas = ' '.join(f'if (_k == {n + 1}) goto {d};' for n, d in enumerate(g['destinos']))
-            gancho = f'        {{ const int _k = {g["nat"]}(ctx); {saidas} }} {MARCA}\n'
+            gancho = f'        {{ const int _k = GOWA_NAT({g["nat"]}, ctx); {saidas} }} {MARCA}\n'
             if gancho in corpo:
                 print(f'{g["fn"]} {g["rotulo"]} multi: já aplicado'); continue
             if g.get('vk'):   # antes do núcleo vk do laço (que fica logo antes do rótulo)
@@ -395,7 +396,7 @@ def main():
         elif g['tipo'] == 'laco_local':
             rot = f'{g["rotulo"]}:\n'
             assert corpo.count(rot) == 1, (g['fn'], g['rotulo'])
-            gancho = f'        if ({g["nat"]}(ctx)) goto {g["rotulo"]}_fim; {MARCA}\n'
+            gancho = f'        if (GOWA_NAT({g["nat"]}, ctx)) goto {g["rotulo"]}_fim; {MARCA}\n'
             if gancho in corpo:
                 print(f'{g["fn"]} {g["rotulo"]} local: já aplicado'); continue
             k = corpo.index(rot)
@@ -409,7 +410,7 @@ def main():
         else:
             rot = f'{g["rotulo"]}:\n'
             assert corpo.count(rot) == 1, (g['fn'], g['rotulo'])
-            gancho = f'        if ({g["nat"]}(ctx)) goto {g["destino"]}; {MARCA}\n'
+            gancho = f'        if (GOWA_NAT({g["nat"]}, ctx)) goto {g["destino"]}; {MARCA}\n'
             if gancho in corpo:
                 print(f'{g["fn"]} antes de {g["rotulo"]}: já aplicado'); continue
             k = corpo.index(rot)

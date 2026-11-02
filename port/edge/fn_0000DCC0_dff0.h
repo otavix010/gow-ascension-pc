@@ -34,7 +34,9 @@ static int fn_0000DCC0_dff0_corpo(spu_context* ctx)
     const uint32_t mask = g[27]._u32[0] & 0xFFFFu;
     for (int i = 0; i < 4; i++) if (g[27]._u32[i] != (mask | (mask << 16))) return 0;
     const uint32_t w = (uint32_t)__builtin_popcount(mask);
-    if (w < 9u || w > 16u || mask != (1u << w) - 1u) return 0;
+    /* 02/11: w = 16 fica com o traduzido -- nele o original não dá a conta acima nos índices pares (a bancada
+     * scripts_edge/banc/bj_dff0.py achou; reports 710/715, cenário preto/riscado no 6ee7878) */
+    if (w < 9u || w > 15u || mask != (1u << w) - 1u) return 0;
     if ((int32_t)g[34]._u32[0] != -(int32_t)(2u * w)) return 0;
     if (g[33]._u32[0] || g[33]._u32[1] || g[33]._u32[2] != 0xFFFFFFC0u || g[33]._u32[3] != 0xFFFFFFC0u) return 0;
     static const int zeros[] = { 14, 26, 22, 21, 43, 40, 42, 39, 50, 51, 49, 52 };
