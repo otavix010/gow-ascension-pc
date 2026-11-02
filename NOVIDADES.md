@@ -4,6 +4,17 @@ O Otavix Launcher mostra este arquivo na página "Novidades" do jogo. Cada atual
 "## <data> · <versão>" e o texto em português (### pt), inglês (### en) e, quando houver, espanhol (### es).
 As mais novas ficam em cima.
 
+## 02/11/2026 · f4fead2
+### pt
+- **Controle:** o DualSense e o DualShock 4 agora vibram também quando conectados por Bluetooth (antes só vibravam pelo cabo USB).
+- **Instalação:** a geração do port não para mais quando o antivírus impede apagar o arquivo temporário do FFmpeg.
+### en
+- **Controller:** the DualSense and DualShock 4 now also vibrate when connected over Bluetooth (before, they only vibrated over a USB cable).
+- **Installation:** port generation no longer stops when the antivirus prevents deleting the temporary FFmpeg file.
+### es
+- **Control:** el DualSense y el DualShock 4 ahora también vibran cuando están conectados por Bluetooth (antes solo vibraban con el cable USB).
+- **Instalación:** la generación del port ya no se detiene cuando el antivirus impide borrar el archivo temporal de FFmpeg.
+
 ## 02/11/2026 · 46fa730
 ### pt
 - **Correção:** desfeita a atualização anterior do processamento gráfico (EDGE), que deixava o cenário preto ou riscado em alguns PCs; o jogo volta à versão anterior enquanto investigamos.
