@@ -135,6 +135,46 @@ static inline u128 pl752_sel(u128 c, u128 ab, u128 e, int b)
     if (b) ctl = spu_a(ctl, k52);
     return spu_shufb(cc, ab, ctl);
 }
+/* 02/11: a mesma seleção pré-calculada por chamada (a tabela em r40 não muda durante o laço): para cada seletor
+ * s (0..15) e vértice b, o shufb do original vira dois pshufb (bytes de c e de ab, big-endian), um AND (o 0x7F do
+ * primeiro byte das palavras 0..2 de c, cujo sinal vem da entrada da tabela) e um OR (esse sinal, a palavra 3 =
+ * a da tabela e as constantes 0x00/0xFF/0x80 dos controles >= 0x80) */
+typedef struct { __m128i mc, mab, e, o; } pl752_sh;
+static inline uint8_t pl752_be8(const uint32_t* w, uint32_t j) { return (uint8_t)(w[j >> 2] >> (24u - 8u * (j & 3u))); }
+static void pl752_prepara(spu_context* ctx, uint32_t r40, pl752_sh* t)
+{
+    for (uint32_t s = 0; s < 16u; s++) {
+        const u128 e = spu_ls_read128(ctx, r40 + 16u * s);
+        for (uint32_t b = 0; b < 2u; b++) {
+            uint32_t ctl[4];
+            for (int i = 0; i < 3; i++) ctl[i] = (e._u32[i] & 0x7FFFFFFFu) + (b ? 0x08080808u : 0u);
+            ctl[3] = 0x0C0D0E0Fu;
+            uint8_t mc[16], mab[16], an[16], ou[16];
+            for (uint32_t j = 0; j < 16u; j++) {
+                const uint32_t c = pl752_be8(ctl, j);
+                mc[j] = mab[j] = 0x80; an[j] = 0; ou[j] = 0;
+                if (c & 0x80u) ou[j] = (c & 0xC0u) == 0x80u ? 0x00 : (c & 0xE0u) == 0xC0u ? 0xFF : 0x80;
+                else if ((c & 0x1Fu) >= 16u) { mab[j] = (uint8_t)((c & 0x1Fu) - 16u); an[j] = 0xFF; }
+                else {
+                    const uint32_t k = c & 0x0Fu;
+                    if (k >= 12u) ou[j] = pl752_be8(e._u32, k);                        /* palavra 3 de cc = a da tabela */
+                    else if (!(k & 3u)) { mc[j] = (uint8_t)k; an[j] = 0x7F; ou[j] = (uint8_t)((e._u32[k >> 2] >> 24) & 0x80u); }
+                    else { mc[j] = (uint8_t)k; an[j] = 0xFF; }
+                }
+            }
+            pl752_sh* x = &t[2u * s + b];
+            x->mc = _mm_loadu_si128((const __m128i*)mc); x->mab = _mm_loadu_si128((const __m128i*)mab);
+            x->e = _mm_loadu_si128((const __m128i*)an); x->o = _mm_loadu_si128((const __m128i*)ou);
+        }
+    }
+}
+static inline void pl752_sel_rapido(uint8_t* ls, uint32_t dst, const uint32_t* c, const uint32_t* ab, const pl752_sh* x)
+{
+    const __m128i be = _mm_setr_epi8(3, 2, 1, 0, 7, 6, 5, 4, 11, 10, 9, 8, 15, 14, 13, 12);
+    const __m128i cb = _mm_shuffle_epi8(_mm_loadu_si128((const __m128i*)c), be), abb = _mm_shuffle_epi8(_mm_loadu_si128((const __m128i*)ab), be);
+    const __m128i v = _mm_or_si128(_mm_and_si128(_mm_or_si128(_mm_shuffle_epi8(cb, x->mc), _mm_shuffle_epi8(abb, x->mab)), x->e), x->o);
+    _mm_storeu_si128((__m128i*)&ls[dst & SPU_LS_MASK & ~15u], v);
+}
 static inline void pl752_pos(uint8_t* ls, uint32_t dst, const uint8_t* src)
 {
     uint8_t* d = &ls[dst & SPU_LS_MASK & ~15u];
@@ -157,6 +197,14 @@ static int pl_00752710_nativo(spu_context* ctx)
 static void pl752_pares(spu_context* ctx, uint32_t inp, uint32_t b0, uint32_t b1, uint32_t b2, uint32_t P, uint32_t r40)
 {
     uint8_t* ls = SPU_LS_BASE(ctx);
+    /* a seleção pré-calculada, se nenhum fluxo de saída encosta na tabela (r40 .. r40 + 256: os seletores 12-15
+     * leem além dela) -- senão a de cada vértice, como antes */
+    pl752_sh sh[32];
+    const uint32_t tb = r40 & SPU_LS_MASK & ~15u, no = 32u * P + 32u;
+#define PL752_ENC(a) (((a) & SPU_LS_MASK) < tb + 256u && tb < ((a) & SPU_LS_MASK) + no)
+    const int rapido = !PL752_ENC(b0) && !PL752_ENC(b1) && !PL752_ENC(b2) && tb + 256u <= SPU_LS_SIZE;
+#undef PL752_ENC
+    if (rapido) pl752_prepara(ctx, r40, sh);
     /* os pares em lotes: as contas em vetor, a seleção e as gravações par a par */
     for (uint32_t p0 = 0; p0 < P; p0 += PL752_PARES) {
         uint32_t f1[4 * PL752_PARES], f2[4 * PL752_PARES], ab1[4 * PL752_PARES], ab2[4 * PL752_PARES], c1[4 * PL752_PARES], c2[4 * PL752_PARES];
@@ -177,6 +225,13 @@ static void pl752_pares(spu_context* ctx, uint32_t inp, uint32_t b0, uint32_t b1
             const uint32_t p = p0 + q;
             pl752_pos(ls, b0 + 32u * p, &ls[inp + 36u * p]);
             pl752_pos(ls, b0 + 32u * p + 16u, &ls[inp + 36u * p + 18u]);
+            if (rapido) {
+                pl752_sel_rapido(ls, b1 + 32u * p, &c1[4 * q], &ab1[4 * q], &sh[2u * s1[2 * q]]);
+                pl752_sel_rapido(ls, b1 + 32u * p + 16u, &c1[4 * q], &ab1[4 * q], &sh[2u * s1[2 * q + 1] + 1u]);
+                pl752_sel_rapido(ls, b2 + 32u * p, &c2[4 * q], &ab2[4 * q], &sh[2u * s2[2 * q]]);
+                pl752_sel_rapido(ls, b2 + 32u * p + 16u, &c2[4 * q], &ab2[4 * q], &sh[2u * s2[2 * q + 1] + 1u]);
+                continue;
+            }
             const u128 A1 = pl752_u128(&ab1[4 * q]), C1 = pl752_u128(&c1[4 * q]), A2 = pl752_u128(&ab2[4 * q]), C2 = pl752_u128(&c2[4 * q]);
             spu_ls_write128(ctx, b1 + 32u * p, pl752_sel(C1, A1, spu_ls_read128(ctx, r40 + 16u * s1[2 * q]), 0));
             spu_ls_write128(ctx, b1 + 32u * p + 16u, pl752_sel(C1, A1, spu_ls_read128(ctx, r40 + 16u * s1[2 * q + 1]), 1));
