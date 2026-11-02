@@ -152,6 +152,29 @@ def corpo_da_funcao(s, fn):
     raise ValueError('função não achada: ' + fn)
 
 
+def chamada_direta(raiz):
+    """01/11 (E4): nos pontos de chamada de uma função com nativo inteiro (gancho 'entrada' no módulo do job), o nativo
+    é chamado direto e, se cobrir o caso, a chamada completa do runtime (host_depth, drain, restauração da imagem) é
+    pulada. Linhas marcadas: 'tirar' as remove e a chamada original fica intacta."""
+    import re
+    nats = {g['fn']: g['nat'] for g in GANCHOS if g['tipo'] == 'entrada' and g['pasta'] == 'gowajm_0072DF80'}
+    p = arquivo(raiz, 'gowajm_0072DF80')
+    linhas = open(p, encoding='latin-1').read().split(chr(10))
+    out, n = [], 0
+    for i, l in enumerate(linhas):
+        m = re.match(r'^(\s*)ctx->gpr\[0\] = spu_link\((0x[0-9A-F]+)\); \{ int32_t _si = \(int32_t\)ctx->image_id; ctx->host_depth\+\+; (gowajm_0072DF80_spu_func_[0-9A-F]{8}__b)\(ctx\); spu_drain_call', l)
+        if m and m.group(3) in nats and MARCA not in l and not (out and out[-1].endswith(MARCA) and 'nat_dir_' in out[-1]):
+            rot = f'nat_dir_{i}'
+            out.append(f'{m.group(1)}ctx->gpr[0] = spu_link({m.group(2)}); if ({nats[m.group(3)]}(ctx)) goto {rot}; {MARCA}')
+            out.append(l)
+            out.append(f'{rot}: ; {MARCA}')
+            n += 1
+            continue
+        out.append(l)
+    open(p, 'w', encoding='latin-1', newline='').write(chr(10).join(out))
+    print(f'chamada direta: {n} pontos')
+
+
 def main():
     modo = sys.argv[1]
     raiz = sys.argv[2] if len(sys.argv) > 2 else os.path.join(os.path.dirname(__file__), '..')
@@ -238,4 +261,7 @@ def main():
         print(f'{g["fn"]}: aplicado ({g["tipo"]})')
 
 
-main()
+_modo, _raiz = sys.argv[1], (sys.argv[2] if len(sys.argv) > 2 else os.path.join(os.path.dirname(__file__), '..'))
+main()   # o main troca o sys.argv (laco_local)
+if _modo == 'aplicar':
+    chamada_direta(_raiz)
