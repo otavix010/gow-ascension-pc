@@ -83,10 +83,13 @@ static inline void pl752_contas(const uint32_t* f10, uint32_t* ab_out, uint32_t*
 #elif defined(SPU_SX_RZ) && defined(__AVX2__) && defined(__FMA__)
 #define PL752_VETOR 1
 #define PL752_PARES 2
-/* MXCSR da thread da SPU em para-zero (SPU_SX_RZ): as operações comuns arredondam para zero */
+/* MXCSR da thread da SPU em para-zero (SPU_SX_RZ): as operações comuns arredondam para zero. 02/11: a entrada montada
+ * pelos valores (setr), não por uma carga de 256 bits sobre 8 gravações escalares recentes (o repasse da gravação
+ * para a carga falha e cada chamada esperava) */
 static inline void pl752_contas(const uint32_t* f10, uint32_t* ab_out, uint32_t* c_out)
 {
-    const __m256 x = _mm256_castsi256_ps(_mm256_or_si256(_mm256_loadu_si256((const __m256i*)f10), _mm256_set1_epi32(0x3F800000)));
+    const __m256i fi = _mm256_setr_epi32((int)f10[0], (int)f10[1], (int)f10[2], (int)f10[3], (int)f10[4], (int)f10[5], (int)f10[6], (int)f10[7]);
+    const __m256 x = _mm256_castsi256_ps(_mm256_or_si256(fi, _mm256_set1_epi32(0x3F800000)));
     const __m256 ab = _mm256_fmadd_ps(_mm256_castsi256_ps(_mm256_set1_epi32(0x46352E7C)), x, _mm256_castsi256_ps(_mm256_set1_epi32((int)0xC6353150u)));
     const __m256 q = _mm256_mul_ps(ab, ab);
     const __m256 sm = _mm256_add_ps(q, _mm256_castsi256_ps(_mm256_bsrli_epi128(_mm256_castps_si256(q), 4)));
