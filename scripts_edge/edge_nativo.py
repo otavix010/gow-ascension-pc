@@ -55,6 +55,10 @@ GANCHOS = [
     # traduzido segue do rótulo com os registradores ajustados
     dict(tipo='antes', pasta='gowajm_0072DF80', fn='gowajm_0072DF80_spu_func_00008930__b', cab='fn_00008930.h',
          nat='fn_00008930_nativo', rotulo='loc_00008B90', destino='loc_00008B90'),
+    # B1A8 (E4, 01/11): a função inteira -- um comando de carga de constante do programa de vértices (24 bytes) no
+    # buffer de comandos da LS; buffer cheio (descarrega por DMA) fica com o traduzido
+    dict(tipo='entrada', pasta='gowajm_0072DF80', fn='gowajm_0072DF80_spu_func_0000B1A8__b', cab='fn_0000B1A8.h',
+         nat='fn_0000B1A8_nativo'),
 ]
 # laços de um bloco só com os registradores em variáveis locais (laco_local.py: o cabeçalho port/edge/ll_*.h é gerado
 # aqui, do próprio módulo): o núcleo faz o laço inteiro e salta para <rótulo>_fim, depois do desvio; vem antes do vk
