@@ -152,6 +152,41 @@ static int pl_00752710_nativo(spu_context* ctx)
     return r;
 }
 
+#if PL752_VETOR
+/* os P pares: posições (w = 1,0) e os dois vetores de cada par, as contas em lotes; tabela da seleção em r40 */
+static void pl752_pares(spu_context* ctx, uint32_t inp, uint32_t b0, uint32_t b1, uint32_t b2, uint32_t P, uint32_t r40)
+{
+    uint8_t* ls = SPU_LS_BASE(ctx);
+    /* os pares em lotes: as contas em vetor, a seleção e as gravações par a par */
+    for (uint32_t p0 = 0; p0 < P; p0 += PL752_PARES) {
+        uint32_t f1[4 * PL752_PARES], f2[4 * PL752_PARES], ab1[4 * PL752_PARES], ab2[4 * PL752_PARES], c1[4 * PL752_PARES], c2[4 * PL752_PARES];
+        uint32_t s1[2 * PL752_PARES], s2[2 * PL752_PARES];
+        for (uint32_t q = 0; q < PL752_PARES; q++) {
+            for (uint32_t k = 0; k < 2; k++) {
+                const uint8_t* r = &ls[(inp + 36u * (p0 + q) + 18u * k) & SPU_LS_MASK];
+                const uint64_t bits = ((uint64_t)r[12] << 40) | ((uint64_t)r[13] << 32) | ((uint64_t)r[14] << 24) |
+                                      ((uint64_t)r[15] << 16) | ((uint64_t)r[16] << 8) | r[17];
+                f1[4 * q + 2 * k] = (uint32_t)(bits >> 38) & 0x3FFu; f1[4 * q + 2 * k + 1] = (uint32_t)(bits >> 28) & 0x3FFu;
+                f2[4 * q + 2 * k] = (uint32_t)(bits >> 14) & 0x3FFu; f2[4 * q + 2 * k + 1] = (uint32_t)(bits >> 4) & 0x3FFu;
+                s1[2 * q + k] = (uint32_t)(bits >> 24) & 0xFu; s2[2 * q + k] = (uint32_t)bits & 0xFu;
+            }
+        }
+        pl752_contas(f1, ab1, c1);
+        pl752_contas(f2, ab2, c2);
+        for (uint32_t q = 0; q < PL752_PARES && p0 + q < P; q++) {
+            const uint32_t p = p0 + q;
+            pl752_pos(ls, b0 + 32u * p, &ls[inp + 36u * p]);
+            pl752_pos(ls, b0 + 32u * p + 16u, &ls[inp + 36u * p + 18u]);
+            const u128 A1 = pl752_u128(&ab1[4 * q]), C1 = pl752_u128(&c1[4 * q]), A2 = pl752_u128(&ab2[4 * q]), C2 = pl752_u128(&c2[4 * q]);
+            spu_ls_write128(ctx, b1 + 32u * p, pl752_sel(C1, A1, spu_ls_read128(ctx, r40 + 16u * s1[2 * q]), 0));
+            spu_ls_write128(ctx, b1 + 32u * p + 16u, pl752_sel(C1, A1, spu_ls_read128(ctx, r40 + 16u * s1[2 * q + 1]), 1));
+            spu_ls_write128(ctx, b2 + 32u * p, pl752_sel(C2, A2, spu_ls_read128(ctx, r40 + 16u * s2[2 * q]), 0));
+            spu_ls_write128(ctx, b2 + 32u * p + 16u, pl752_sel(C2, A2, spu_ls_read128(ctx, r40 + 16u * s2[2 * q + 1]), 1));
+        }
+    }
+}
+
+#endif
 static int pl_00752710_corpo(spu_context* ctx)
 {
 #if PL752_VETOR
@@ -180,35 +215,7 @@ static int pl_00752710_corpo(spu_context* ctx)
     spu_ls_write128(ctx, g[58]._u32[0] + r18, pl752_sel(g[15], g[13], g[39], 1));
     spu_ls_write128(ctx, g[51]._u32[0] + r18, pl752_sel(g[45], g[47], g[44], 0));
     spu_ls_write128(ctx, g[59]._u32[0] + r18, pl752_sel(g[45], g[47], g[46], 1));
-    /* os pares em lotes: as contas em vetor, a seleção e as gravações par a par */
-    for (uint32_t p0 = 0; p0 < P; p0 += PL752_PARES) {
-        uint32_t f1[4 * PL752_PARES], f2[4 * PL752_PARES], ab1[4 * PL752_PARES], ab2[4 * PL752_PARES], c1[4 * PL752_PARES], c2[4 * PL752_PARES];
-        uint32_t s1[2 * PL752_PARES], s2[2 * PL752_PARES];
-        for (uint32_t q = 0; q < PL752_PARES; q++) {
-            for (uint32_t k = 0; k < 2; k++) {
-                const uint8_t* r = &ls[(inp + 36u * (p0 + q) + 18u * k) & SPU_LS_MASK];
-                const uint64_t bits = ((uint64_t)r[12] << 40) | ((uint64_t)r[13] << 32) | ((uint64_t)r[14] << 24) |
-                                      ((uint64_t)r[15] << 16) | ((uint64_t)r[16] << 8) | r[17];
-                f1[4 * q + 2 * k] = (uint32_t)(bits >> 38) & 0x3FFu; f1[4 * q + 2 * k + 1] = (uint32_t)(bits >> 28) & 0x3FFu;
-                f2[4 * q + 2 * k] = (uint32_t)(bits >> 14) & 0x3FFu; f2[4 * q + 2 * k + 1] = (uint32_t)(bits >> 4) & 0x3FFu;
-                s1[2 * q + k] = (uint32_t)(bits >> 24) & 0xFu; s2[2 * q + k] = (uint32_t)bits & 0xFu;
-            }
-        }
-        pl752_contas(f1, ab1, c1);
-        pl752_contas(f2, ab2, c2);
-        for (uint32_t q = 0; q < PL752_PARES && p0 + q < P; q++) {
-            const uint32_t p = p0 + q;
-            if (p) {
-                pl752_pos(ls, b0 + 32u * p, &ls[inp + 36u * p]);
-                pl752_pos(ls, b0 + 32u * p + 16u, &ls[inp + 36u * p + 18u]);
-            }
-            const u128 A1 = pl752_u128(&ab1[4 * q]), C1 = pl752_u128(&c1[4 * q]), A2 = pl752_u128(&ab2[4 * q]), C2 = pl752_u128(&c2[4 * q]);
-            spu_ls_write128(ctx, b1 + 32u * p, pl752_sel(C1, A1, spu_ls_read128(ctx, r40 + 16u * s1[2 * q]), 0));
-            spu_ls_write128(ctx, b1 + 32u * p + 16u, pl752_sel(C1, A1, spu_ls_read128(ctx, r40 + 16u * s1[2 * q + 1]), 1));
-            spu_ls_write128(ctx, b2 + 32u * p, pl752_sel(C2, A2, spu_ls_read128(ctx, r40 + 16u * s2[2 * q]), 0));
-            spu_ls_write128(ctx, b2 + 32u * p + 16u, pl752_sel(C2, A2, spu_ls_read128(ctx, r40 + 16u * s2[2 * q + 1]), 1));
-        }
-    }
+    pl752_pares(ctx, inp, b0, b1, b2, P, r40);
     g[1] = spu_ai(g[1], 224);
     g[3] = spu_il(0);
     return 1;
@@ -216,5 +223,88 @@ static int pl_00752710_corpo(spu_context* ctx)
     (void)ctx;
     return 0;
 #endif
+}
+/* 02/11: o plugin inteiro, da 0x30000. Vértice de 18 bytes em r4, n = r5 (aos pares). Refaz a preparação: o r1 em
+ * r1 - 0xE0, a tabela de constantes do plugin (a da seleção) no quadro r1 - 224 + 0x20..0xD0, os atributos 1, 3 e 4
+ * nos três primeiros zeros da lista (r3 + 0x160) com os ponteiros daquelas vagas em r3 + 0x58 + 4 * id; a saída é a
+ * posição no fluxo do 1 e os vetores nos do 3 e do 4, e os vetores "do par -1" (zeros) depois do fim dos dois. Sai com
+ * r3 = 0 e o r1 de volta. Conferido na bancada sintética e nas gravações. */
+static int pl_00752710_inteiro_corpo(spu_context* ctx, int na20)
+{
+#if PL752_VETOR
+    if (!gowa_edge_nativo_on()) return 0;
+    u128* g = ctx->gpr;
+    uint8_t* ls = SPU_LS_BASE(ctx);
+    const uint32_t r1 = (g[1]._u32[0] + (na20 ? 224u : 0u)) & SPU_LS_MASK, r3 = g[3]._u32[0] & SPU_LS_MASK, r4 = g[4]._u32[0] & SPU_LS_MASK, n = g[5]._u32[0];
+    if ((r3 & 15u) || r3 + 0x170u > SPU_LS_SIZE || r1 < 0x200u || !n || n > 4096u) return 0;
+    static const uint8_t ids[3] = { 1, 3, 4 };
+    int k[3], j = 0;
+    for (int i = 0; i < 3; i++) {
+        while (j < 16 && ls[r3 + 0x160u + (uint32_t)j]) j++;
+        if (j >= 16) return 0;
+        k[i] = j++;
+    }
+    uint32_t pt[3];
+    for (int i = 0; i < 3; i++) {
+        const uint32_t a = r3 + 16u + 4u * (uint32_t)k[i];
+        pt[i] = ((uint32_t)ls[a] << 24) | ((uint32_t)ls[a + 1] << 16) | ((uint32_t)ls[a + 2] << 8) | ls[a + 3];
+    }
+    const uint32_t b0 = pt[0] & SPU_LS_MASK, b1 = pt[1] & SPU_LS_MASK, b2 = pt[2] & SPU_LS_MASK, P = (n + 1u) / 2u;
+    const uint32_t fq = (r1 - 224u) & ~15u, tab = fq + 32u, ni = 36u * (P + PL752_PARES) + 64u, no = 32u * P, nv = 32u * P + 32u;
+#define PL7I_ENC(a0, n0, c0, n1) ((a0) < (c0) + (n1) && (c0) < (a0) + (n0))
+    /* os dados dos três fluxos não se encostam; o lixo dos vetores (32 bytes depois do fim de b1 e de b2, gravado antes
+     * de tudo, como no original) pode cair no começo de outro fluxo (os fluxos vêm colados), mas não na entrada, no
+     * quadro nem no contexto */
+    if (((b0 | b1 | b2) & 15u) || r4 + ni > SPU_LS_SIZE || b0 + no > SPU_LS_SIZE || b1 + nv > SPU_LS_SIZE || b2 + nv > SPU_LS_SIZE ||
+        PL7I_ENC(b0, no, b1, no) || PL7I_ENC(b0, no, b2, no) || PL7I_ENC(b1, no, b2, no) ||
+        PL7I_ENC(b0, no, r4, ni) || PL7I_ENC(b1, nv, r4, ni) || PL7I_ENC(b2, nv, r4, ni) || PL7I_ENC(b0, no, fq, 240u) ||
+        PL7I_ENC(b1, nv, fq, 240u) || PL7I_ENC(b2, nv, fq, 240u) || PL7I_ENC(b0, no, r3, 0x170u) || PL7I_ENC(b1, nv, r3, 0x170u) ||
+        PL7I_ENC(b2, nv, r3, 0x170u) || PL7I_ENC(r4, ni, fq, 256u))
+        return 0;
+#undef PL7I_ENC
+    if (!na20) spu_ls_write128(ctx, fq, g[1]);   /* na 0x30020 quem chama já gravou */
+    static const uint16_t de[12] = { 0x500, 0x510, 0x520, 0x530, 0x540, 0x550, 0x4B0, 0x4C0, 0x4D0, 0x560, 0x4E0, 0x4F0 };
+    for (uint32_t i = 0; i < 12; i++)
+        spu_ls_write128(ctx, fq + 0x20u + 16u * i, spu_ls_read128(ctx, (uint32_t)(0x30000 + de[i] + g_spu_hot_reloc)));
+    for (int i = 0; i < 3; i++) {
+        ls[r3 + 0x160u + (uint32_t)k[i]] = ids[i];
+        const uint32_t a = r3 + 0x58u + 4u * ids[i];
+        ls[a] = (uint8_t)(pt[i] >> 24); ls[a + 1] = (uint8_t)(pt[i] >> 16); ls[a + 2] = (uint8_t)(pt[i] >> 8); ls[a + 3] = (uint8_t)pt[i];
+    }
+    memset(ls + b1 + no, 0, 32);   /* os vetores "do par -1" */
+    memset(ls + b2 + no, 0, 32);
+    pl752_pares(ctx, r4, b0, b1, b2, P, tab);
+    g[3] = spu_il(0);
+    if (na20) g[1] = spu_ai(g[1], 224);
+    return 1;
+#else
+    (void)ctx;
+    return 0;
+#endif
+}
+
+static __attribute__((noinline)) int pl_00752710_inteiro(spu_context* ctx)
+{
+    static volatile long n[2];
+    const int r = pl_00752710_inteiro_corpo(ctx, 0);
+    gowa_edge_conta("pl752i", n, r);
+    return r;
+}
+
+/* a entrada 0x30020 (o job também chama direto nela): vale se o que o 0x30000 faz já está feito -- r1 descido 224 com
+ * o antigo gravado em r1, r8 = 1, r69 = 3, r23 = a lista, r44 = r3 + 16, r25 e r21 = as constantes 0x304B0/0x304C0 */
+static __attribute__((noinline)) int pl_00752710_n20(spu_context* ctx)
+{
+    static volatile long n[2];
+    const u128* g = ctx->gpr;
+    const uint32_t sp = g[1]._u32[0];
+    const u128 lista = spu_ls_read128(ctx, g[3]._u32[0] + 0x160u), c25 = spu_ls_read128(ctx, (uint32_t)(0x304B0 + g_spu_hot_reloc)),
+               c21 = spu_ls_read128(ctx, (uint32_t)(0x304C0 + g_spu_hot_reloc));
+    int ok = spu_ls_read32(ctx, sp) == sp + 224u && !memcmp(&lista, &g[23], 16) && !memcmp(&c25, &g[25], 16) && !memcmp(&c21, &g[21], 16);
+    for (int i = 0; i < 4 && ok; i++)
+        ok = g[8]._u32[i] == 1u && g[69]._u32[i] == 3u && g[44]._u32[i] == g[3]._u32[i] + 16u;
+    const int r = ok ? pl_00752710_inteiro_corpo(ctx, 1) : 0;
+    gowa_edge_conta("pl752i/20", n, r);
+    return r;
 }
 #endif
