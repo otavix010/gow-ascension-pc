@@ -92,18 +92,29 @@ static inline __m256i f538_bswap8(__m256i v)
                                                    3, 2, 1, 0, 7, 6, 5, 4, 11, 10, 9, 8, 15, 14, 13, 12));
 }
 static inline __m256 f538_k8(u128 k) { return f538_z8(_mm256_broadcast_ps((const __m128*)k._u32)); }
-/* 2 vértices (32 bytes); o MXCSR da thread da SPU arredonda para zero */
+#if defined(SPU_SX_DAZ)
+/* 02/11: a thread da SPU roda com MXCSR.DAZ (spu_daz_enter): um operando denormal já vale zero na conta seguinte, e
+ * o sinal de um zero intermediário não chega ao resultado (arredondando para zero, +0 + -0 = +0; -0 + -0 = -0 vira
+ * +0 na saída). Então só a saída gravada precisa do +0 (f538_z8); os operandos e os intermediários vão crus. */
+#define F538_ZI(x) (x)
+#else
+#define F538_ZI(x) f538_z8(x)
+#endif
+/* 2 vértices (32 bytes); o MXCSR da thread da SPU arredonda para zero. Fora do alcance (|r| >= 0x7F7FFFFF) pelo
+ * máximo dos módulos de todos os resultados */
 static inline int f538_dois(uint8_t* ls, uint32_t in, uint32_t out, __m256 A, __m256 B, __m256 C, __m256 D)
 {
-    const __m256 v = f538_z8(_mm256_castsi256_ps(f538_bswap8(_mm256_loadu_si256((const __m256i*)(ls + in)))));
+    const __m256i mod = _mm256_set1_epi32(0x7FFFFFFF);
+    const __m256 v = F538_ZI(_mm256_castsi256_ps(f538_bswap8(_mm256_loadu_si256((const __m256i*)(ls + in)))));
     __m256 m = _mm256_mul_ps(v, A);
-    __m256i ruim = f538_ruim8(m);
-    m = _mm256_fmadd_ps(_mm256_permute_ps(v, _MM_SHUFFLE(0, 3, 2, 1)), B, f538_z8(m));
-    ruim = _mm256_or_si256(ruim, f538_ruim8(m));
-    m = _mm256_fmadd_ps(_mm256_permute_ps(v, _MM_SHUFFLE(1, 0, 3, 2)), C, f538_z8(m));
-    ruim = _mm256_or_si256(ruim, f538_ruim8(m));
-    m = _mm256_fmadd_ps(_mm256_permute_ps(v, _MM_SHUFFLE(2, 1, 0, 3)), D, f538_z8(m));
-    ruim = _mm256_or_si256(ruim, f538_ruim8(m));
+    __m256i mx = _mm256_and_si256(_mm256_castps_si256(m), mod);
+    m = _mm256_fmadd_ps(_mm256_permute_ps(v, _MM_SHUFFLE(0, 3, 2, 1)), B, F538_ZI(m));
+    mx = _mm256_max_epu32(mx, _mm256_and_si256(_mm256_castps_si256(m), mod));
+    m = _mm256_fmadd_ps(_mm256_permute_ps(v, _MM_SHUFFLE(1, 0, 3, 2)), C, F538_ZI(m));
+    mx = _mm256_max_epu32(mx, _mm256_and_si256(_mm256_castps_si256(m), mod));
+    m = _mm256_fmadd_ps(_mm256_permute_ps(v, _MM_SHUFFLE(2, 1, 0, 3)), D, F538_ZI(m));
+    mx = _mm256_max_epu32(mx, _mm256_and_si256(_mm256_castps_si256(m), mod));
+    const __m256i ruim = _mm256_cmpgt_epi32(mx, _mm256_set1_epi32(0x7F7FFFFE));
     if (!_mm256_testz_si256(ruim, ruim)) return 0;
     _mm256_storeu_si256((__m256i*)(ls + out), f538_bswap8(_mm256_castps_si256(f538_z8(m))));
     return 1;
