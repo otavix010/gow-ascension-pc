@@ -4,6 +4,14 @@ O Otavix Launcher mostra este arquivo na página "Novidades" do jogo. Cada atual
 "## <data> · <versão>" e o texto em português (### pt), inglês (### en) e, quando houver, espanhol (### es).
 As mais novas ficam em cima.
 
+## 01/11/2026 · 03fee28
+### pt
+- **Estabilidade:** o jogo não fecha mais quando o compilador de shaders do Windows falha num shader; o efeito afetado é pulado.
+### en
+- **Stability:** the game no longer closes when the Windows shader compiler fails on a shader; the affected effect is skipped.
+### es
+- **Estabilidad:** el juego ya no se cierra cuando el compilador de shaders de Windows falla en un shader; el efecto afectado se omite.
+
 ## 01/11/2026 · 43491b9
 ### pt
 - **Gráficos:** corrigidas as mãos amarelas e a pele manchada do Kratos em placas com pouca memória de vídeo (texturas que não eram refeitas).
