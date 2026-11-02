@@ -262,6 +262,15 @@ def main():
 
 
 _modo, _raiz = sys.argv[1], (sys.argv[2] if len(sys.argv) > 2 else os.path.join(os.path.dirname(__file__), '..'))
+# 01/11 (E4): as funções folha puras do job com registradores locais (funcao_local.py), gancho 'entrada' cada uma
+if _modo == 'aplicar':
+    import subprocess
+    _fl = subprocess.run([sys.executable, '-I', os.path.join(os.path.dirname(os.path.abspath(__file__)), 'funcao_local.py'),
+                          arquivo(_raiz, 'gowajm_0072DF80'), os.path.join(_raiz, 'port', 'edge', 'fl_jm72.h'), 'gowajm_0072DF80'],
+                         capture_output=True, text=True, check=True).stdout.split()
+    for _k in range(0, len(_fl), 2):
+        GANCHOS.append(dict(tipo='entrada', pasta='gowajm_0072DF80', fn=_fl[_k], cab='fl_jm72.h', nat='fl_' + _fl[_k + 1]))
+    print(f'funções locais: {len(_fl) // 2}')
 main()   # o main troca o sys.argv (laco_local)
 if _modo == 'aplicar':
     chamada_direta(_raiz)
