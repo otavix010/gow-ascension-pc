@@ -159,12 +159,13 @@ def chamada_direta(raiz):
     import re
     nats = {g['fn']: g['nat'] for g in GANCHOS if g['tipo'] == 'entrada' and g['pasta'] == 'gowajm_0072DF80'}
     p = arquivo(raiz, 'gowajm_0072DF80')
-    linhas = open(p, encoding='latin-1').read().split(chr(10))
+    # tira as linhas desta passada de uma aplicação anterior (os rótulos são renumerados)
+    linhas = [l for l in open(p, encoding='latin-1').read().split(chr(10)) if not (MARCA in l and 'nat_dir_' in l)]
     out, n = [], 0
     for i, l in enumerate(linhas):
         m = re.match(r'^(\s*)ctx->gpr\[0\] = spu_link\((0x[0-9A-F]+)\); \{ int32_t _si = \(int32_t\)ctx->image_id; ctx->host_depth\+\+; (gowajm_0072DF80_spu_func_[0-9A-F]{8}__b)\(ctx\); spu_drain_call', l)
         if m and m.group(3) in nats and MARCA not in l and not (out and out[-1].endswith(MARCA) and 'nat_dir_' in out[-1]):
-            rot = f'nat_dir_{i}'
+            rot = f'nat_dir_{n}'
             out.append(f'{m.group(1)}ctx->gpr[0] = spu_link({m.group(2)}); if ({nats[m.group(3)]}(ctx)) goto {rot}; {MARCA}')
             out.append(l)
             out.append(f'{rot}: ; {MARCA}')
@@ -266,7 +267,7 @@ _modo, _raiz = sys.argv[1], (sys.argv[2] if len(sys.argv) > 2 else os.path.join(
 if _modo == 'aplicar':
     import subprocess
     _fl = subprocess.run([sys.executable, '-I', os.path.join(os.path.dirname(os.path.abspath(__file__)), 'funcao_local.py'),
-                          arquivo(_raiz, 'gowajm_0072DF80'), os.path.join(_raiz, 'port', 'edge', 'fl_jm72.h'), 'gowajm_0072DF80'],
+                          arquivo(_raiz, 'gowajm_0072DF80'), os.path.join(_raiz, 'port', 'edge', 'fl_jm72.h'), 'gowajm_0072DF80'],   # 'geral' (funções com chamadas, sincronizando em volta delas) PERDEU no A/B de 02/11: f1 3,6-3,9 -> 4,1-4,3 ms, cap16 5,7-6,3 -> 6,4-6,9
                          capture_output=True, text=True, check=True).stdout.split()
     for _k in range(0, len(_fl), 2):
         GANCHOS.append(dict(tipo='entrada', pasta='gowajm_0072DF80', fn=_fl[_k], cab='fl_jm72.h', nat='fl_' + _fl[_k + 1]))
