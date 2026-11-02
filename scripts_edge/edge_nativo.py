@@ -178,6 +178,10 @@ GANCHOS = [
     # plugin 0x751B20 (E4, 02/11): o laço 0x30358 -- posição + 2 vetores smallest-three + cor (o 0x752710 com a cor do
     # 0x755A20); não roda nas gravações: conferido na bancada sintética (as duas builds)
     dict(tipo='entrada', pasta='gowapl_00751B20', fn='gowapl_00751B20_spu_func_00030358', cab='pl_00751B20.h', nat='pl_00751B20_nativo'),
+    # plugins 0x755540 e 0x754B80 inteiros (E4, 02/11): na 0x30014, onde o job entra (a preparação + o laço; se recusar,
+    # segue a preparação traduzida e o gancho do laço 0x30310)
+    dict(tipo='entrada', pasta='gowapl_00755540', fn='gowapl_00755540_spu_func_00030014', cab='pl_00755540.h', nat='pl_00755540_inteiro'),
+    dict(tipo='entrada', pasta='gowapl_00754B80', fn='gowapl_00754B80_spu_func_00030014', cab='pl_00755540.h', nat='pl_00754B80_inteiro'),
     # 9090/9458 (E4, 02/11): o desenho no buffer de comandos (0x1714, 0x181C endereço/formato do índice, 0x1808) e a
     # decisão seguinte (9888, 9958 = buffer cheio, ou 9570); vivos nas saídas por scripts_edge/vivos.py
     dict(tipo='multi', pasta='gowajm_0072DF80', fn='gowajm_0072DF80_spu_func_00009090__b', cab='fn_00009090_9458.h',
