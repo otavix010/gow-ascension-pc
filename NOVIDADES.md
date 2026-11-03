@@ -4,6 +4,20 @@ O Otavix Launcher mostra este arquivo na página "Novidades" do jogo. Cada atual
 "## <data> · <versão>" e o texto em português (### pt), inglês (### en) e, quando houver, espanhol (### es).
 As mais novas ficam em cima.
 
+## 03/11/2026 · 74fb89b
+### pt
+- **Instalação:** quando a pasta do update 1.04 traz o jogo inteiro (como a pasta BCUS98232 do RPCS3), a geração deixa no port só os arquivos do update e move o resto para vfsora_do_update, sem apagar; isso evita o carregamento infinito nesse caso.
+- **Instalação:** se a compilação parar por restos de uma geração anterior, o gerador limpa a pasta da compilação e compila de novo sozinho.
+- **Instalação:** quando o disco do jogo estava num HD externo ou pendrive desconectado, a mensagem agora diz qual unidade falta, em vez de um erro técnico.
+### en
+- **Installation:** when the 1.04 update folder contains the whole game (like RPCS3's BCUS98232 folder), generation keeps only the update files in the port and moves the rest to vfsora_do_update, without deleting anything; this avoids the endless loading in that case.
+- **Installation:** if the build stops because of leftovers from a previous generation, the generator cleans the build folder and builds again on its own.
+- **Installation:** when the game disc was on an unplugged external drive or USB stick, the message now says which drive is missing instead of a technical error.
+### es
+- **Instalación:** cuando la carpeta de la actualización 1.04 trae el juego completo (como la carpeta BCUS98232 de RPCS3), la generación deja en el port solo los archivos de la actualización y mueve el resto a vfsora_do_update, sin borrar nada; así se evita la carga infinita en ese caso.
+- **Instalación:** si la compilación se detiene por restos de una generación anterior, el generador limpia la carpeta de compilación y vuelve a compilar solo.
+- **Instalación:** cuando el disco del juego estaba en un disco externo o pendrive desconectado, el mensaje ahora indica qué unidad falta, en lugar de un error técnico.
+
 ## 03/11/2026 · a822b21
 ### pt
 - **Controle:** um controle Xbox (ou compatível) é reconhecido em qualquer porta do Windows; antes, só o primeiro slot do XInput chegava ao jogo.
