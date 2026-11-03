@@ -1000,6 +1000,24 @@ if ($Disco -and (Test-Path (Join-Path $OUT '2_jogo.ok'))) {
     }
     Conferir-Arquivos (Pasta-Do-Disco $pg)
 }
+# reports 621/717/826 (mesmo jogador, carregamento infinito com tela preta): a pasta escolhida como update era uma
+# BCUS98232 do RPCS3 com o jogo inteiro dentro (ARCHIVES + GAME.PSARC, SHELL.PSARC...), e a cópia levou tudo para o
+# vfs; o jogo procura a lista de pacotes (ARCHIVES) primeiro no HDD e passava a carregar os pacotes de lá em vez do
+# disco. O update 1.04 oficial só tem EBOOT.BIN, GOWA.SELF, PATCHES e TPPS*.PSARC: o resto vai para uma pasta ao lado
+# (não é apagado), em toda geração, para consertar também as instalações já feitas.
+function Limpar-Update-Vfs {
+    $u = Join-Path $R 'vfs\game\BCUS98232\USRDIR'
+    if (-not (Test-Path -LiteralPath $u -PathType Container)) { return }
+    $sobra = @(Get-ChildItem -LiteralPath $u -Force -ErrorAction SilentlyContinue |
+               Where-Object { $_.Name -notin @('EBOOT.BIN', 'GOWA.SELF', 'PATCHES') -and $_.Name -notlike 'TPPS*.PSARC' })
+    if (-not $sobra.Count) { return }
+    $lado = Join-Path $R ('vfs\fora_do_update\' + (Get-Date -Format 'yyyyMMdd_HHmmss'))
+    New-Item -ItemType Directory -Force $lado | Out-Null
+    foreach ($s in $sobra) { Move-Item -LiteralPath $s.FullName -Destination $lado -Force }
+    Msg ("a pasta do update tinha $($sobra.Count) arquivo(s) que não são do update 1.04 (ex.: $($sobra[0].Name)), e o jogo " +
+         "os carregava no lugar dos do disco: movidos para $lado")
+}
+Limpar-Update-Vfs
 Etapa '2_jogo' {
     $Disco = Achar-Disco $Disco
     Msg "disco: $Disco"
@@ -1050,6 +1068,7 @@ Etapa '2_jogo' {
     $dst = Join-Path $vfs 'game\BCUS98232'
     cmd /c "robocopy `"$upd`" `"$dst`" /E /NFL /NDL /NJH /NJS /NP >> `"$LOG`" 2>&1"
     if ($LASTEXITCODE -ge 8) { throw "falhou a cópia do update (robocopy $LASTEXITCODE)" }
+    Limpar-Update-Vfs
 
     $jogo = Join-Path $R 'jogo'
     New-Item -ItemType Directory -Force $jogo | Out-Null
