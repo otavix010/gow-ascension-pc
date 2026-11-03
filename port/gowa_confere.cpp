@@ -37,6 +37,7 @@
 #include <vector>
 
 extern "C" uint8_t* vm_base;
+extern "C" volatile uint32_t g_gowa_ibl_parar;   /* gowa_offline.cpp / scripts/ib_local.py */
 typedef void (*conf_fn)(spu_context*);
 extern "C" int spu_registry_patch(int image_id, uint32_t addr, conf_fn fn, conf_fn* old);
 extern "C" conf_fn spu_lookup(uint32_t addr, int image_id);
@@ -368,10 +369,14 @@ int replay(const char* dir)
             QueryPerformanceCounter(&t0);
             const uint32_t parar = j.pend == 3 ? (((const spu_context*)j.ctx_out)->pc | 0x80000000u) : 0u;
             amostra.dentro = 1;
+            /* 03/11: o atalho do desvio indireto local (scripts/ib_local.py) não vê esta parada -- ela só é
+             * conferida no dreno; sem isto ele passava por cima dela e o job seguia além do fim gravado */
+            g_gowa_ibl_parar = parar ? (parar & SPU_LS_MASK) : 0xFFFFFFFFu;
             if (setjmp(s_jb) == 0) {
                 entrada(ctx);
                 pend = drena_ate(ctx, link, nullptr, parar) ? 3u : g_spu_trampoline_fn ? 1u : 0u;
             }
+            g_gowa_ibl_parar = 0xFFFFFFFFu;
             amostra.dentro = 0;
             QueryPerformanceCounter(&t1);
             spu_halt_arm_replay(0);

@@ -1422,8 +1422,14 @@ extern "C" void ps3_hle_register(unsigned int nid, const char* name, void* handl
 extern "C" void cellVdecQueryAttr(void);
 extern "C" void cellVdecOpen(void);
 
+/* 03/11: desvio indireto local nos módulos de áudio (scripts/ib_local.py); GOWA_IBL=0 volta ao caminho de
+ * sempre (dreno + resolvedor) em tempo de execução, para A/B */
+extern "C" int g_gowa_ibl = 1;
+extern "C" volatile uint32_t g_gowa_ibl_parar = 0xFFFFFFFFu;   /* gowa_confere.cpp a usa só na reprodução */
+
 extern "C" void gowa_offline_register(void)
 {
+    { const char* e = getenv("GOWA_IBL"); if (e && *e == '0') g_gowa_ibl = 0; }
     if (!ps3_hle_has(0xC982A84Au)) ps3_hle_register(0xC982A84Au, "cellVdecQueryAttrEx(gowa)", (void*)cellVdecQueryAttr);
     if (!ps3_hle_has(0x0053E2D8u)) ps3_hle_register(0x0053E2D8u, "cellVdecOpenEx(gowa)", (void*)cellVdecOpen);
     const int listar = getenv("GOWA_IMPORTS") != nullptr;

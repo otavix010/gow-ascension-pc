@@ -42,6 +42,9 @@ VK_EDGE = ['73E0:7BB4', '73E0:7ED8', 'F538:F620', 'A880:A950', 'D250:D4DC', 'E55
 # 30/10: o vk da DCC0/E3C4 (reconstrução dos triângulos) é mais LENTO que o próprio código traduzido (as recorrências
 # vão faixa a faixa); ela fica com o laço de registradores locais (scripts_edge/laco_local.py)
 VK_PL = {'gowapl_0074EF90': '304A0:304A0', 'gowapl_00755540': '30310:30310'}
+# 03/11: o som do GoW (workload BrBDblBufWrkld, só na SPU 5) roda os jobs destes dois módulos; o decodificador
+# do 0x7D8600 termina cada símbolo num salto calculado, e o despacho era ~21% da SPU 5
+IBL_MODULOS = ['gowajm_007B6680', 'gowajm_007D8600']
 LUZGPU = ('/*LUZGPU*/ { extern int g_gowa_luz_gpu; extern int gowa_luz_gpu(spu_context*); '
           'if (g_gowa_luz_gpu && gowa_luz_gpu(ctx)) goto loc_00008210; }')
 
@@ -151,6 +154,12 @@ def main():
     # só é reconhecido na forma já promovida, por isso vem por último (19 módulos)
     for m in jm + pl + [PM]:
         py('divide_pic.py', SPU / m, '--aplicar')
+    # 03/11 (som picotado em CPU fraca): saltos indiretos de cauda dos módulos de áudio que caem numa função do
+    # próprio módulo vão direto (scripts/ib_local.py; GOWA_IBL=0 no jogo desliga). Depois do divide_pic, para as
+    # funções que ele cria entrarem na tabela.
+    for m in IBL_MODULOS:
+        if (SPU / m / 'spu_recomp.c').exists():
+            py('ib_local.py', SPU / m)
     # 30/10 (EDGE nativo, marco E7): as partes do EDGE escritas para o PC (port/edge/*.h) entram no código traduzido
     # pelos ganchos de scripts_edge/edge_nativo.py; GOWA_EDGE_NATIVO=0 no jogo volta ao código traduzido
     en = RAIZ / 'scripts_edge' / 'edge_nativo.py'
