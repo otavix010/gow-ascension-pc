@@ -4,6 +4,17 @@ O Otavix Launcher mostra este arquivo na página "Novidades" do jogo. Cada atual
 "## <data> · <versão>" e o texto em português (### pt), inglês (### en) e, quando houver, espanhol (### es).
 As mais novas ficam em cima.
 
+## 03/11/2026 · f2c6830
+### pt
+- **Som:** menos cortes e chiado em processadores mais fracos (Xeon e CPUs com menos núcleos): parte do processamento de áudio que ainda rodava interpretada agora é traduzida, e o despacho entre as rotinas de som ficou mais leve.
+- **Instalação:** quando uma atualização muda a tradução das SPUs, a próxima geração a refaz sozinha; desta vez ela demora alguns minutos a mais.
+### en
+- **Audio:** fewer dropouts and crackling on weaker processors (Xeon and CPUs with fewer cores): audio processing that still ran interpreted is now translated, and dispatch between the sound routines is lighter.
+- **Installation:** when an update changes the SPU translation, the next generation redoes it on its own; this time it takes a few extra minutes.
+### es
+- **Sonido:** menos cortes y chasquidos en procesadores más débiles (Xeon y CPUs con menos núcleos): parte del procesamiento de audio que aún se interpretaba ahora está traducida, y el despacho entre las rutinas de sonido es más ligero.
+- **Instalación:** cuando una actualización cambia la traducción de las SPU, la siguiente generación la rehace sola; esta vez tarda unos minutos más.
+
 ## 03/11/2026 · 74fb89b
 ### pt
 - **Instalação:** quando a pasta do update 1.04 traz o jogo inteiro (como a pasta BCUS98232 do RPCS3), a geração deixa no port só os arquivos do update e move o resto para vfsora_do_update, sem apagar; isso evita o carregamento infinito nesse caso.
