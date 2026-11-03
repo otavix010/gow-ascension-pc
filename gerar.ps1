@@ -1024,13 +1024,24 @@ if ($Disco -and (Test-Path (Join-Path $OUT '2_jogo.ok'))) {
 # reports 621/717/826 (mesmo jogador, carregamento infinito com tela preta): a pasta escolhida como update era uma
 # BCUS98232 do RPCS3 com o jogo inteiro dentro (ARCHIVES + GAME.PSARC, SHELL.PSARC...), e a cópia levou tudo para o
 # vfs; o jogo procura a lista de pacotes (ARCHIVES) primeiro no HDD e passava a carregar os pacotes de lá em vez do
-# disco. O update 1.04 oficial só tem EBOOT.BIN, GOWA.SELF, PATCHES e TPPS*.PSARC: o resto vai para uma pasta ao lado
-# (não é apagado), em toda geração, para consertar também as instalações já feitas.
+# disco. O USRDIR do update 1.04 oficial só tem EBOOT.BIN, GOWA.SELF, PATCHES, TLOUCOUNTDOWN.SELF e TPPS*.PSARC
+# (lista do pacote: pkg_extract.py): o resto vai para uma pasta ao lado (não é apagado), em toda geração, para
+# consertar também as instalações já feitas.
+# 03/11 noite: a 1a versão esquecia o TLOUCOUNTDOWN.SELF (do update oficial) e o tirava da pasta; um arquivo oficial
+# que esteja em vfs\fora_do_update volta para o lugar.
+function Oficial-Update([string]$n) { ($n -in @('EBOOT.BIN', 'GOWA.SELF', 'PATCHES', 'TLOUCOUNTDOWN.SELF')) -or ($n -like 'TPPS*.PSARC') }
 function Limpar-Update-Vfs {
     $u = Join-Path $R 'vfs\game\BCUS98232\USRDIR'
     if (-not (Test-Path -LiteralPath $u -PathType Container)) { return }
-    $sobra = @(Get-ChildItem -LiteralPath $u -Force -ErrorAction SilentlyContinue |
-               Where-Object { $_.Name -notin @('EBOOT.BIN', 'GOWA.SELF', 'PATCHES') -and $_.Name -notlike 'TPPS*.PSARC' })
+    $fora = Join-Path $R 'vfs\fora_do_update'
+    if (Test-Path -LiteralPath $fora -PathType Container) {
+        foreach ($f in @(Get-ChildItem -LiteralPath $fora -Recurse -File -Force -ErrorAction SilentlyContinue |
+                         Where-Object { (Oficial-Update $_.Name) -and -not (Test-Path -LiteralPath (Join-Path $u $_.Name)) })) {
+            Move-Item -LiteralPath $f.FullName -Destination $u -Force
+            Msg "$($f.Name) é do update 1.04 oficial: devolvido à pasta do update"
+        }
+    }
+    $sobra = @(Get-ChildItem -LiteralPath $u -Force -ErrorAction SilentlyContinue | Where-Object { -not (Oficial-Update $_.Name) })
     if (-not $sobra.Count) { return }
     $lado = Join-Path $R ('vfs\fora_do_update\' + (Get-Date -Format 'yyyyMMdd_HHmmss'))
     New-Item -ItemType Directory -Force $lado | Out-Null
