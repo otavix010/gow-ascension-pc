@@ -167,6 +167,8 @@ static PadFlick  s_amo_flick;       /* the right stick at the last sample */
 static int       s_amo_flick_pend;  /* a flick begun since the last game read */
 static PadFlick  s_amo_flick_ini;
 static volatile LONG s_amostra_viva;
+static volatile LONG s_xinput_slot_porta0;   /* o slot XInput que está na porta 0 (pad_poll_xinput) */
+static volatile LONG s_xinput_slot_da_porta[4] = { 0, 1, 2, 3 };   /* porta do jogo -> slot XInput (vibração) */
 static HANDLE    s_amostra_thread;
 
 static int pad_desvio(u8 x, u8 y)
@@ -246,7 +248,7 @@ static DWORD WINAPI pad_amostra_func(LPVOID arg)
     while (InterlockedCompareExchange(&s_amostra_viva, 1, 1)) {
         XINPUT_STATE st;
         memset(&st, 0, sizeof st);
-        if (XInputGetState(0, &st) != ERROR_SUCCESS) { Sleep(250); continue; }   /* no controller: look now and then */
+        if (XInputGetState((DWORD)InterlockedCompareExchange(&s_xinput_slot_porta0, 0, 0), &st) != ERROR_SUCCESS) { Sleep(250); continue; }   /* no controller: look now and then */
         u8 rx, ry;
         pad_xinput_stick(st.Gamepad.sThumbRX, st.Gamepad.sThumbRY, PAD_STICK_DEADZONE, &rx, &ry);
         ry = (u8)(256 - ry);
@@ -907,40 +909,44 @@ static u16 pad_xinput_botoes(const XINPUT_GAMEPAD* gp)
 
 static void pad_poll_xinput(void)
 {
+    /* 03/11 (report 804, "xbox controller not working": o log só tinha "XInput no slot 1"): o Windows
+     * pode pôr o único controle num slot que não é o 0, e o slot virava a porta do jogo -- que lê a
+     * porta 0. Agora os slots conectados ocupam as portas em ordem (o primeiro achado é a porta 0),
+     * como os controles Sony já faziam. */
+    int d = 0;
     for (int i = 0; i < PAD_MAX_HOST_PORTS; i++) {
         XINPUT_STATE state;
         memset(&state, 0, sizeof(state));
 
         DWORD result = XInputGetState((DWORD)i, &state);
-        if (result != ERROR_SUCCESS) {
-            s_host_state[i].connected = 0;
-            continue;
-        }
+        if (result != ERROR_SUCCESS) continue;
+        if (d == 0) InterlockedExchange(&s_xinput_slot_porta0, i);
+        if (d < 4) InterlockedExchange(&s_xinput_slot_da_porta[d], i);
 
         /* 30/10 (reports 422/423, "controle não reconhecido"): o log diz quais controles o jogo achou */
         { static int visto[PAD_MAX_HOST_PORTS];
           if (!visto[i]) { visto[i] = 1; fprintf(stderr, "[controle] XInput no slot %d (Xbox ou compatível)\n", i); } }
-        s_host_state[i].connected = 1;
+        s_host_state[d].connected = 1;
         XINPUT_GAMEPAD* gp = &state.Gamepad;
 
         const u16 btns = pad_xinput_botoes(gp);
-        s_host_state[i].buttons = btns;
+        s_host_state[d].buttons = btns;
 
         /* Analog sticks. PS3 Y axis is inverted vs XInput (up = 0). Reflect about
          * 128 (256 - x), NOT 255 - x: the latter turns a centered stick into 127,
          * whose bits (0x7F) alias SELECT+START and can make the guest self-exit.
          * (via sagemono, PR #42) */
-        pad_xinput_stick(gp->sThumbLX, gp->sThumbLY, PAD_STICK_DEADZONE, &s_host_state[i].analog_lx, &s_host_state[i].analog_ly);
-        s_host_state[i].analog_ly = (u8)(256 - s_host_state[i].analog_ly);
-        pad_xinput_stick(gp->sThumbRX, gp->sThumbRY, PAD_STICK_DEADZONE, &s_host_state[i].analog_rx, &s_host_state[i].analog_ry);
-        s_host_state[i].analog_ry = (u8)(256 - s_host_state[i].analog_ry);
+        pad_xinput_stick(gp->sThumbLX, gp->sThumbLY, PAD_STICK_DEADZONE, &s_host_state[d].analog_lx, &s_host_state[d].analog_ly);
+        s_host_state[d].analog_ly = (u8)(256 - s_host_state[d].analog_ly);
+        pad_xinput_stick(gp->sThumbRX, gp->sThumbRY, PAD_STICK_DEADZONE, &s_host_state[d].analog_rx, &s_host_state[d].analog_ry);
+        s_host_state[d].analog_ry = (u8)(256 - s_host_state[d].analog_ry);
 
         /* Triggers */
-        s_host_state[i].trigger_l2 = gp->bLeftTrigger;
-        s_host_state[i].trigger_r2 = gp->bRightTrigger;
+        s_host_state[d].trigger_l2 = gp->bLeftTrigger;
+        s_host_state[d].trigger_r2 = gp->bRightTrigger;
 
         /* the controller used (a button, a trigger or a stick well off the centre): the HUD shows its buttons */
-        if (i == 0) {
+        if (d == 0) {
             s_xinput_ligado = 1;
             const PadHostState* h = &s_host_state[0];
             if (btns || gp->bLeftTrigger > 40 || gp->bRightTrigger > 40 ||
@@ -950,17 +956,19 @@ static void pad_poll_xinput(void)
         }
 
         /* Pressure-sensitive buttons: XInput has digital only, so 0 or 255 */
-        s_host_state[i].press_up       = (btns & CELL_PAD_CTRL_UP)       ? 255 : 0;
-        s_host_state[i].press_down     = (btns & CELL_PAD_CTRL_DOWN)     ? 255 : 0;
-        s_host_state[i].press_left     = (btns & CELL_PAD_CTRL_LEFT)     ? 255 : 0;
-        s_host_state[i].press_right    = (btns & CELL_PAD_CTRL_RIGHT)    ? 255 : 0;
-        s_host_state[i].press_triangle = (btns & CELL_PAD_CTRL_TRIANGLE) ? 255 : 0;
-        s_host_state[i].press_circle   = (btns & CELL_PAD_CTRL_CIRCLE)   ? 255 : 0;
-        s_host_state[i].press_cross    = (btns & CELL_PAD_CTRL_CROSS)    ? 255 : 0;
-        s_host_state[i].press_square   = (btns & CELL_PAD_CTRL_SQUARE)   ? 255 : 0;
-        s_host_state[i].press_l1       = (btns & CELL_PAD_CTRL_L1)       ? 255 : 0;
-        s_host_state[i].press_r1       = (btns & CELL_PAD_CTRL_R1)       ? 255 : 0;
+        s_host_state[d].press_up       = (btns & CELL_PAD_CTRL_UP)       ? 255 : 0;
+        s_host_state[d].press_down     = (btns & CELL_PAD_CTRL_DOWN)     ? 255 : 0;
+        s_host_state[d].press_left     = (btns & CELL_PAD_CTRL_LEFT)     ? 255 : 0;
+        s_host_state[d].press_right    = (btns & CELL_PAD_CTRL_RIGHT)    ? 255 : 0;
+        s_host_state[d].press_triangle = (btns & CELL_PAD_CTRL_TRIANGLE) ? 255 : 0;
+        s_host_state[d].press_circle   = (btns & CELL_PAD_CTRL_CIRCLE)   ? 255 : 0;
+        s_host_state[d].press_cross    = (btns & CELL_PAD_CTRL_CROSS)    ? 255 : 0;
+        s_host_state[d].press_square   = (btns & CELL_PAD_CTRL_SQUARE)   ? 255 : 0;
+        s_host_state[d].press_l1       = (btns & CELL_PAD_CTRL_L1)       ? 255 : 0;
+        s_host_state[d].press_r1       = (btns & CELL_PAD_CTRL_R1)       ? 255 : 0;
+        d++;
     }
+    for (int k = d; k < PAD_MAX_HOST_PORTS; k++) s_host_state[k].connected = 0;
     pad_poll_sony();
 }
 
@@ -1883,7 +1891,7 @@ s32 cellPadSetActDirect(u32 port_no, CellPadActParam* param)
         XINPUT_VIBRATION vib;
         vib.wLeftMotorSpeed  = (WORD)(grande * 257);
         vib.wRightMotorSpeed = (WORD)(pequeno * 257);
-        XInputSetState((DWORD)port_no, &vib);
+        XInputSetState((DWORD)(port_no < 4 ? s_xinput_slot_da_porta[port_no] : port_no), &vib);
     }
 #endif
 
