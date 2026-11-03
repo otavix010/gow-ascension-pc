@@ -351,6 +351,7 @@ extern "C" uint64_t ppu_guest_call(uint32_t, uint64_t, uint64_t, uint64_t, uint6
 extern "C" void cellGcmTickVBlank(void);
 extern "C" void cellGcmTickFlip(void);
 extern "C" int  cellGcm_take_flip_pending(void);  /* hoisted to file scope: clang-cl rejects block-scope extern "C" */
+extern "C" volatile long g_gowa_save_em_andamento;   /* cellSaveData.c: saves em andamento (report 797) */
 extern "C" int  cellGcm_flip_hold_us(void);       /* cellGcmSys.c: GOWA_FLIP_HZ */
 
 static void harness_guest_caller(uint32_t opd, uint64_t a0, uint64_t a1,
@@ -1913,6 +1914,12 @@ static DWORD WINAPI vblank_ticker(LPVOID)
                  * "it opens and closes" and "the PC is slow afterwards"). End it here; the saves are
                  * whole files written as they go and the launcher's performance file is rewritten every
                  * ~30 s, so nothing waits for an orderly exit. */
+                /* 03/11 (report 797): um save do jogo em andamento termina antes (até 8 s) -- encerrar no
+                 * meio da gravação era um dos caminhos do "não salvou e voltou" */
+                { if (__atomic_load_n(&g_gowa_save_em_andamento, __ATOMIC_SEQ_CST) > 0) {
+                      fprintf(stderr, "[janela] esperando o save em andamento terminar\n");
+                      for (int k = 0; k < 400 && __atomic_load_n(&g_gowa_save_em_andamento, __ATOMIC_SEQ_CST) > 0; k++) Sleep(20);
+                  } }
                 fflush(stdout);
                 fflush(stderr);
 #ifdef _WIN32

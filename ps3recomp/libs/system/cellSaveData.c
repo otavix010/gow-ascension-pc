@@ -743,12 +743,19 @@ static s32 process_file_op(const char* save_path, CellSaveDataFileSet* set)
         } else {
             mode = "r+b";
         }
-        FILE* fp = fopen(file_path, mode);
-        if (!fp) {
+        /* 03/11 (report 797, "às vezes não salva e regride"): o arquivo inteiro ("wb") era truncado e
+         * regravado no lugar -- fechar o jogo no meio (a janela encerra o processo na hora) deixava o
+         * save cortado. Agora vai para <arquivo>.gowa_tmp e só no fim troca o antigo (MoveFileEx com
+         * WRITE_THROUGH): ou fica o save novo inteiro, ou o anterior. */
+        char tmp_path[1100];
+        const int atomico = (mode[0] == 'w');
+        snprintf(tmp_path, sizeof tmp_path, "%s.gowa_tmp", file_path);
+        FILE* fp = fopen(atomico ? tmp_path : file_path, mode);
+        if (!fp && !atomico) {
             fp = fopen(file_path, "wb");
         }
         if (!fp) {
-            printf("[cellSaveData] file write: cannot open '%s'\n", file_path);
+            printf("[cellSaveData] file write: cannot open '%s'\n", atomico ? tmp_path : file_path);
             return CELL_SAVEDATA_ERROR_ACCESS_ERROR;
         }
         if (set->fileOffset > 0) {
@@ -762,7 +769,16 @@ static s32 process_file_op(const char* save_path, CellSaveDataFileSet* set)
         if (write_size > set->fileBufSize) write_size = set->fileBufSize;
         size_t wrote = fwrite(set->fileBuf, 1, write_size, fp);
         int failed = wrote != write_size;
+        if (fflush(fp) != 0) failed = 1;
         if (fclose(fp) != 0) failed = 1;
+        if (atomico) {
+#ifdef _WIN32
+            if (!failed && !MoveFileExA(tmp_path, file_path, MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) failed = 1;
+#else
+            if (!failed && rename(tmp_path, file_path) != 0) failed = 1;
+#endif
+            if (failed) remove(tmp_path);
+        }
         if (!failed && set->fileType == CELL_SAVEDATA_FILETYPE_SECUREFILE)
             pfd_add(save_path, name);
         return failed ? CELL_SAVEDATA_ERROR_ACCESS_ERROR : (s32)wrote;
@@ -867,8 +883,29 @@ static void read_param_sfo(const char* save_path, CellSaveDataSystemFileParam* p
     }
 }
 
-/* Core save/load implementation shared by List/Fixed/Auto variants */
+/* 03/11 (report 797): quantos saves estão em andamento -- o fechamento da janela espera chegar a 0 */
+volatile long g_gowa_save_em_andamento = 0;
+
+static s32 savedata_execute_nucleo(const char* dirName, int is_save,
+                                   CellSaveDataSetBuf* setBuf,
+                                   CellSaveDataStatCallback funcStat,
+                                   CellSaveDataFileCallback funcFile,
+                                   void* userdata);
+
 static s32 savedata_execute(const char* dirName, int is_save,
+                             CellSaveDataSetBuf* setBuf,
+                             CellSaveDataStatCallback funcStat,
+                             CellSaveDataFileCallback funcFile,
+                             void* userdata)
+{
+    if (is_save) __atomic_add_fetch(&g_gowa_save_em_andamento, 1, __ATOMIC_SEQ_CST);
+    s32 r = savedata_execute_nucleo(dirName, is_save, setBuf, funcStat, funcFile, userdata);
+    if (is_save) __atomic_sub_fetch(&g_gowa_save_em_andamento, 1, __ATOMIC_SEQ_CST);
+    return r;
+}
+
+/* Core save/load implementation shared by List/Fixed/Auto variants */
+static s32 savedata_execute_nucleo(const char* dirName, int is_save,
                              CellSaveDataSetBuf* setBuf,
                              CellSaveDataStatCallback funcStat,
                              CellSaveDataFileCallback funcFile,
