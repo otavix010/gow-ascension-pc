@@ -45,6 +45,7 @@ VK_PL = {'gowapl_0074EF90': '304A0:304A0', 'gowapl_00755540': '30310:30310'}
 # 03/11: o som do GoW (workload BrBDblBufWrkld, só na SPU 5) roda os jobs destes dois módulos; o decodificador
 # do 0x7D8600 termina cada símbolo num salto calculado, e o despacho era ~21% da SPU 5
 IBL_MODULOS = ['gowajm_007B6680', 'gowajm_007D8600']
+LACOS_AUDIO = {'gowajm_007B6680': ['4FA4,5088', '5140,5224', '536C,5584']}
 LUZGPU = ('/*LUZGPU*/ { extern int g_gowa_luz_gpu; extern int gowa_luz_gpu(spu_context*); '
           'if (g_gowa_luz_gpu && gowa_luz_gpu(ctx)) goto loc_00008210; }')
 
@@ -136,6 +137,13 @@ def main():
     py('promover_chamadas.py', g, '63B4')
     py('vetorizar_chamadas.py', g, '4930')
     py('gancho_vc.py', g, '63B4', '4930')
+
+    # 03/11 (som em CPU fraca): os laços de conta de volume do 0x7B6680 são duas funções que saltam uma para a
+    # outra (536C -> 5584 -> 536C ...); cada volta gravava e relia ~70 registradores. Fundidas, a volta é um goto.
+    # Antes do encadeia (o fundir_cadeia só reconhece os saltos pelo trampolim).
+    for m, cadeias in LACOS_AUDIO.items():
+        if (SPU / m / 'spu_recomp.c').exists():
+            py('fundir_cadeia.py', SPU / m, *cadeias)
 
     for m, p in VK_PL.items():
         if (SPU / m / 'spu_recomp.c').exists():

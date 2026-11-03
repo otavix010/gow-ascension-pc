@@ -182,6 +182,12 @@ GANCHOS = [
     # plugin 0x751B20 (E4, 02/11): o laço 0x30358 -- posição + 2 vetores smallest-three + cor (o 0x752710 com a cor do
     # 0x755A20); não roda nas gravações: conferido na bancada sintética (as duas builds)
     dict(tipo='entrada', pasta='gowapl_00751B20', fn='gowapl_00751B20_spu_func_00030358', cab='pl_00751B20.h', nat='pl_00751B20_nativo'),
+    # General6 (0x727200, 02/11): a 0x4930 = ruído de Perlin melhorado em 4 pontos; o núcleo das 4 chamadas da 0x63B4
+    # (vc_00004930.inc) passa a ser g6_vc4930 (o algoritmo em AVX2, port/edge/g6_ruido.h); modelo g6_modelo.py
+    dict(tipo='troca_vc', pasta='gowajm_00727200', cab='g6_ruido.h', nat='g6_vc4930', vc='gowa_vc_gowajm_00727200_00004930', inc='vc_00004930.inc'),
+    # o laço 0x63B4 que chama o ruído (16 voltas de 4 amostras): as voltas 0..n-2 em AVX2, a última no traduzido
+    # (port/edge/g6_laco.h; modelo g63_modelo.py, 40/40 laços iguais às fotos)
+    dict(tipo='entrada_segue', pasta='gowajm_00727200', fn='gowajm_00727200_spu_func_000063B4__b', cab='g6_laco.h', nat='g6_laco63_nativo'),
     # plugins 0x755540 e 0x754B80 inteiros (E4, 02/11): na 0x30014, onde o job entra (a preparação + o laço; se recusar,
     # segue a preparação traduzida e o gancho do laço 0x30310)
     dict(tipo='entrada', pasta='gowapl_00755540', fn='gowapl_00755540_spu_func_00030014', cab='pl_00755540.h', nat='pl_00755540_inteiro'),
@@ -352,6 +358,18 @@ def main():
                 inc2 = '#include "spu_recomp.h"\n'
                 assert s.count(inc2) == 1, (p, 'include')
                 s = s.replace(inc2, inc2 + linha_inc, 1)
+        if g['tipo'] == 'troca_vc':   # 02/11: o núcleo vc gerado vira o nativo (#define antes, #undef antes do .inc)
+            d = f'#define {g["vc"]} {g["nat"]} {MARCA}' + chr(10)
+            if d in s:
+                print(f'{g["vc"]}: já trocado'); continue
+            h = f'#include "../../../port/edge/{g["cab"]}" {MARCA}' + chr(10)
+            s = s.replace(h, h + d, 1)
+            inc = f'#include "{g["inc"]}"'
+            assert s.count(inc) == 1, (p, g['inc'])
+            s = s.replace(inc, f'#undef {g["vc"]} {MARCA}' + chr(10) + inc, 1)
+            open(p, 'w', encoding='latin-1', newline='').write(s)
+            print(f'{g["vc"]} -> {g["nat"]}: aplicado (troca_vc)')
+            continue
         i, fim = corpo_da_funcao(s, g['fn'])
         corpo = s[i:fim]
         if g['tipo'] in ('entrada', 'entrada_segue'):
@@ -438,7 +456,7 @@ if _modo == 'aplicar':
     _fl = subprocess.run([sys.executable, '-I', os.path.join(os.path.dirname(os.path.abspath(__file__)), 'funcao_local.py'),
                           arquivo(_raiz, 'gowajm_0072DF80'), os.path.join(_raiz, 'port', 'edge', 'fl_jm72.h'), 'gowajm_0072DF80'],   # 'geral' (funções com chamadas, sincronizando em volta delas) PERDEU no A/B de 02/11: f1 3,6-3,9 -> 4,1-4,3 ms, cap16 5,7-6,3 -> 6,4-6,9
                          capture_output=True, text=True, check=True).stdout.split()
-    _com_gancho = {g['fn'] for g in GANCHOS}   # quem já tem nativo (ou laço local) fica com ele
+    _com_gancho = {g['fn'] for g in GANCHOS if 'fn' in g}   # quem já tem nativo (ou laço local) fica com ele
     for _k in range(0, len(_fl), 2):
         if _fl[_k] in _com_gancho: continue
         GANCHOS.append(dict(tipo='entrada', pasta='gowajm_0072DF80', fn=_fl[_k], cab='fl_jm72.h', nat='fl_' + _fl[_k + 1]))

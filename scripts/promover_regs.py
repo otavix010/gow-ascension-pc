@@ -34,7 +34,10 @@ MARCA = '/* promover_regs.py */'
 FULL = {'spu_drain_call', 'spu_indirect_branch', 'SPU_RET', 'SPU_RET_REG', 'spu_stop',
         'spu_halt', 'gowa_fnskip', 'spu_check_stack_reset'}
 HALF = {'spu_wrch', 'spu_rdch', 'spu_rchcnt'}
-SAFE = {'spu_ls_read128', 'spu_ls_write128', 'spu_img_restore'}
+# 03/11: as leituras do contexto do kernel (spu_num_remap.py) também não tocam em registradores. O
+# gerar.ps1 aplica o remap ANTES do otimizar.py, e sem elas aqui 137 funções (todas as que leem
+# $base+0xC0, inclusive a 0x5BF8 do 0x73A400, 28% desse job) ficavam sem promoção.
+SAFE = {'spu_ls_read128', 'spu_ls_write128', 'spu_img_restore', 'spu_ls_read128_kc', 'spu_ls_read128_kcx'}
 
 RE_HDR = re.compile(r'^void (\w+)\(spu_context\* ctx\) \{[ \t]*$')
 RE_GPR = re.compile(r'ctx->gpr\[(\d+)\]')
