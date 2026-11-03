@@ -361,10 +361,14 @@ static int audio_backend_init(void)
     printf("[cellAudio] output: %u channels\n", (unsigned)s_out_ch);
 
     /* Request event-driven mode with a ~20ms buffer.
-     * GOWA (25/10): GOWA_AUDIO_BUFFER_MS=20..250 (padrão 20) aumenta o buffer: num PC
+     * GOWA (25/10): GOWA_AUDIO_BUFFER_MS=20..250 (padrão 40 desde 03/11; era 20) aumenta o buffer: num PC
      * lento, uma queda de FPS maior que o buffer esvazia a saída e o som corta (relato de
      * dois jogadores, 5600X e 5700G). 100 é o padrão do RPCS3; custa essa latência a mais. */
-    REFERENCE_TIME buf_duration = 200000; /* 20ms in 100ns units */
+    /* 03/11 (reports 777/778/779, 5950X + RTX 4080 a ~35 fps, "áudio falhando"): com 20 ms a fila no
+     * dispositivo nunca passava de ~17 ms e esvaziava 33-68 vezes em 10 s com o jogo 5 blocos ADIANTADO
+     * (0 atrasados): faltava som no dispositivo, não no jogo. 40 ms dobra a folga contra atraso de
+     * agendamento da thread de mixagem; custa 20 ms de latência (o RPCS3 usa 100). */
+    REFERENCE_TIME buf_duration = 400000; /* 40ms in 100ns units */
     { const char* bm = getenv("GOWA_AUDIO_BUFFER_MS");
       if (bm && *bm) {
           long ms = strtol(bm, NULL, 10);
