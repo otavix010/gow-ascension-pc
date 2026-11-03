@@ -464,6 +464,9 @@ Conferir-Processador
 # ---------------------------------------------------------------------------- jogo
 # a pasta do jogo: a que contém PS3_GAME\USRDIR, ou uma até dois níveis abaixo da escolhida
 function Achar-PS3Game([string]$raiz) {
+    # report 818: uma pasta num drive que não existe mais (HD externo desligado): o Join-Path parava o gerador
+    # com "Cannot find drive"; aqui ela é só "não achei", e o Achar-Disco explica ao jogador
+    if (-not $raiz -or -not (Test-Path -LiteralPath $raiz)) { return $null }
     if (Test-Path -LiteralPath (Join-Path $raiz 'PS3_GAME\USRDIR') -PathType Container) { return $raiz }
     # a pasta escolhida já é o próprio PS3_GAME (com USRDIR dentro), ou o USRDIR dele: o disco é a pasta de cima
     # (um jogador escolheu "J:\JOGOS RPCS3\BCUS98232\PS3_GAME" e o gerador recusava toda vez)
@@ -499,6 +502,13 @@ function Achar-PS3Game([string]$raiz) {
 }
 # o disco também pode vir compactado: extrai uma vez para disco\ (o tar do Windows lê 7z, zip, rar e iso)
 function Achar-Disco([string]$d) {
+    # report 818: o disco salvo está num drive que não está conectado agora (HD externo, pendrive, drive virtual)
+    $q = if ($d -match '^([A-Za-z]:)') { $Matches[1] } else { $null }
+    if ($q -and -not (Test-Path -LiteralPath "$q\")) {
+        throw ("o disco do jogo está em $d, mas a unidade $q não está conectada agora. Conecte o HD/pendrive dessa " +
+               'unidade (ou monte de novo o drive virtual) e gere de novo, ou escolha o disco em outro lugar em ' +
+               '"Escolher o disco de novo".')
+    }
     if (Test-Path -LiteralPath $d -PathType Leaf) {
         if ($d -notmatch '\.(7z|zip|rar|iso)$') { throw "o disco tem que ser a pasta com PS3_GAME ou um arquivo .7z, .zip, .rar ou .iso ($d)" }
         $dx = Join-Path $R 'disco'
@@ -1342,6 +1352,13 @@ function Compilar-Build([string]$a) {
     if (-not (Test-Path $exe) -and (Novo-No-Log $l0 'still dirty after')) {
         Msg 'o ninja não parou de reconfigurar (datas dos arquivos): apagando a pasta da build e compilando de novo'
         $null = Corrigir-Datas
+        Remove-Item -LiteralPath (Join-Path $R "port\$bd") -Recurse -Force -ErrorAction SilentlyContinue
+        Exec $LOG "`"$R\scripts\build_portatil.cmd`" $ba"
+    }
+    # report 814: o link parou em "undefined symbol" com o ninja só refazendo o link -- .obj de outra geração que
+    # ficaram na pasta da build (as datas não denunciaram). Uma compilação do zero resolve; vale uma vez.
+    if (-not (Test-Path $exe) -and (Novo-No-Log $l0 'undefined symbol')) {
+        Msg 'o link encontrou partes de uma compilação anterior que não combinam: apagando a pasta da build e compilando do zero'
         Remove-Item -LiteralPath (Join-Path $R "port\$bd") -Recurse -Force -ErrorAction SilentlyContinue
         Exec $LOG "`"$R\scripts\build_portatil.cmd`" $ba"
     }
