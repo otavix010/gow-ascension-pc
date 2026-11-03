@@ -4,6 +4,23 @@ O Otavix Launcher mostra este arquivo na página "Novidades" do jogo. Cada atual
 "## <data> · <versão>" e o texto em português (### pt), inglês (### en) e, quando houver, espanhol (### es).
 As mais novas ficam em cima.
 
+## 03/11/2026 · a822b21
+### pt
+- **Controle:** um controle Xbox (ou compatível) é reconhecido em qualquer porta do Windows; antes, só o primeiro slot do XInput chegava ao jogo.
+- **Salvamento:** o progresso é gravado num arquivo temporário e só substitui o anterior quando termina, e fechar o jogo espera um salvamento em andamento; fechar no meio da gravação não deixa mais o save incompleto.
+- **Áudio:** o buffer de saída passa de 20 para 40 ms, o que evita cortes nos dispositivos de áudio que aceitam filas muito curtas.
+- **Instalação:** quando o download das chaves do RPCS3 falha por certificado do Windows, a geração tenta de novo pelo curl.exe do sistema.
+### en
+- **Controller:** an Xbox (or compatible) controller is recognized in any Windows slot; before, only the first XInput slot reached the game.
+- **Saving:** progress is written to a temporary file and only replaces the previous one once complete, and closing the game waits for a save in progress; closing mid-write no longer leaves an incomplete save.
+- **Audio:** the output buffer goes from 20 to 40 ms, which prevents dropouts on audio devices that accept very short queues.
+- **Installation:** when downloading the RPCS3 keys fails because of a Windows certificate, generation retries through the system's curl.exe.
+### es
+- **Control:** un mando de Xbox (o compatible) se reconoce en cualquier puerto de Windows; antes, solo la primera ranura de XInput llegaba al juego.
+- **Guardado:** el progreso se escribe en un archivo temporal y solo reemplaza al anterior cuando termina, y cerrar el juego espera un guardado en curso; cerrar a mitad de la escritura ya no deja la partida incompleta.
+- **Audio:** el búfer de salida pasa de 20 a 40 ms, lo que evita cortes en los dispositivos de audio que aceptan colas muy cortas.
+- **Instalación:** cuando la descarga de las claves de RPCS3 falla por un certificado de Windows, la generación vuelve a intentarlo con el curl.exe del sistema.
+
 ## 02/11/2026 · 6207b51
 ### pt
 - **Instalação:** a opção "Automático" da versão do executável passa a usar sempre a build portátil (AVX2), a mais testada; a nativa (AVX-512) continua disponível por escolha. Quem já tinha gerado no Automático com a nativa passa à portátil na próxima atualização.
