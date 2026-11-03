@@ -39,8 +39,22 @@ def baixar_vault(pasta):
         if destino.exists():
             continue
         print(f'baixando {nome} do RPCS3 ({URL}{nome})')
-        with urllib.request.urlopen(URL + nome, timeout=60) as r:
-            destino.write_bytes(r.read())
+        try:
+            with urllib.request.urlopen(URL + nome, timeout=60) as r:
+                destino.write_bytes(r.read())
+        except OSError as e:
+            # 03/11 (report 788): com um certificado corrompido na loja do Windows o Python nem abre a
+            # conexão (ssl.load_default_certs: OSError WinError -2146881269, ASN1 inválido). O curl.exe que
+            # vem com o Windows usa o TLS do próprio sistema e não lê a loja do mesmo jeito.
+            print(f'download pelo Python falhou ({e}); tentando o curl.exe do Windows')
+            import shutil
+            import subprocess
+            curl = shutil.which('curl.exe') or shutil.which('curl')
+            parcial = destino.with_suffix(destino.suffix + '.parcial')
+            if not curl or subprocess.run([curl, '-L', '-f', '-s', '-S', '--retry', '2', '-o', str(parcial), URL + nome]).returncode != 0                     or not parcial.exists() or parcial.stat().st_size == 0:
+                parcial.unlink(missing_ok=True)
+                raise
+            parcial.replace(destino)
 
 
 def carregar_vault(pasta):
