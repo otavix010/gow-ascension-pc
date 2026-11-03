@@ -101,6 +101,27 @@ if ((Test-Path -LiteralPath (Join-Path $OUT '4_ppu.ok')) -and
     Write-Host '[gerar] 4_ppu: o tradutor do PPU mudou nesta atualização; traduzindo de novo' -ForegroundColor Cyan
     Remove-Item -LiteralPath (Join-Path $OUT '4_ppu.ok'), (Join-Path $OUT '6_compilar.ok'), (Join-Path $OUT '7_jogar.ok') -Force -ErrorAction SilentlyContinue
 }
+# o mesmo para a tradução das SPUs (etapa 5; 03/11, correção do som picotado): o código SPU é gerado no PC do jogador
+# pelos scripts da geração (tradutor, entradas, passes de desempenho), e uma correção neles só chega traduzindo de
+# novo. A marca guarda o MD5 de todos esses arquivos (e se a geração foi sem os passes de desempenho); sem marca, refaz.
+$marcaSpu = Join-Path $R 'port\spu\spu_md5.txt'
+function Md5-Spu {
+    $arqs = @(Get-ChildItem -LiteralPath (Join-Path $R 'scripts') -Filter *.py -File -ErrorAction SilentlyContinue) +
+            @(Get-ChildItem -LiteralPath (Join-Path $R 'scripts_edge') -Filter *.py -File -ErrorAction SilentlyContinue) +
+            @(Get-ChildItem -LiteralPath (Join-Path $R 'dados') -Filter *.txt -File -ErrorAction SilentlyContinue) +
+            @(Get-ChildItem -LiteralPath (Join-Path $R 'ps3recomp\tools') -Filter *.py -File -ErrorAction SilentlyContinue |
+              Where-Object { $_.Name -ne 'ppu_lifter.py' })
+    $linhas = $arqs | Sort-Object FullName | ForEach-Object {
+        "$($_.FullName.Substring($R.Length)) $((Get-FileHash -LiteralPath $_.FullName -Algorithm MD5).Hash)" }
+    $txt = ($linhas -join "`n") + $(if ($SemOtimizar) { "`nsem_otimizar" } else { '' })
+    $md5 = [Security.Cryptography.MD5]::Create()
+    try { [BitConverter]::ToString($md5.ComputeHash([Text.Encoding]::UTF8.GetBytes($txt))).Replace('-', '') } finally { $md5.Dispose() }
+}
+if ((Test-Path -LiteralPath (Join-Path $OUT '5_spu.ok')) -and
+    (-not (Test-Path -LiteralPath $marcaSpu) -or (Get-Content -LiteralPath $marcaSpu -Raw).Trim() -ne (Md5-Spu))) {
+    Write-Host '[gerar] 5_spu: a tradução das SPUs mudou nesta atualização; traduzindo de novo' -ForegroundColor Cyan
+    Remove-Item -LiteralPath (Join-Path $OUT '5_spu.ok'), (Join-Path $OUT '6_compilar.ok'), (Join-Path $OUT '7_jogar.ok') -Force -ErrorAction SilentlyContinue
+}
 # Report 398 (30/10) e parecidos: um PATH sem a pasta do Windows deixa o cmd, o robocopy e o icacls sem achar
 $sis = @("$env:SystemRoot\System32", $env:SystemRoot, "$env:SystemRoot\System32\Wbem", "$env:SystemRoot\System32\WindowsPowerShell\v1.0")
 $noPath = @($env:PATH -split ';' | ForEach-Object { $_.Trim('"', ' ').TrimEnd('\') })
@@ -1210,6 +1231,7 @@ Etapa '5_spu' {
     Exec $LOG "python `"$s\guarda_avx512.py`" aplicar"
     # passes de desempenho (núcleos vetoriais, luz do EDGE na GPU, saltos diretos...)
     if (-not $SemOtimizar) { Exec $LOG "python `"$s\otimizar.py`"" }
+    Set-Content -LiteralPath $marcaSpu -Value (Md5-Spu) -Encoding ASCII
 }
 
 # ---------------------------------------------------------------------------- compilar
