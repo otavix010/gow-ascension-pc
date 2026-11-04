@@ -4,6 +4,20 @@ O Otavix Launcher mostra este arquivo na página "Novidades" do jogo. Cada atual
 "## <data> · <versão>" e o texto em português (### pt), inglês (### en) e, quando houver, espanhol (### es).
 As mais novas ficam em cima.
 
+## 04/11/2026 · ffc6e00
+### pt
+- **Estabilidade:** corrigida a falha em que, em sessões longas, o jogo ficava cada vez mais lento e o som começava a cortar (processadores de som e física paravam um a um).
+- **Desempenho:** o gerador de ruído do General6 roda nativo e 137 rotinas das SPUs passam a ser otimizadas (menos carga em processadores mais fracos).
+- **Instalação:** a próxima geração refaz a tradução das SPUs sozinha e demora alguns minutos a mais.
+### en
+- **Stability:** fixed an issue where, in long sessions, the game got progressively slower and audio started cutting out (sound and physics processors stopped one by one).
+- **Performance:** the General6 noise generator runs natively and 137 SPU routines are now optimized (less load on weaker CPUs).
+- **Installation:** the next generation redoes the SPU translation on its own and takes a few extra minutes.
+### es
+- **Estabilidad:** corregido el fallo por el que, en sesiones largas, el juego se volvía cada vez más lento y el sonido empezaba a cortarse (los procesadores de sonido y física se detenían uno a uno).
+- **Rendimiento:** el generador de ruido del General6 se ejecuta de forma nativa y 137 rutinas de las SPU pasan a estar optimizadas (menos carga en procesadores más débiles).
+- **Instalación:** la siguiente generación rehace sola la traducción de las SPU y tarda unos minutos más.
+
 ## 04/11/2026 · 6ad8889
 ### pt
 - **Instalação:** o arquivo TLOUCOUNTDOWN.SELF, que faz parte do update 1.04 oficial, não é mais retirado da pasta do update, e volta para lá se tiver sido retirado.
