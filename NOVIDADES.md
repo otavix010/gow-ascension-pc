@@ -4,6 +4,14 @@ O Otavix Launcher mostra este arquivo na página "Novidades" do jogo. Cada atual
 "## <data> · <versão>" e o texto em português (### pt), inglês (### en) e, quando houver, espanhol (### es).
 As mais novas ficam em cima.
 
+## 04/11/2026 · 6ad8889
+### pt
+- **Instalação:** o arquivo TLOUCOUNTDOWN.SELF, que faz parte do update 1.04 oficial, não é mais retirado da pasta do update, e volta para lá se tiver sido retirado.
+### en
+- **Installation:** the TLOUCOUNTDOWN.SELF file, which is part of the official 1.04 update, is no longer moved out of the update folder, and goes back there if it was.
+### es
+- **Instalación:** el archivo TLOUCOUNTDOWN.SELF, que forma parte de la actualización 1.04 oficial, ya no se saca de la carpeta de la actualización, y vuelve allí si se había sacado.
+
 ## 03/11/2026 · f2c6830
 ### pt
 - **Som:** menos cortes e chiado em processadores mais fracos (Xeon e CPUs com menos núcleos): parte do processamento de áudio que ainda rodava interpretada agora é traduzida, e o despacho entre as rotinas de som ficou mais leve.
