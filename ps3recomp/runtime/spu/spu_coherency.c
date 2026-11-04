@@ -341,10 +341,15 @@ void spu_coh_notify_write_except(uint32_t ea, const void* self)
     for (spu_coh_entry* entry = s_coh_ctxs; entry; entry = entry->next) {
         spu_context* c = entry->ctx;
         if (!c || (const void*)c == self) continue;
-        if (c->resv_valid && (c->resv_ea & ~127u) == line) {
+        /* GOWA 04/11 (trava do kick perdido): verificar e zerar num passo só. Antes era "se valid e a linha bate:
+         * marca LR, ..., valid = 0" com um store comum; uma thread interrompida entre a marca e o store deixava a SPU
+         * consumir o LR, reservar outra linha (a do SPURS) e dormir, e o store atrasado apagava essa reserva nova sem
+         * evento: a SPU dormia para sempre. resv_valid guarda (linha | 1) (spu_channels.c, GETLLAR); o CAS só zera a
+         * reserva desta linha, e o LR vem depois (no pior caso, um LR à toa). */
+        if (c->resv_valid == (int)(line | 1u) &&
+            _InterlockedCompareExchange((volatile long*)&c->resv_valid, 0, (long)(line | 1u)) == (long)(line | 1u)) {
             _InterlockedOr((volatile long*)&c->event_status, (long)SPU_EVENT_LR);   /* GOWA: atomic (striped lock) */
             c->tail_budget = 0;   /* SPU_TAILX: event pending (racy store, bounded by the budget) */
-            c->resv_valid = 0;
             g_spu_lr_raise++;
             spu_ch_wake(c);
         }
@@ -359,10 +364,12 @@ void spu_coh_notify_write(uint32_t ea)
     for (spu_coh_entry* entry = s_coh_ctxs; entry; entry = entry->next) {
         spu_context* c = entry->ctx;
         if (!c) continue;
-        if (c->resv_valid && (c->resv_ea & ~127u) == line) {
+        /* GOWA 04/11: verificar e zerar num passo só (ver spu_coh_notify_write_except) */
+        if (c->resv_valid == (int)(line | 1u) &&
+            _InterlockedCompareExchange((volatile long*)&c->resv_valid, 0, (long)(line | 1u)) == (long)(line | 1u)) {
             _InterlockedOr((volatile long*)&c->event_status, (long)SPU_EVENT_LR);   /* GOWA: atomic (striped lock) */
             c->tail_budget = 0;   /* SPU_TAILX: event pending (racy store, bounded by the budget) */
-            c->resv_valid = 0;          /* reservation lost, PUTLLC must fail */
+            /* reservation lost (zerada pelo CAS acima), PUTLLC must fail */
             /* SPU_PUTLLC_WHY=1: name the agent that killed it. A PUTLLC that
              * always fails for "no reservation" is useless without knowing who
              * took it away -- a peer SPU, or the PPU committing to the line. */

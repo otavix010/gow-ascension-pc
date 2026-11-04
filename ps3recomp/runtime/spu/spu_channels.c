@@ -903,7 +903,9 @@ static int spu_mfc_atomic(spu_context* ctx, uint32_t cmd)
         /* MFC_RdAtomicStat after a GETLLAR reads 4 (GETLLAR complete), not 0:
          * Havok's SPU allocator (GH3 collide task, LS 0xA66C) re-issues the
          * GETLLAR until that bit is set, and spun forever on 0. PUTLLUC is 2. */
-        ctx->resv_ea = ea; ctx->resv_valid = 1; ctx->atomic_stat = 4;
+        /* GOWA 04/11: (linha | 1) e não 1 -- o avisador de escrita só zera a reserva da MESMA linha, com CAS
+         * (spu_coherency.c; a trava do kick perdido) */
+        ctx->resv_ea = ea; ctx->resv_valid = (int)((ea & ~127u) | 1u); ctx->atomic_stat = 4;
         ctx->dbg_getllar++;
         /* A GETLLAR re-issued millions of times on one line is an SPU spin-wait
          * that nobody is releasing (a ticket lock, a counter barrier). Say so
@@ -1239,7 +1241,7 @@ static int spu_mfc_getlist_lean(spu_context* ctx, uint32_t cmd)
             ctx->list_stall_cmd[tag]       = base_cmd;
             ctx->list_stall_mask |= (1u << tag);
             ctx->list_stall_stat |= (1u << tag);
-            ctx->event_status    |= 0x2u;
+            _InterlockedOr((volatile long*)&ctx->event_status, 0x2);   /* GOWA 03/11: atômico (ver abaixo) */
             ctx->tail_budget = 0;
             { extern void* volatile g_sn_defer_ctx;
               extern volatile unsigned g_sn_defer;
@@ -1418,7 +1420,7 @@ void spu_wrch_tagupdate(spu_context* ctx, uint32_t v)
     }
     ctx->mfc_tag_status = mfc_tag_wait(mfc_for(ctx), ctx->mfc_tag_mask, v);
     if (v != 0 && (ctx->event_mask & 0x1u)) {
-        ctx->event_status |= 0x1u;
+        _InterlockedOr((volatile long*)&ctx->event_status, 0x1);   /* GOWA 03/11: atômico -- um |= comum apagava o LR de outra thread */
         ctx->tail_budget = 0;
         spu_ch_wake(ctx);
     }
@@ -1466,7 +1468,7 @@ void spu_wrch(spu_context* ctx, uint32_t channel, u128 value)
          * long-missing producer for event_status (previously only ever cleared
          * via WrEventAck -> RdEventStat waits could never complete). */
         if (channel == MFC_WrTagUpdate && v != 0 && (ctx->event_mask & 0x1u)) {
-            ctx->event_status |= 0x1u;
+            _InterlockedOr((volatile long*)&ctx->event_status, 0x1);   /* GOWA 03/11: atômico -- um |= comum apagava o LR de outra thread */
             ctx->tail_budget = 0;   /* SPU_TAILX: event pending -> back to the drain */
             spu_ch_wake(ctx);
         }

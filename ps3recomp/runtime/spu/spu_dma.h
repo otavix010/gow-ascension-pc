@@ -931,7 +931,7 @@ static inline int mfc_run_list(spu_context* spu, uint32_t elem_lsa,
             spu->list_stall_cmd[t]       = base_cmd;
             spu->list_stall_mask |= (1u << t);  /* this tag now has a parked list */
             spu->list_stall_stat |= (1u << t);  /* accumulate into the notify mask */
-            spu->event_status    |= 0x2u;       /* SPU_EVENT_SN stall-and-notify */
+            _InterlockedOr((volatile long*)&spu->event_status, 0x2);         /* SPU_EVENT_SN stall-and-notify */
             spu->tail_budget = 0;               /* SPU_TAILX: event pending */
             /* Real MFC runs a queued list asynchronously, so the notify lands
              * AFTER the arming code finishes. We run it inline here, so hold the
