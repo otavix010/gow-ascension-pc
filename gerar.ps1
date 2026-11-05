@@ -272,6 +272,21 @@ function Escolher-Python {
     # os outros Pythons que o lançador py conhece (o "py -3" pode ser justamente o incompleto)
     $l = SemExcecao { cmd /c 'py --list-paths 2>nul' }
     if ($l) { $cands += @($l | ForEach-Object { if ("$_" -match '([A-Za-z]:\\.*python\.exe)\s*$') { $matches[1] } }) }
+    # reports 846/855: um Python instalado sem "Add python.exe to PATH" e sem o lançador py passava na conferência do
+    # launcher (que procura nas pastas comuns e no registro) e a geração parava aqui dizendo que faltava. Mesma busca.
+    foreach ($p in @("$env:LOCALAPPDATA\Programs\Python", "$env:LOCALAPPDATA\Python", $env:ProgramFiles, ${env:ProgramFiles(x86)}, "$env:SystemDrive\")) {
+        if (-not $p -or -not (Test-Path -LiteralPath $p)) { continue }
+        $cands += @(Get-ChildItem -LiteralPath $p -Directory -ErrorAction SilentlyContinue |
+                    Where-Object { $_.Name -like 'Python3*' -or $_.Name -like 'pythoncore-3*' } |
+                    Sort-Object Name -Descending | ForEach-Object { Join-Path $_.FullName 'python.exe' })
+    }
+    foreach ($k in 'HKCU:\Software\Python\PythonCore', 'HKLM:\Software\Python\PythonCore', 'HKLM:\Software\WOW6432Node\Python\PythonCore') {
+        foreach ($v in @(Get-ChildItem $k -ErrorAction SilentlyContinue)) {
+            $ip = Get-ItemProperty (Join-Path $v.PSPath 'InstallPath') -ErrorAction SilentlyContinue
+            if ($ip.ExecutablePath) { $cands += "$($ip.ExecutablePath)" }
+            elseif ($ip.'(default)') { $cands += (Join-Path "$($ip.'(default)')" 'python.exe') }
+        }
+    }
     $semPip = $null
     foreach ($c in ($cands | Where-Object { $_ -and $_ -notmatch '\\WindowsApps\\' } | Select-Object -Unique)) {
         if (-not (Test-Path -LiteralPath $c)) { continue }
@@ -361,8 +376,9 @@ function Instalar-ComponenteVS([string]$inst, [string[]]$comp, [string]$pasta = 
 Etapa '1_ferramentas' {
     $falta = @()
     # "python" pode ser o atalho da Microsoft Store (abre a loja, não roda nada)
+    # o escolhido acima (o "python" do PATH sozinho não acha o que só está nas pastas comuns ou no registro)
     $v = ''
-    try { $v = (cmd /c 'python -c "import sys; print(sys.version_info[0]*100+sys.version_info[1])" 2>nul') } catch { }
+    if ($py) { $v = "$(@(SemExcecao { & $py -c 'import sys; print(sys.version_info[0]*100+sys.version_info[1])' 2>$null })[0])" }
     if (-not ($v -match '^\d+$')) { $falta += 'Python 3 (winget install Python.Python.3.12) -- e feche/abra o terminal depois' }
     elseif ([int]$v -lt 310) { $falta += 'Python 3.10 ou mais novo' }
     if (-not (Achar-VS)) {
@@ -586,6 +602,24 @@ function Achar-Disco([string]$d) {
         $erro = try { [void][IO.File]::GetAttributes($d); 'sem acesso' } catch { $_.Exception.InnerException.Message }
         throw ("não consegui abrir o arquivo do jogo $d ($erro). Confira se ele ainda está nessa pasta com esse nome e " +
                'se o download terminou, e escolha-o de novo em "Escolher o disco de novo".')
+    }
+    # report 856: a pasta escolhida não existe (renomeada, movida, ou o nome chegou cortado: "...\PlayStation 3\God");
+    # uma só pasta ao lado com esse começo de nome e o jogo dentro é ela
+    if (-not [IO.Directory]::Exists($d)) {
+        $pai = Split-Path $d
+        $nome = Split-Path -Leaf $d
+        $irmas = @()
+        if ($pai -and $nome -and [IO.Directory]::Exists($pai)) {
+            $irmas = @(Get-ChildItem -LiteralPath $pai -Directory -Force -ErrorAction SilentlyContinue |
+                       Where-Object { $_.Name -like "$([WildcardPattern]::Escape($nome))*" } |
+                       ForEach-Object { Achar-PS3Game $_.FullName } | Where-Object { $_ })
+        }
+        if ($irmas.Count -eq 1) {
+            Msg "a pasta $d não existe; usando o jogo em $($irmas[0])"
+            return $irmas[0]
+        }
+        throw ("a pasta do jogo $d não existe (foi movida ou renomeada?). No launcher, clique em `"Escolher o disco de " +
+               'novo" e escolha a pasta onde o jogo está (a que tem PS3_GAME) ou o arquivo dele (.7z, .zip, .rar ou .iso).')
     }
     $achou = Achar-PS3Game $d
     if (-not $achou) {
