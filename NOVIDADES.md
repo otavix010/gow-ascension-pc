@@ -4,6 +4,17 @@ O Otavix Launcher mostra este arquivo na página "Novidades" do jogo. Cada atual
 "## <data> · <versão>" e o texto em português (### pt), inglês (### en) e, quando houver, espanhol (### es).
 As mais novas ficam em cima.
 
+## 05/11/2026 · 832fc54
+### pt
+- **Instalação:** o gerador agora encontra o Python mesmo quando ele foi instalado sem a opção "Add python.exe to PATH".
+- **Instalação:** se a pasta do jogo mudou de nome ou de lugar, o gerador a reconhece quando dá; se não der, a mensagem explica que a pasta não existe mais.
+### en
+- **Installation:** the generator now finds Python even when it was installed without the "Add python.exe to PATH" option.
+- **Installation:** if the game folder was renamed or moved, the generator recognizes it when it can; if not, the message explains that the folder no longer exists.
+### es
+- **Instalación:** el generador ahora encuentra Python aunque se haya instalado sin la opción "Add python.exe to PATH".
+- **Instalación:** si la carpeta del juego cambió de nombre o de lugar, el generador la reconoce cuando puede; si no, el mensaje explica que la carpeta ya no existe.
+
 ## 04/11/2026 · ffc6e00
 ### pt
 - **Estabilidade:** corrigida a falha em que, em sessões longas, o jogo ficava cada vez mais lento e o som começava a cortar (processadores de som e física paravam um a um).
