@@ -6031,7 +6031,40 @@ static void gowa_plib_name(const D3D12_GRAPHICS_PIPELINE_STATE_DESC* pd, WCHAR n
     h2 = gowa_plib_h(h2, &pd->Flags, sizeof pd->Flags);
     swprintf(name, 40, L"%016llX%016llX", (unsigned long long)h1, (unsigned long long)h2);
 }
-/* write the library back once no new PSO came for 3 s (RSX thread) */
+/* Report 858 (i5-8400 + RX 6600 XT, "congela uns 5 s com o SSD alto ao carregar área nova"):
+ * a biblioteca inteira (65 MB) era serializada e gravada na thread do RSX a cada área nova,
+ * e o desenho parava até o disco terminar. Agora uma thread de trabalho faz as duas coisas (o
+ * ID3D12PipelineLibrary se sincroniza sozinho entre threads); a do RSX só a acorda, uma
+ * gravação por vez, e o tempo de cada parte vai para o log. */
+static volatile LONG s_plib_gravando;
+static DWORD WINAPI gowa_plib_grava(LPVOID arg)
+{
+    (void)arg;
+    LARGE_INTEGER f, t0, t1, t2;
+    QueryPerformanceFrequency(&f);
+    QueryPerformanceCounter(&t0);
+    const SIZE_T n = s_plib->lpVtbl->GetSerializedSize(s_plib);
+    void* buf = n ? malloc(n) : NULL;
+    if (buf && SUCCEEDED(s_plib->lpVtbl->Serialize(s_plib, buf, n))) {
+        QueryPerformanceCounter(&t1);
+        char tmp[MAX_PATH + 8];
+        snprintf(tmp, sizeof tmp, "%s.tmp", s_plib_path);
+        FILE* fo = fopen(tmp, "wb");
+        if (fo) {
+            const size_t w = fwrite(buf, 1, n, fo);
+            fclose(fo);
+            QueryPerformanceCounter(&t2);
+            if (w == n && MoveFileExA(tmp, s_plib_path, MOVEFILE_REPLACE_EXISTING))
+                fprintf(stderr, "[pso-lib] gravada (%llu bytes; serializar %.0f ms, disco %.0f ms, fora do desenho)\n",
+                        (unsigned long long)n, (double)(t1.QuadPart - t0.QuadPart) * 1000.0 / (double)f.QuadPart,
+                        (double)(t2.QuadPart - t1.QuadPart) * 1000.0 / (double)f.QuadPart);
+        }
+    }
+    free(buf);
+    InterlockedExchange(&s_plib_gravando, 0);
+    return 0;
+}
+/* write the library back once no new PSO came for 3 s (asks the worker; RSX thread) */
 static void gowa_plib_tick(void)
 {
     if (!s_plib_dirty) return;
@@ -6039,21 +6072,15 @@ static void gowa_plib_tick(void)
     QueryPerformanceCounter(&now);
     QueryPerformanceFrequency(&f);
     if (now.QuadPart - s_plib_last.QuadPart < 3 * f.QuadPart) return;
+    if (InterlockedCompareExchange(&s_plib_gravando, 1, 0) != 0) return;   /* a anterior ainda grava: depois */
     s_plib_dirty = 0;
-    const SIZE_T n = s_plib->lpVtbl->GetSerializedSize(s_plib);
-    void* buf = n ? malloc(n) : NULL;
-    if (buf && SUCCEEDED(s_plib->lpVtbl->Serialize(s_plib, buf, n))) {
-        char tmp[MAX_PATH + 8];
-        snprintf(tmp, sizeof tmp, "%s.tmp", s_plib_path);
-        FILE* fo = fopen(tmp, "wb");
-        if (fo) {
-            const size_t w = fwrite(buf, 1, n, fo);
-            fclose(fo);
-            if (w == n && MoveFileExA(tmp, s_plib_path, MOVEFILE_REPLACE_EXISTING))
-                fprintf(stderr, "[pso-lib] gravada (%llu bytes)\n", (unsigned long long)n);
-        }
+    HANDLE th = CreateThread(NULL, 0, gowa_plib_grava, NULL, 0, NULL);
+    if (th) {
+        SetThreadPriority(th, THREAD_PRIORITY_BELOW_NORMAL);
+        CloseHandle(th);
+    } else {
+        gowa_plib_grava(NULL);   /* sem thread: grava aqui, como antes */
     }
-    free(buf);
 }
 
 /* GOWA (27/10, report 80 -- "congela ao abrir uma porta"): compilação dos shaders fora da
