@@ -4,6 +4,14 @@ O Otavix Launcher mostra este arquivo na página "Novidades" do jogo. Cada atual
 "## <data> · <versão>" e o texto em português (### pt), inglês (### en) e, quando houver, espanhol (### es).
 As mais novas ficam em cima.
 
+## 05/11/2026 · 330a716
+### pt
+- **Desempenho:** fim dos congelamentos de alguns segundos ao entrar em áreas novas: o cache de shaders agora é salvo em segundo plano.
+### en
+- **Performance:** no more multi-second freezes when entering new areas: the shader cache is now saved in the background.
+### es
+- **Rendimiento:** se acabaron los congelamientos de algunos segundos al entrar en zonas nuevas: la caché de shaders ahora se guarda en segundo plano.
+
 ## 05/11/2026 · 832fc54
 ### pt
 - **Instalação:** o gerador agora encontra o Python mesmo quando ele foi instalado sem a opção "Add python.exe to PATH".
