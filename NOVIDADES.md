@@ -4,6 +4,14 @@ O Otavix Launcher mostra este arquivo na página "Novidades" do jogo. Cada atual
 "## <data> · <versão>" e o texto em português (### pt), inglês (### en) e, quando houver, espanhol (### es).
 As mais novas ficam em cima.
 
+## 06/11/2026 · f5f7dc9
+### pt
+- **Instalação:** o gerador não deixa mais rodar duas gerações ao mesmo tempo na mesma pasta; a segunda para com um aviso, em vez de travar a primeira.
+### en
+- **Installation:** the generator no longer lets two generations run at the same time in the same folder; the second one stops with a notice instead of breaking the first.
+### es
+- **Instalación:** el generador ya no permite dos generaciones al mismo tiempo en la misma carpeta; la segunda se detiene con un aviso en lugar de romper la primera.
+
 ## 05/11/2026 · 330a716
 ### pt
 - **Desempenho:** fim dos congelamentos de alguns segundos ao entrar em áreas novas: o cache de shaders agora é salvo em segundo plano.
