@@ -4,7 +4,8 @@
 
 .DESCRIPTION
   Faz tudo em ordem, e cada etapa pula se já foi feita (use -Refazer para refazer):
-    1. confere as ferramentas (Visual Studio Build Tools com Clang, Python) e baixa o FFmpeg;
+    1. confere as ferramentas (Visual Studio Build Tools com Clang, Python) e baixa o FFmpeg e a
+       Otavix Engine PS3 (a engine compilada: runtime, cabeçalhos e o tradutor), conferidos pelo SHA-256;
     2. prepara os arquivos do jogo: disco, update 1.04 e decriptação do executável;
     3. prepara a libsre a partir do firmware oficial;
     4. traduz o código da PPU;
@@ -29,6 +30,10 @@
   Pasta com key_vault.cpp e key_vault.h do código-fonte do RPCS3. Se não for dada,
   os dois arquivos são baixados do repositório do RPCS3 para dl\rpcs3_chaves.
 
+.PARAMETER Engine
+  O pacote da Otavix Engine PS3 (otavix-engine-ps3-<versão>.zip) a usar no lugar do que o gerador
+  baixa. Os arquivos dele são conferidos pelo manifesto; trocar de pacote refaz da etapa 3 em diante.
+
 .PARAMETER RefazerDe
   Refaz da etapa N em diante. Depois de atualizar o port, -RefazerDe 4 retraduz e
   recompila sem repetir o disco, o update e o firmware.
@@ -46,6 +51,7 @@ param(
     [string]$Update = '',
     [string]$Firmware = '',
     [string]$ChavesRpcs3 = '',
+    [string]$Engine = '',
     [ValidateSet('auto', 'avx512', 'nativa', 'portatil')][string]$Build = 'auto',
     [int]$Jobs = 0,
     [switch]$SemOtimizar,
@@ -74,6 +80,18 @@ $UPDATE_SHA1 = '5a94c17aa07cb5181a505d3429c88ea3d9f4e4d0'   # do arquivo inteiro
 $PUP_LISTA = 'http://fus01.ps3.update.playstation.net/update/ps3/list/us/ps3-updatelist.txt'
 # libsre.prx decriptado: o mesmo nos firmwares 4.x até o 4.93; a etapa 3 usa endereços fixos dele
 $SHA_LIBSRE = '9e7ee6edc99b1d372686cf927b883b18f19ed4d32d1faf35e214cca4ae0737b6'
+# A Otavix Engine PS3 (06/11): a engine vem compilada num pacote (o runtime, os cabeçalhos que o código gerado inclui
+# e o tradutor do PPU e das SPUs em .exe), que vai para engine\. O código do jogo continua sendo traduzido e compilado
+# aqui, a partir do disco do jogador, pelo tradutor do pacote. -Engine <zip> usa um pacote local no lugar do baixado.
+$ENGINE_VERSAO = '0.11.0'
+$ENGINE_NOME = "otavix-engine-ps3-$ENGINE_VERSAO"
+$ENGINE_URLS = @("https://otavix-launcher.otavix-launcher-servidor.workers.dev/v1/arquivos/engine/ps3/$ENGINE_NOME.zip")
+$ENGINE_SHA = 'b87ee99ca38f053dd24af3af153b529e7890fd34ffd240ba49ce9571dd0b74e3'
+$ENG = Join-Path $R 'engine'
+$ENGINE_BIN = Join-Path $ENG 'bin'
+# o tradutor das SPUs para os scripts de tradução do port (scripts\otx_ponte.py)
+$env:OTX_SPU_LIFTER = Join-Path $ENGINE_BIN 'spu_traduz.exe'
+$env:OTX_SPU_PONTE = Join-Path $ENGINE_BIN 'spu_ponte.exe'
 $OUT = Join-Path $R 'out\gerar'
 New-Item -ItemType Directory -Force $OUT | Out-Null
 # -RefazerDe N: refaz da etapa N em diante (ex.: 4 depois de atualizar o port; o jogo e o
@@ -93,9 +111,18 @@ foreach ($c in @(@('2_jogo', 'jogo\GOWA.elf'), @('3_firmware', 'fw\lle\libsre_im
 }
 # a tradução do PPU (etapa 4) é refeita quando o tradutor muda: o código gerado no PC do jogador é do tradutor da
 # geração anterior, e uma correção nele (31/10: dcbz sob a trava da linha, trava da tela de carregamento) só chega
-# traduzindo de novo. A marca guarda o MD5 do ppu_lifter.py e do preâmbulo (port\ppu_recomp_preambulo.h) que geraram o código; sem marca, também refaz.
+# traduzindo de novo. A marca guarda o MD5 do tradutor (o manifesto do pacote da engine, com o SHA-256 de cada
+# arquivo dele; antes, os .py de scripts\otx\ppu) e do preâmbulo (port\ppu_recomp_preambulo.h) que geraram o código;
+# sem marca, também refaz. Uma marca de uma geração com o tradutor em .py nunca bate: a primeira com o pacote refaz.
 $marcaLifter = Join-Path $R 'port\recompiled\lifter_md5.txt'
-function Md5-Lifter { (@('ps3recomp\tools\ppu_lifter.py', 'port\ppu_recomp_preambulo.h') | ForEach-Object { (Get-FileHash -LiteralPath (Join-Path $R $_) -Algorithm MD5).Hash }) -join '' }
+function Md5-Lifter {
+    $arqs = @(Get-Item -LiteralPath (Join-Path $ENG 'manifesto.json') -ErrorAction SilentlyContinue) +
+            @(Get-Item -LiteralPath (Join-Path $R 'port\ppu_recomp_preambulo.h'))
+    $linhas = $arqs | Sort-Object FullName | ForEach-Object {
+        "$($_.FullName.Substring($R.Length)) $((Get-FileHash -LiteralPath $_.FullName -Algorithm MD5).Hash)" }
+    $md5 = [Security.Cryptography.MD5]::Create()
+    try { [BitConverter]::ToString($md5.ComputeHash([Text.Encoding]::UTF8.GetBytes($linhas -join "`n"))).Replace('-', '') } finally { $md5.Dispose() }
+}
 if ((Test-Path -LiteralPath (Join-Path $OUT '4_ppu.ok')) -and
     (-not (Test-Path -LiteralPath $marcaLifter) -or (Get-Content -LiteralPath $marcaLifter -Raw).Trim() -ne (Md5-Lifter))) {
     Write-Host '[gerar] 4_ppu: o tradutor do PPU mudou nesta atualização; traduzindo de novo' -ForegroundColor Cyan
@@ -104,13 +131,13 @@ if ((Test-Path -LiteralPath (Join-Path $OUT '4_ppu.ok')) -and
 # o mesmo para a tradução das SPUs (etapa 5; 03/11, correção do som picotado): o código SPU é gerado no PC do jogador
 # pelos scripts da geração (tradutor, entradas, passes de desempenho), e uma correção neles só chega traduzindo de
 # novo. A marca guarda o MD5 de todos esses arquivos (e se a geração foi sem os passes de desempenho); sem marca, refaz.
+# Entra também o tradutor das SPUs nosso (o manifesto do pacote da engine: o spu_traduz.exe e o spu_workloads.exe).
 $marcaSpu = Join-Path $R 'port\spu\spu_md5.txt'
 function Md5-Spu {
     $arqs = @(Get-ChildItem -LiteralPath (Join-Path $R 'scripts') -Filter *.py -File -ErrorAction SilentlyContinue) +
             @(Get-ChildItem -LiteralPath (Join-Path $R 'scripts_edge') -Filter *.py -File -ErrorAction SilentlyContinue) +
             @(Get-ChildItem -LiteralPath (Join-Path $R 'dados') -Filter *.txt -File -ErrorAction SilentlyContinue) +
-            @(Get-ChildItem -LiteralPath (Join-Path $R 'ps3recomp\tools') -Filter *.py -File -ErrorAction SilentlyContinue |
-              Where-Object { $_.Name -ne 'ppu_lifter.py' })
+            @(Get-Item -LiteralPath (Join-Path $ENG 'manifesto.json') -ErrorAction SilentlyContinue)
     $linhas = $arqs | Sort-Object FullName | ForEach-Object {
         "$($_.FullName.Substring($R.Length)) $((Get-FileHash -LiteralPath $_.FullName -Algorithm MD5).Hash)" }
     $txt = ($linhas -join "`n") + $(if ($SemOtimizar) { "`nsem_otimizar" } else { '' })
@@ -315,7 +342,7 @@ function Escolher-Python {
         $null = SemExcecao { & $semPip -m pip --version 2>$null }
         if ($LASTEXITCODE -eq 0) { return $semPip }
         # report 336: o pip só servia para o pycryptodome, e o AES agora tem reserva no próprio Windows
-        # (ps3recomp\tools\aes_cng.py): um Python sem pip também serve
+        # (scripts\aes_cng.py): um Python sem pip também serve
         Msg "o Python em $semPip não tem pip e não deu para instalar; segue sem ele (o AES vem do Windows)"
         return $semPip
     }
@@ -509,6 +536,93 @@ function Conferir-Processador {
            'mesmo com AVX2, os de 4 núcleos ficam abaixo de 15 fps.')
 }
 Conferir-Processador
+
+# ---------------------------------------------------------------------------- a engine (pacote compilado)
+# O pacote vai para engine\ (lib, include, bin com o tradutor, cmake) e o SHA-256 do .zip instalado fica em
+# engine\pacote.sha256. Pacote novo (outra versão, ou -Engine com outro .zip): reinstala e refaz da etapa 3 em diante
+# (a libsre, o PPU e as SPUs são traduzidos pelo tradutor do pacote, e o jogo é compilado contra ele). Pasta engine
+# apagada ou com arquivo faltando (antivírus): reinstala; com o mesmo pacote, a tradução continua valendo.
+$marcaPacote = Join-Path $ENG 'pacote.sha256'
+if ($Engine) {
+    # report 818 e afins: o caminho como o jogador o deu; um .zip que não existe para aqui, dizendo qual
+    if (-not (Test-Path -LiteralPath $Engine -PathType Leaf)) { throw "o pacote da engine $Engine não existe" }
+    $Engine = (Resolve-Path -LiteralPath $Engine).ProviderPath
+    $ENGINE_SHA = (Get-FileHash -LiteralPath $Engine -Algorithm SHA256).Hash.ToLower()
+    Msg "engine: pacote local $Engine"
+}
+function Engine-Inteira {
+    $man = Join-Path $ENG 'manifesto.json'
+    if (-not (Test-Path -LiteralPath $man) -or -not (Test-Path -LiteralPath $marcaPacote)) { return $false }
+    if ((Get-Content -LiteralPath $marcaPacote -Raw).Trim() -ne $ENGINE_SHA) { return $false }
+    return (@(Conferir-Engine $ENG).Count -eq 0)
+}
+# os arquivos de uma pasta da engine que não batem com o manifesto dela (nomes; vazio = tudo certo)
+function Conferir-Engine([string]$pasta) {
+    $m = Get-Content -LiteralPath (Join-Path $pasta 'manifesto.json') -Raw -Encoding UTF8 | ConvertFrom-Json
+    $ruins = @()
+    foreach ($a in $m.arquivos.PSObject.Properties) {
+        $f = Join-Path $pasta ($a.Name -replace '/', '\')
+        if (-not (Test-Path -LiteralPath $f -PathType Leaf)) { $ruins += "$($a.Name) (falta)" }
+        elseif ((Get-FileHash -LiteralPath $f -Algorithm SHA256).Hash.ToLower() -ne $a.Value) { $ruins += "$($a.Name) (diferente)" }
+    }
+    return $ruins
+}
+$marcaEng = Join-Path $OUT '1_engine.ok'
+if ((Test-Path -LiteralPath $marcaEng) -and -not (Engine-Inteira)) {
+    Msg '1_engine: o pacote da engine mudou ou não está inteiro; instalando de novo'
+    Remove-Item -LiteralPath $marcaEng -Force
+}
+Etapa '1_engine' {
+    $antes = if (Test-Path -LiteralPath $marcaPacote) { (Get-Content -LiteralPath $marcaPacote -Raw).Trim() } else { '' }
+    $zip = $Engine
+    if (-not $zip) {
+        $zip = Join-Path $R "dl\$ENGINE_NOME.zip"
+        $ok = (Test-Path -LiteralPath $zip) -and (Get-FileHash -LiteralPath $zip -Algorithm SHA256).Hash.ToLower() -eq $ENGINE_SHA
+        $falhas = @()
+        foreach ($u in $ENGINE_URLS) {
+            if ($ok) { break }
+            Msg "baixando a Otavix Engine PS3 $ENGINE_VERSAO"
+            try {
+                Baixar $u $zip
+                if ((Get-FileHash -LiteralPath $zip -Algorithm SHA256).Hash.ToLower() -eq $ENGINE_SHA) { $ok = $true }
+                else { $falhas += "$u (sha256 diferente)"; Remove-Item -LiteralPath $zip -Force -ErrorAction SilentlyContinue }
+            } catch { $falhas += "$u ($($_.Exception.Message))" }
+        }
+        if (-not $ok) {
+            throw ("não deu para baixar a Otavix Engine PS3 $ENGINE_VERSAO (" + ($falhas -join '; ') + "). Confira a internet " +
+                   'e se o antivírus não está bloqueando o download, e gere de novo.')
+        }
+    }
+    # extrai ao lado, confere cada arquivo pelo manifesto e só então troca a pasta engine
+    $novo = Join-Path $R 'engine.novo'
+    if (Test-Path -LiteralPath $novo) { SemExcecao { cmd /c "rmdir /s /q `"$novo`" 2>&1" } | Out-Null }
+    Add-Type -AssemblyName System.IO.Compression.FileSystem
+    try { [IO.Compression.ZipFile]::ExtractToDirectory($zip, $novo) }
+    catch { throw "o pacote da engine não abriu ($zip): $($_.Exception.Message). Gere de novo para baixá-lo outra vez." }
+    $ruins = @(Conferir-Engine $novo)
+    if ($ruins) {
+        throw ("o pacote da engine foi extraído, mas $($ruins.Count) arquivo(s) não conferem com o manifesto: " +
+               (($ruins | Select-Object -First 5) -join '; ') + '. Se o antivírus removeu ou bloqueou algum .exe da ' +
+               "pasta $novo, libere a pasta do jogo no antivírus e gere de novo.")
+    }
+    if (Test-Path -LiteralPath $ENG) {
+        SemExcecao { cmd /c "rmdir /s /q `"$ENG`" 2>&1" } | Out-Null
+        if (Test-Path -LiteralPath $ENG) { throw "não deu para trocar a pasta $ENG (algum arquivo dela está aberto?). Feche o jogo e gere de novo." }
+    }
+    Move-Item -LiteralPath $novo -Destination $ENG
+    [IO.File]::WriteAllText($marcaPacote, $ENGINE_SHA, (New-Object Text.UTF8Encoding $false))
+    $ver = (Get-Content -LiteralPath (Join-Path $ENG 'manifesto.json') -Raw -Encoding UTF8 | ConvertFrom-Json).versao
+    Anotar $LOG "engine $ver instalada em $ENG (sha256 $ENGINE_SHA)"
+    if ($antes -ne $ENGINE_SHA) {
+        # pacote novo: a tradução e a compilação são do tradutor e do runtime dele
+        $refazer = @(Get-ChildItem -LiteralPath $OUT -Filter '*.ok' -ErrorAction SilentlyContinue |
+                     Where-Object { $_.Name -match '^(\d+)_' -and [int]$matches[1] -ge 3 })
+        if ($refazer) {
+            Msg "engine $ver nova: a libsre, o PPU e as SPUs serão traduzidos de novo e o jogo recompilado"
+            $refazer | Remove-Item -Force
+        }
+    }
+}
 
 # ---------------------------------------------------------------------------- jogo
 # a pasta do jogo: a que contém PS3_GAME\USRDIR, ou uma até dois níveis abaixo da escolhida
@@ -1019,7 +1133,7 @@ function Conferir-Arquivos([string]$pg) {
 }
 function Extrair-Pkg([string]$pkg) {
     $tmp = Join-Path $R 'out\update_pkg'
-    Exec $LOG "python `"$R\ps3recomp\tools\pkg_extract.py`" `"$pkg`" `"$tmp`""
+    Exec $LOG "$ENGINE_BIN\pkg.exe `"$pkg`" `"$tmp`""
     $sfo = Get-ChildItem $tmp -Recurse -Filter PARAM.SFO | Select-Object -First 1
     if (-not $sfo) { throw "o PKG não trouxe PARAM.SFO ($tmp)" }
     $sfo.DirectoryName
@@ -1204,12 +1318,12 @@ Etapa '3_firmware' {
         catch { Msg "o firmware escolhido não serviu ($(($_.Exception.Message -split "`n")[0])); usando o firmware oficial do PS3" }
     }
     if (-not $feito) { Libsre-De (Pup-Oficial) }
-    Push-Location (Join-Path $R 'ps3recomp')
+    Push-Location $ENG
     try {
-        Exec $LOG "python tools\lift_prx.py `"$fw\libsre.prx`" --base 0x30000000 --output `"$lle`""
-        Exec $LOG "python tools\prx_exports.py `"$fw\libsre.prx`" --symbol libsre --out `"$lle\libsre_exports.c`" --json `"$lle\libsre_exports_c.json`""
+        Exec $LOG "$ENGINE_BIN\ppu_prx.exe `"$fw\libsre.prx`" --base 0x30000000 --output `"$lle`""
+        Exec $LOG "$ENGINE_BIN\ppu_prx.exe `"$fw\libsre.prx`" --symbol libsre --out `"$lle\libsre_exports.c`" --json `"$lle\libsre_exports_c.json`""
         Exec $LOG "python `"$R\scripts\libsre_stubs_json.py`" `"$lle\libsre_imports.json`" `"$lle\libsre_hle_stubs.json`""
-        Exec $LOG "python tools\ppu_lifter.py `"$lle\libsre_image.bin`" --raw --base 0x30000000 --toc 0x30039AB0 --code-end 0x3001DB18 --symbol-prefix libsre_ --functions `"$lle\libsre_functions.json`" --hle-stubs `"$lle\libsre_hle_stubs.json`" -o `"$lle\recomp`""
+        Exec $LOG "$ENGINE_BIN\ppu_traduz.exe `"$lle\libsre_image.bin`" --raw --base 0x30000000 --toc 0x30039AB0 --code-end 0x3001DB18 --symbol-prefix libsre_ --functions `"$lle\libsre_functions.json`" --hle-stubs `"$lle\libsre_hle_stubs.json`" -o `"$lle\recomp`""
     } finally { Pop-Location }
     $pl = Join-Path $R 'port\lle_libsre'
     New-Item -ItemType Directory -Force $pl | Out-Null
@@ -1220,11 +1334,11 @@ Etapa '3_firmware' {
 # ---------------------------------------------------------------------------- PPU
 Etapa '4_ppu' {
     $o = Join-Path $R 'out'
-    Push-Location (Join-Path $R 'ps3recomp')
+    Push-Location $ENG
     try {
-        Exec $LOG "python tools\ppu_loader.py `"$R\jogo\GOWA.elf`" -o `"$o`""
-        Exec $LOG "python tools\ppu_lifter.py `"$R\jogo\GOWA.elf`" --functions `"$o\GOWA.functions.json`" --hle-stubs `"$o\GOWA.imports.json`" --code-end 0x661C14 --chunks 48 --output `"$R\port\recompiled`" -j $Jobs"
-        Exec $LOG "python tools\gen_hle_nids.py --all --out `"$R\port\recompiled\ppu_hle_nids.cpp`""
+        Exec $LOG "$ENGINE_BIN\ppu_carrega.exe `"$R\jogo\GOWA.elf`" -o `"$o`""
+        Exec $LOG "$ENGINE_BIN\ppu_traduz.exe `"$R\jogo\GOWA.elf`" --functions `"$o\GOWA.functions.json`" --hle-stubs `"$o\GOWA.imports.json`" --code-end 0x661C14 --chunks 48 --output `"$R\port\recompiled`" -j $Jobs"
+        Exec $LOG "$ENGINE_BIN\ppu_nids.exe --all --out `"$R\port\recompiled\ppu_hle_nids.cpp`""
     } finally { Pop-Location }
     Exec $LOG "python `"$R\scripts\ppu_preambulo.py`""
     Exec $LOG "python `"$R\scripts\ppu_restrict.py`" aplicar"
@@ -1266,7 +1380,7 @@ Etapa '5_spu' {
             Msg "gerando em $sw"
         }
     }
-    Exec $LOG "python `"$R\ps3recomp\tools\build_spu_workloads.py`" --input `"$R\jogo\GOWA.elf`" --input `"$R\fw\libsre.prx`" --lifted `"$sw`" --out `"$sw\spu_workloads.c`" --constructor --allow-partial"
+    Exec $LOG "$ENGINE_BIN\spu_workloads.exe --input `"$R\jogo\GOWA.elf`" --input `"$R\fw\libsre.prx`" --lifted `"$sw`" --out `"$sw\spu_workloads.c`" --constructor --allow-partial"
     cmd /c "robocopy `"$sw`" `"$R\port\spu`" /E /NFL /NDL /NJH /NJS /NP >> `"$LOG`" 2>&1"
     if ($LASTEXITCODE -ge 8) { throw "falhou a cópia de $sw (robocopy $LASTEXITCODE)" }
     Exec $LOG "python `"$s\lift_gowa_jobmods.py`""
@@ -1340,7 +1454,7 @@ if ($antes['escolhida'] -eq $escolha -and $antes['pasta'] -and ($antes['pasta'] 
 # ("manifest 'build.ninja' still dirty after 100 tries"). Traz essas datas para agora; devolve quantos arquivos.
 function Corrigir-Datas {
     $agora = Get-Date; $n = 0
-    foreach ($p in 'port', 'ps3recomp', 'scripts') {
+    foreach ($p in 'port', 'engine', 'scripts') {
         Get-ChildItem -LiteralPath (Join-Path $R $p) -Recurse -File -Force -ErrorAction SilentlyContinue |
             Where-Object { $_.LastWriteTime -gt $agora.AddMinutes(1) } |
             ForEach-Object { try { $_.LastWriteTime = $agora; $n++ } catch { } }
@@ -1358,7 +1472,7 @@ function Fontes-Repo {
     @(Get-ChildItem -LiteralPath (Join-Path $p 'edge') -Recurse -File -Force -ErrorAction SilentlyContinue) +
     @(Get-ChildItem -LiteralPath (Join-Path $p 'spu') -Directory -Filter 'gowanat_*' -Force -ErrorAction SilentlyContinue |
       ForEach-Object { Get-ChildItem -LiteralPath $_.FullName -Recurse -File -Force -ErrorAction SilentlyContinue }) +
-    @(Get-ChildItem -LiteralPath (Join-Path $R 'ps3recomp') -Recurse -File -Force -ErrorAction SilentlyContinue) +
+    @(Get-ChildItem -LiteralPath $ENG -Recurse -File -Force -ErrorAction SilentlyContinue) +
     @(Get-ChildItem -LiteralPath (Join-Path $R 'scripts') -Recurse -File -Force -ErrorAction SilentlyContinue)
 }
 function Hashes-Fontes {

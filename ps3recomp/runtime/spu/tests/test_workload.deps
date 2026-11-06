@@ -1,2 +1,0 @@
-# Extra sources for the workload-dispatch test: the dispatch layer itself.
-EXTRA="$RUNTIME_SPU/spu_workload.c"

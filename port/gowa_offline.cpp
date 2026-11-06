@@ -215,6 +215,7 @@ extern "C" { int g_gowa_pula_luz = [] { const char* e = getenv("GOWA_PULA_LUZ");
 /* padrão LIGADO desde 22/10 (A/B ablg2 cap. 16 +2,0%, fase 1 empate, imagem igual); =0 volta à SPU */
 static int s_luz_gpu_init = [] { const char* e = getenv("GOWA_LUZ_GPU"); g_gowa_luz_gpu = e ? atoi(e) : 1; return 0; }();
 extern "C" uint32_t gowa_conf_luz(void* ctx, uint32_t g);
+extern "C" void gowa_conf_marca_7040(void* ctx);
 extern "C" int gowa_luz_gpu(void* vctx)
 {
     spu_context* ctx = (spu_context*)vctx;
@@ -232,7 +233,7 @@ extern "C" int gowa_luz_gpu(void* vctx)
                   InterlockedExchange(&s_ok, 0), InterlockedExchange(&s_perdido, 0), InterlockedExchange(&s_7040, 0), InterlockedExchange(&s_pass2, 0), InterlockedExchange(&s_mais, 0)); }
     const uint32_t sp = ctx->gpr[1]._u32[0];
     const uint32_t s50 = be32(sp + 0x50), s40 = be32(sp + 0x40);
-    if (s50 & 0x10000u) { InterlockedIncrement(&s_7040); return 0; }
+    if (s50 & 0x10000u) { InterlockedIncrement(&s_7040); gowa_conf_marca_7040(ctx); return 0; }
     if (s40) { InterlockedIncrement(&s_pass2); return 0; }
     const uint32_t n = ctx->gpr[107]._u32[0];
     const uint32_t hdr = ctx->gpr[115]._u32[0];
@@ -627,6 +628,39 @@ static DWORD WINAPI peek_thread(LPVOID)
     return 0;
 }
 
+/* GOWA_DUMP_EA=<ea hex>:<bytes hex>:<segundos>[,...] (03/11, fase 2): grava o trecho da memória do jogo
+ * em dump_<ea>_<s>s.bin (pasta de trabalho do exe) depois de tantos segundos -- ex.: a instância do SPURS
+ * com a libsre real, para achar onde ficam os campos dos workloads 16..31. */
+static DWORD WINAPI dump_ea_thread(LPVOID)
+{
+    struct { uint32_t ea, len, seg; } d[8]; int n = 0;
+    char buf[256]; strncpy(buf, getenv("GOWA_DUMP_EA"), sizeof buf - 1); buf[sizeof buf - 1] = 0;
+    for (char* tok = strtok(buf, ","); tok && n < 8; tok = strtok(nullptr, ",")) {
+        char* p = tok;
+        d[n].ea = (uint32_t)strtoul(p, &p, 16); d[n].len = 0x1000u; d[n].seg = 60u;
+        if (*p == ':') { d[n].len = (uint32_t)strtoul(p + 1, &p, 16); }
+        if (*p == ':') { d[n].seg = (uint32_t)strtoul(p + 1, &p, 10); }
+        if (d[n].len > 0x100000u) d[n].len = 0x100000u;
+        n++;
+    }
+    const ULONGLONG t0 = GetTickCount64();
+    for (int feitos = 0; feitos < n;) {
+        Sleep(250);
+        const ULONGLONG s = (GetTickCount64() - t0) / 1000;
+        for (int i = 0; i < n; i++) {
+            if (!d[i].len || s < d[i].seg) continue;
+            char nome[64]; snprintf(nome, sizeof nome, "dump_%08X_%us.bin", d[i].ea, d[i].seg);
+            if (FILE* f = fopen(nome, "wb")) {
+                for (uint32_t k = 0; k < d[i].len; k++) { const uint8_t b = vm_read8(d[i].ea + k); fwrite(&b, 1, 1, f); }
+                fclose(f);
+            }
+            fprintf(stderr, "[dump-ea] %s (0x%X bytes)\n", nome, d[i].len);
+            d[i].len = 0; feitos++;
+        }
+    }
+    return 0;
+}
+
 /* GOWA_WATCH=ea[:len],... (hex, len <= 8): a cada ~1 ms compara os bytes e
  * registra cada mudança com o tempo -- quem zera um readyCount, quando um
  * flag muda. */
@@ -935,6 +969,27 @@ static void h_mmapper_unmap(ppu_context* ctx)
  * GOWA_NO_TASKLIFT=1 desliga. */
 #define GOWA_IMG_TASK_8E4F 600001
 extern "C" void spu_begin_image(int image_id);
+extern "C" void spu_register_function(uint32_t addr, void (*fn)(spu_context*));
+extern "C" void gowapm_0079E500_spu_func_00000A00(void*);
+/* GOWA (03/11, fase 2): entrada do policy module WWS (LS 0xA00) com GOWA_PM_DUMP=1 imprime, nas
+ * primeiras entradas de cada SPU, os registradores de entrada (r0, r1, r3, r4, r5) e o contexto do
+ * kernel em LS 0x100..0x1FF, e segue para a função traduzida. Serve para comparar o que o kernel
+ * real (libsre LLE) e o do HLE (PS3_LIBSRE=p) entregam ao PM. */
+extern "C" void gowa_pm_entrada(spu_context* ctx)
+{
+    static volatile long s_n = 0;
+    const long n = InterlockedIncrement(&s_n);
+    if (n <= 12) {
+        char b[1400]; int p = snprintf(b, sizeof b, "[pm-entrada] #%ld r0=%08X r1=%08X r3=%08X r4=%08X %08X %08X %08X r5=%08X | LS100:",
+                                      n, ctx->gpr[0]._u32[0], ctx->gpr[1]._u32[0], ctx->gpr[3]._u32[0], ctx->gpr[4]._u32[0],
+                                      ctx->gpr[4]._u32[1], ctx->gpr[4]._u32[2], ctx->gpr[4]._u32[3], ctx->gpr[5]._u32[0]);
+        for (uint32_t o = 0x100u; o < 0x200u && p < (int)sizeof b - 12; o += 4)
+            p += snprintf(b + p, sizeof b - p, "%s%02X%02X%02X%02X", (o & 0xF) ? "" : " ",
+                          ctx->ls[o], ctx->ls[o + 1], ctx->ls[o + 2], ctx->ls[o + 3]);
+        fprintf(stderr, "%s\n", b);
+    }
+    gowapm_0079E500_spu_func_00000A00(ctx);
+}
 extern "C" void spu_overlay_register_region(uint32_t content_ea, uint32_t span, int image_id);
 extern "C" void spu_8e4f213617fb468dc09ae1a03a0b333b6f22ccbb4c24ee36d3a0e11c0a94b4d8_spu_recomp_register(void);
 /* Módulos de job WWS (C0DEC0DE do GOWA.elf), traduzidos por
@@ -1028,7 +1083,11 @@ static void gowa_register_jobmod_lifts(void)
     { const char* e = getenv("GOWA_PM_NATIVE");
       if (e && e[0] == '1') {
           const int img = GOWA_IMG_JOBMOD_BASE + 900;
-          spu_begin_image(img); gowapm_0079E500_spu_recomp_register(); spu_begin_image(0);
+          spu_begin_image(img);
+          { const char* d = getenv("GOWA_PM_DUMP");   /* 03/11: contexto de entrada do PM (comparar LLE x HLE); */
+            if (d && d[0] == '1') spu_register_function(0xA00u, gowa_pm_entrada); }   /* antes: o 1º registro vence */
+          gowapm_0079E500_spu_recomp_register();
+          spu_begin_image(0);
           spu_overlay_register_region(g_gowa_pm_ea, 0x3000u, img);
           fprintf(stderr, "[gowa] policy module WWS nativo (imagem %d, região 0x%X)\n", img, g_gowa_pm_ea);
       } }
@@ -1458,6 +1517,8 @@ extern "C" void gowa_offline_register(void)
         CreateThread(NULL, 0, cntwatch_thread, NULL, 0, NULL);
     if (getenv("GOWA_WATCH"))
         CreateThread(NULL, 0, watch_thread, NULL, 0, NULL);
+    if (getenv("GOWA_DUMP_EA"))
+        CreateThread(NULL, 0, dump_ea_thread, NULL, 0, NULL);
     if (getenv("GOWA_PEEK"))
         CreateThread(NULL, 0, peek_thread, NULL, 0, NULL);
     if (getenv("GOWA_SPU_SAMPLER"))

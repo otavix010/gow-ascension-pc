@@ -20,11 +20,9 @@ import subprocess
 import sys
 
 R = RAIZ
-TOOLS = os.path.join(R, 'ps3recomp', 'tools')
-sys.path.insert(0, TOOLS)
-from wrap_spu_elf import wrap  # noqa: E402
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))   # 06/11: o tradutor das SPUs vem compilado no pacote da engine
+from otx_ponte import embrulha, comando_lifter  # noqa: E402
 
-LIFTER = os.path.join(TOOLS, 'spu_lifter.py')
 EA, SIZE, BASE = 0x30021480, 0x2200, 0x0A00
 IMG, IMG_BASE = os.path.join(R, 'fw', 'lle', 'libsre_image.bin'), 0x30000000
 NOME = f'gowass_{EA:08X}'
@@ -38,8 +36,8 @@ def main():
     raw = d[EA - IMG_BASE:EA - IMG_BASE + SIZE]
     tmp = os.path.join(R, 'port', 'spu', '_tmp_gowass.elf')
     with open(tmp, 'wb') as f:
-        f.write(wrap(raw, base=BASE, entry=BASE))
-    cmd = [sys.executable, LIFTER, '--auto-functions', tmp, '--base', hex(BASE),
+        f.write(embrulha(raw, BASE, BASE))
+    cmd = comando_lifter() + ['--auto-functions', tmp, '--base', hex(BASE),
            '--symbol-prefix', NOME + '_', '-o', SAIDA,
            '--source-name', 'spu_recomp.c', '--header-name', 'spu_recomp.h',
            '--extra-funcs', ','.join(hex(x) for x in EXTRA),

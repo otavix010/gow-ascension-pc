@@ -55,27 +55,29 @@ if hasattr(sys.stdout, 'reconfigure'):
 AMB = dict(os.environ, PYTHONIOENCODING='utf-8')
 
 
-def _estado(args):
-    """(data, tamanho) do spu_recomp.c de cada pasta dos argumentos (o que um passe grava)."""
-    est = {}
+def _marcas(args):
+    """data e tamanho do spu_recomp.c de cada pasta entre os argumentos (o que um passe grava)"""
+    marcas = {}
     for a in args:
         c = Path(str(a)) / 'spu_recomp.c'
         if c.is_file():
             st = c.stat()
-            est[c] = (st.st_mtime_ns, st.st_size)
-    return est
+            marcas[c] = (st.st_mtime_ns, st.st_size)
+    return marcas
 
 
 def py(*args):
     cmd = [sys.executable, str(S / args[0])] + [str(a) for a in args[1:]]
     print('>', ' '.join(str(a) for a in args), flush=True)
-    # report 505: o Python caiu com 0xC0000005 num passe trivial (0,06 s, nada a mudar). É o processo que
-    # caiu (memória instável, antivírus), não o script: com os arquivos ainda intactos, roda de novo
+    # report 505 (31/10): o Python caiu com 0xC0000005 num passe trivial (0,06 s, nada a mudar) -- foi o processo
+    # (memória instável, antivírus), não o script. Se caiu com uma exceção do Windows (0xC...) e os arquivos do passe
+    # seguem intactos, roda de novo, até 3 vezes; se gravou algo, a falha vale.
     for tentativa in range(3):
-        antes = _estado(args[1:])
-        r = subprocess.run(cmd, cwd=str(RAIZ), capture_output=True, text=True, encoding='utf-8', errors='replace', env=AMB)
+        antes = _marcas(args[1:])
+        r = subprocess.run(cmd, cwd=str(RAIZ), capture_output=True, text=True, encoding='utf-8', errors='replace',
+                           env=AMB)
         caiu = (r.returncode & 0xFFFFFFFF) >= 0xC0000000
-        if not caiu or tentativa == 2 or _estado(args[1:]) != antes:
+        if not caiu or tentativa == 2 or _marcas(args[1:]) != antes:
             break
         print(f'   o Python caiu (código 0x{r.returncode & 0xFFFFFFFF:08X}) sem gravar nada: tentando de novo', flush=True)
     saida = (r.stdout + r.stderr).strip().split('\n')
@@ -162,9 +164,9 @@ def main():
     # só é reconhecido na forma já promovida, por isso vem por último (19 módulos)
     for m in jm + pl + [PM]:
         py('divide_pic.py', SPU / m, '--aplicar')
-    # 03/11 (som picotado em CPU fraca): saltos indiretos de cauda dos módulos de áudio que caem numa função do
-    # próprio módulo vão direto (scripts/ib_local.py; GOWA_IBL=0 no jogo desliga). Depois do divide_pic, para as
-    # funções que ele cria entrarem na tabela.
+    # 03/11 (áudio picotado em CPU fraca): saltos indiretos de cauda dos módulos de áudio que caem numa função
+    # do próprio módulo vão direto (scripts/ib_local.py; GOWA_IBL=0 no jogo desliga). Depois do divide_pic,
+    # para as funções que ele cria entrarem na tabela.
     for m in IBL_MODULOS:
         if (SPU / m / 'spu_recomp.c').exists():
             py('ib_local.py', SPU / m)

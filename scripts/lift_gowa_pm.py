@@ -19,11 +19,9 @@ import subprocess
 import sys
 
 R = RAIZ
-TOOLS = os.path.join(R, 'ps3recomp', 'tools')
-sys.path.insert(0, TOOLS)
-from wrap_spu_elf import wrap  # noqa: E402
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))   # 06/11: o tradutor das SPUs vem compilado no pacote da engine
+from otx_ponte import embrulha, comando_lifter  # noqa: E402
 
-LIFTER = os.path.join(TOOLS, 'spu_lifter.py')
 EA, SIZE, BASE = 0x0079E500, 0x3000, 0x0A00
 ELF = os.path.join(R, 'jogo', 'GOWA.elf')
 NOME = f'gowapm_{EA:08X}'
@@ -48,8 +46,8 @@ def main():
     raw = d[off:off + SIZE]
     tmp = os.path.join(R, 'port', 'spu', '_tmp_gowapm.elf')
     with open(tmp, 'wb') as f:
-        f.write(wrap(raw, base=BASE, entry=BASE))
-    cmd = [sys.executable, LIFTER, '--auto-functions', tmp, '--base', hex(BASE),
+        f.write(embrulha(raw, BASE, BASE))
+    cmd = comando_lifter() + ['--auto-functions', tmp, '--base', hex(BASE),
            '--symbol-prefix', NOME + '_', '-o', SAIDA,
            '--source-name', 'spu_recomp.c', '--header-name', 'spu_recomp.h',
            # 21/10: + 0x3378 (o tradutor não a descobre: só desvio indireto); rodava

@@ -21,33 +21,31 @@ endif()
 # ---------------------------------------------------------------------------
 # The two directories this project is built from
 # ---------------------------------------------------------------------------
-# PS3RECOMP_DIR is the toolkit checkout: include/, runtime/, libs/, tools/.
-# RECOMP_DIR is where the lifter's output for THIS game lives. They are
-# separate on purpose -- a port keeps its generated code in its own tree and
-# points at whatever toolkit checkout it is building against:
+# ENGINE_PACOTE_DIR is the Otavix Engine PS3 package (06/11): the engine comes
+# compiled (lib/, include/, bin/, cmake/), downloaded and checked by gerar.ps1
+# into <port root>/engine. RECOMP_DIR is where the lifter's output for THIS
+# game lives:
 #
 #   cmake -B build -G Ninja \
-#         -DPS3RECOMP_DIR=/path/to/ps3recomp \
+#         -DENGINE_PACOTE_DIR=/path/to/engine \
 #         -DRECOMP_DIR=/path/to/my_game/recompiled
 #
-if(NOT DEFINED PS3RECOMP_DIR)
-    # Default: this project is still sitting inside ps3recomp/templates/project/
-    get_filename_component(PS3RECOMP_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../" ABSOLUTE)
-endif()
-get_filename_component(PS3RECOMP_DIR "${PS3RECOMP_DIR}" ABSOLUTE)
+set(ENGINE_PACOTE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../engine" CACHE PATH
+    "Otavix Engine PS3 package (extracted): lib/, include/, cmake/")
+get_filename_component(ENGINE_PACOTE_DIR "${ENGINE_PACOTE_DIR}" ABSOLUTE)
 
 set(RECOMP_DIR "${CMAKE_CURRENT_SOURCE_DIR}/recompiled" CACHE PATH
     "Directory holding the lifter's output: ppu_recomp.h and the lifted sources")
 get_filename_component(RECOMP_DIR "${RECOMP_DIR}" ABSOLUTE)
 
-message(STATUS "ps3recomp SDK:   ${PS3RECOMP_DIR}")
+message(STATUS "Engine package:  ${ENGINE_PACOTE_DIR}")
 message(STATUS "Lifted output:   ${RECOMP_DIR}")
 
 if(NOT EXISTS "${RECOMP_DIR}/ppu_recomp.h")
     message(FATAL_ERROR
         "No ppu_recomp.h in ${RECOMP_DIR}.\n"
         "That header and the lifted sources beside it are what "
-        "tools/ppu_lifter.py writes. Run the lifter, drop its output there, "
+        "the translator (engine bin/ppu_traduz.exe) writes. Run gerar.ps1, drop its output there, "
         "or point -DRECOMP_DIR= at wherever it already is.")
 endif()
 
@@ -67,24 +65,18 @@ list(LENGTH RECOMP_SOURCES RECOMP_SOURCE_COUNT)
 message(STATUS "Lifted sources:  ${RECOMP_SOURCE_COUNT} file(s)")
 
 # ---------------------------------------------------------------------------
-# ps3recomp runtime library
+# Otavix Engine PS3 (compiled package)
 # ---------------------------------------------------------------------------
-# Built from source as a subdirectory rather than imported as a prebuilt
-# archive. A static library carries none of its own link requirements, so an
-# imported one arrives without SDL2, pthreads, the Metal frameworks or the
-# Winsock/XInput imports -- the link then fails on every platform for a
-# different reason. add_subdirectory hands all of that over with the target.
-add_subdirectory("${PS3RECOMP_DIR}" "${CMAKE_BINARY_DIR}/ps3recomp_sdk"
-                 EXCLUDE_FROM_ALL)
-
-# GOWA_RUNTIME_FAST: the runtime (SPU drain loop, interpreter, MFC, RSX) for
-# x86-64-v3 and without the /GS stack cookie. The drain loop calls several
-# small runtime functions on every trampoline step, and with nothing to do
-# their cost was the prologue and the cookie check (yz_lockstep_tick's hot
-# instruction was the cookie compare). Same CPU floor as GOWA_SPU_X86_V3.
-option(GOWA_RUNTIME_FAST "Runtime for x86-64-v3, without /GS" ON)
-if(GOWA_RUNTIME_FAST AND MSVC AND CMAKE_C_COMPILER_ID MATCHES "Clang")
-    target_compile_options(ps3recomp_runtime PRIVATE /GS- /clang:-march=x86-64-v3)
+# The runtime, the PPU boot scaffold (runtime/ppu/*.cpp, built against this
+# game's ppu_recomp.h) and the SPU musttail dispatcher come prebuilt in the
+# package, with the options this file used to give them: x86-64-v3 without /GS
+# (the old GOWA_RUNTIME_FAST), FFmpeg loaded at run time, and two versions --
+# portatil (SPU_SX_RZ, GOWA_SPU_RZ=ON) and nativa. The package's cmake file
+# carries the link requirements (Winsock, XInput, COM, bcrypt).
+if(NOT EXISTS "${ENGINE_PACOTE_DIR}/cmake/otavix-engine.cmake")
+    message(FATAL_ERROR
+        "No Otavix Engine PS3 package in ${ENGINE_PACOTE_DIR} (cmake/otavix-engine.cmake). "
+        "gerar.ps1 downloads and checks it into <port root>/engine; or pass -DENGINE_PACOTE_DIR=.")
 endif()
 
 # GOWA_PGO: profile-guided optimization (clang) for the runtime and the lifted
@@ -101,55 +93,25 @@ if(GOWA_PGO STREQUAL "gen")
 elseif(GOWA_PGO STREQUAL "use")
     set(GOWA_PGO_FLAGS "/clang:-fprofile-instr-use=${GOWA_PGO_PROFILE};/clang:-Wno-profile-instr-unprofiled;/clang:-Wno-profile-instr-out-of-date;/clang:-Wno-backend-plugin")
 endif()
-if(GOWA_PGO_FLAGS)
-    target_compile_options(ps3recomp_runtime PRIVATE ${GOWA_PGO_FLAGS})
-endif()
+# (the runtime is prebuilt now: GOWA_PGO reaches the lifted SPU code only)
 
 # ---------------------------------------------------------------------------
 # The HLE NID table
 # ---------------------------------------------------------------------------
 # Maps each firmware import NID onto the handler in the runtime that answers
-# it. A port may keep a hand-curated one beside its lift; otherwise generate
-# the canonical every-module table, which is what the toolkit's own boot
-# harness uses.
-if(EXISTS "${RECOMP_DIR}/ppu_hle_nids.cpp")
-    set(HLE_NID_TABLE "${RECOMP_DIR}/ppu_hle_nids.cpp")
-    message(STATUS "HLE NID table:   ${HLE_NID_TABLE}")
-else()
-    find_package(Python3 COMPONENTS Interpreter REQUIRED)
-    set(HLE_NID_TABLE "${CMAKE_CURRENT_BINARY_DIR}/ppu_hle_nids.cpp")
-    # The generator discovers handlers from library definitions. Rebuild when
-    # an existing module changes, and reconfigure when a new module is added.
-    file(GLOB_RECURSE HLE_NID_SOURCES CONFIGURE_DEPENDS
-        "${PS3RECOMP_DIR}/libs/*.c")
-    # A removed input cannot make the output older than a remaining dependency.
-    # Track the list itself so deletions also remove stale handler references.
-    set(HLE_NID_SOURCE_LIST "${CMAKE_CURRENT_BINARY_DIR}/hle_nid_sources.txt")
-    file(GENERATE OUTPUT "${HLE_NID_SOURCE_LIST}" CONTENT "${HLE_NID_SOURCES}\n")
-    add_custom_command(
-        OUTPUT "${HLE_NID_TABLE}"
-        COMMAND "${Python3_EXECUTABLE}"
-                "${PS3RECOMP_DIR}/tools/gen_hle_nids.py"
-                --out "${HLE_NID_TABLE}" --all
-        DEPENDS "${PS3RECOMP_DIR}/tools/gen_hle_nids.py"
-                "${PS3RECOMP_DIR}/tools/nid_database.py"
-                ${HLE_NID_SOURCES} "${HLE_NID_SOURCE_LIST}"
-        COMMENT "Generating the HLE NID -> handler table")
-    message(STATUS "HLE NID table:   generated (every module)")
+# it: written beside the lift by gerar.ps1 (engine bin/ppu_nids.exe --all).
+if(NOT EXISTS "${RECOMP_DIR}/ppu_hle_nids.cpp")
+    message(FATAL_ERROR "No ppu_hle_nids.cpp in ${RECOMP_DIR} (gerar.ps1, step 4_ppu, writes it).")
 endif()
+set(HLE_NID_TABLE "${RECOMP_DIR}/ppu_hle_nids.cpp")
+message(STATUS "HLE NID table:   ${HLE_NID_TABLE}")
 
 # ---------------------------------------------------------------------------
 # The game executable
 # ---------------------------------------------------------------------------
-# The PPU boot scaffold is compiled here rather than taken from the runtime
-# library: every one of these files #includes the lifter's per-game
-# ppu_recomp.h, so they can only be built against a particular lift.
-set(PS3RECOMP_SCAFFOLD
-    "${PS3RECOMP_DIR}/runtime/ppu/ppu_loader.cpp"
-    "${PS3RECOMP_DIR}/runtime/ppu/ppu_hle.cpp"
-    "${PS3RECOMP_DIR}/runtime/ppu/ppu_fs.cpp"
-    "${PS3RECOMP_DIR}/runtime/ppu/ppu_sysprx.cpp"
-)
+# The PPU boot scaffold (runtime/ppu/*.cpp) comes compiled in the engine
+# package, against this game's ppu_recomp.h (otavix_engine_liga checks it is
+# the same one).
 
 # ---------------------------------------------------------------------------
 # Lifted SPU images (optional)
@@ -170,22 +132,15 @@ set(PORT_SPU_INPUTS "" CACHE STRING
     "Input files to scan for all embedded SPU ELF programs (semicolon-separated decrypted ELF/PRX/data paths)")
 set(SPU_SOURCES "")
 if(PORT_ENABLE_SPU AND PORT_SPU_INPUTS)
-    include("${PS3RECOMP_DIR}/cmake/PS3RecompSPU.cmake")
-    ps3recomp_generate_spu("${CMAKE_CURRENT_BINARY_DIR}/generated_spu" ${PORT_SPU_INPUTS})
-    list(APPEND SPU_SOURCES ${SPU_GENERATED_SOURCES}
-         "${PS3RECOMP_DIR}/runtime/spu/spu_dispatch_mt.c")
+    message(FATAL_ERROR "PORT_SPU_INPUTS: the SPU images are lifted by gerar.ps1 (step 5_spu), not by CMake")
 elseif(PORT_ENABLE_SPU)
     file(GLOB SPU_LIFTED CONFIGURE_DEPENDS "${SPU_DIR}/*/spu_recomp.c")
     if(SPU_LIFTED)
         list(LENGTH SPU_LIFTED SPU_IMAGE_COUNT)
         message(STATUS "Lifted SPU:      ${SPU_IMAGE_COUNT} image(s)")
-        # The musttail indirect-branch fast path. Excluded from the runtime
-        # library on purpose (see the SDK root CMakeLists): it must be built
-        # here, by clang, or the tail call degrades to a plain call and a guest
-        # loop that branches indirectly walks the thread stack off its guard
-        # page a few thousand iterations in.
-        list(APPEND SPU_SOURCES ${SPU_LIFTED}
-             "${PS3RECOMP_DIR}/runtime/spu/spu_dispatch_mt.c")
+        # The musttail indirect-branch fast path (spu_dispatch_mt.c) comes
+        # compiled in the engine package, by clang, with the SPU options.
+        list(APPEND SPU_SOURCES ${SPU_LIFTED})
         # Generated beside the lift; each is present only once its generator
         # has been run, so each is included only if it is actually here.
         foreach(gen IN ITEMS spu_workloads.c jobmods_register.c taskset_policy_bytes.c)
@@ -225,7 +180,6 @@ add_executable(${PROJECT_NAME}
     otavix_osd.c                       # o medidor padrão dos ports Otavix (F10)
     otavix_legenda.c                   # a legenda das teclas (F1)
     ${LLE_SOURCES}
-    ${PS3RECOMP_SCAFFOLD}
     ${HLE_NID_TABLE}
     ${RECOMP_SOURCES}
     ${SPU_SOURCES}
@@ -267,8 +221,11 @@ endif()
 option(GOWA_SPU_RZ "SPU float ops with MXCSR round-toward-zero (builds without AVX-512)" OFF)
 if(GOWA_SPU_RZ)
     set(GOWA_SPU_DAZ_DEF "${GOWA_SPU_DAZ_DEF};SPU_SX_RZ")
-    target_compile_definitions(ps3recomp_runtime PRIVATE SPU_SX_RZ)
+    set(ENGINE_VARIANTE portatil)   # the engine package's runtime built with SPU_SX_RZ
+else()
+    set(ENGINE_VARIANTE nativa)
 endif()
+include("${ENGINE_PACOTE_DIR}/cmake/otavix-engine.cmake")
 option(GOWA_SPU_NOFLUSH "Measurement only: lifted SPU float ops without the +0 flush" OFF)
 if(GOWA_SPU_NOFLUSH)
     set(GOWA_SPU_DAZ_DEF "${GOWA_SPU_DAZ_DEF};SPU_SX_NOFLUSH")
@@ -289,7 +246,7 @@ if(GOWA_LS_CONST_CHECK)
 endif()
 if(SPU_SOURCES)
     set_source_files_properties(${SPU_SOURCES} PROPERTIES
-        INCLUDE_DIRECTORIES "${PS3RECOMP_DIR}/runtime/spu"
+        INCLUDE_DIRECTORIES "${ENGINE_SPU_INCLUDE_DIR}"
         COMPILE_DEFINITIONS "SPU_USE_DISPATCH_MT;SPU_LS_NO_PROBES;SPU_LS_DIRECT${GOWA_SPU_DAZ_DEF}")
     if(NOT MSVC OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
         # GOWA: -msse4.1 so spu_helpers.h takes its pshufb spu_shufb (and the
@@ -332,20 +289,12 @@ endif()
 
 target_include_directories(${PROJECT_NAME} PRIVATE
     "${RECOMP_DIR}"                            # the generated ppu_recomp.h
-    "${PS3RECOMP_DIR}/include"
-    "${PS3RECOMP_DIR}/runtime/ppu"
-    "${PS3RECOMP_DIR}/runtime/spu"
-    "${PS3RECOMP_DIR}/runtime/memory"
-    "${PS3RECOMP_DIR}/runtime/syscalls"
-    "${PS3RECOMP_DIR}/runtime/platform"        # win32_compat.h and friends
-    "${PS3RECOMP_DIR}/libs/video"
-    "${PS3RECOMP_DIR}/runtime/prx"             # prx_loader.h (LLE da libsre)
+    ${ENGINE_INCLUDE_DIRS}                     # the engine package's headers (include, runtime/*, libs/video)
     "${CMAKE_CURRENT_SOURCE_DIR}"
 )
 
-target_link_libraries(${PROJECT_NAME} PRIVATE
-    ps3recomp_runtime
-)
+# the engine: runtime, PPU scaffold (whole), SPU dispatcher, and their Windows imports
+otavix_engine_liga(${PROJECT_NAME} "${RECOMP_DIR}")
 if(GOWA_PGO STREQUAL "gen")
     # pgo_getenv.c: the profile runtime's getenv, so the CRT member that also
     # defines __imp_getenv (already ours, boot_main_gowa.cpp) is not linked.

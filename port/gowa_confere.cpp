@@ -65,12 +65,15 @@ int s_img = -1;
 conf_fn s_velha;
 std::string s_dir = "out/confere";
 volatile LONG s_vistos, s_gravados, s_entradas, s_perdidos;
+/* 02/11: GOWA_CONF_SO=7040 grava só os jobs que passam pela luz da 0x7040 (raros: a amostra 1 a cada k não os pega) */
+const bool s_so_7040 = [] { const char* e = getenv("GOWA_CONF_SO"); return e && !strcmp(e, "7040"); }();
 
 struct Rec {
     spu_context* ctx;
     std::vector<uint8_t> buf;
     uint32_t nev = 0, flags = 0;
     size_t ultimo_getllar = (size_t)-1;
+    bool marca = false;   /* GOWA_CONF_SO=7040: o job passou pela luz da 0x7040 */
 };
 thread_local Rec* t_rec;
 
@@ -138,6 +141,7 @@ bool drena_ate(spu_context* ctx, uint32_t link, Rec* r, uint32_t parar = 0)
 void fecha(Rec* rp, spu_context* ctx, uint32_t pend)
 {
     Rec& r = *rp;
+    if (s_so_7040 && !r.marca) return;
     Cab c;
     memcpy(&c, &r.buf[0], sizeof c);
     static const char fim[4] = {'F', 'I', 'M', '!'};
@@ -618,6 +622,13 @@ extern "C" uint32_t gowa_conf_luz(void* vctx, uint32_t g)
     return evs[rp->i_luz++].e.ea;
 }
 
+/* gowa_offline.cpp, gowa_luz_gpu: o segmento ficou na SPU pela 0x7040 */
+extern "C" void gowa_conf_marca_7040(void* vctx)
+{
+    Rec* r = t_rec;
+    if (g_gowa_conf_on == 1 && r && r->ctx == (spu_context*)vctx) r->marca = true;
+}
+
 /* spu_channels.c, antes de cada salto não local de uma SPU (reinício da pilha do guest, parada) */
 extern "C" void gowa_conf_salto(void* vctx)
 {
@@ -760,7 +771,9 @@ DWORD WINAPI perf_jogo_laco(LPVOID arg)
      * _outros.txt se misturam com as que só esperam: ../../out/perfil_jogo_t<tid>.txt */
     for (const auto& x : uso) {
         const Alvo* a = x.second;
-        if (a->papel != 2 || x.first < 20.0) continue;
+        /* 03/11: as SPUs também (a SPU 5 é a do som: o workload dele ocupa 47% dela, mas o código dos jobs de
+         * áudio é só ~3% -- o resto é custo por job do runtime, a separar por thread) */
+        if ((a->papel != 2 && a->papel != 0) || x.first < 20.0) continue;
         const uint16_t ia = (uint16_t)(a - alvos.data());
         std::unordered_map<uint32_t, uint32_t> hist; size_t n = 0;
         for (const AmostraJogo& s : am) {

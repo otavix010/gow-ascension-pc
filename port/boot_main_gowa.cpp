@@ -46,6 +46,12 @@
 #include <stdlib.h>
 
 extern "C" void gowa_watch_dump(void);   /* spu_channels.c: GOWA_WATCH_A03 */
+extern "C" uint32_t ppu_hle_inject_base;   /* vm.h: base da janela dos rótulos da RSX */
+extern "C" void cellGcm_estado(char* b, size_t n);   /* cellGcmSys.c: estado do FIFO da RSX */
+/* GOWA 03/11: batimento do laço da RSX (apresentação + FIFO), para o despejo da trava dizer se ele
+ * empacou no Present (fase 1/3) ou no FIFO (2/4) ou se segue vivo (0 = esperando, ms recente). */
+static volatile int s_laco_fase;
+static volatile ULONGLONG s_laco_ms, s_laco_voltas;
 extern "C" void rsx_live_draw_resumo_tela(void);   /* rsx_live_draw.c: [resumo-tela] ao fechar */
 extern "C" {
 uint32_t ppu_load_elf(const char* path);
@@ -415,6 +421,15 @@ extern "C" void* rsx_null_backend_get_hwnd(void);
 extern "C" void  rsx_null_backend_suppress_present(int on);
 extern "C" uint32_t cellGcmResolveLocated(int local, uint32_t offset);
 extern "C" uint32_t cellGcmResolveIO(uint32_t offset);
+/* OTX (05/11): régua de imagem da RSX (ps3recomp/libs/video/rsx_grava.c) --
+ * OTX_RSX_GRAVA grava quadros na entrada do renderizador, OTX_RSX_REPRODUZ os
+ * reproduz no lugar do jogo */
+typedef const uint8_t* (*rsx_grava_resolve_fn)(void*, uint32_t, uint32_t, uint32_t);
+extern "C" void rsx_grava_inicia(void);
+extern "C" int  rsx_grava_reproduz(const char* arg);
+extern "C" rsx_grava_resolve_fn rsx_grava_resolvedor(rsx_grava_resolve_fn original);
+extern "C" void rsx_grava_apresentou(uint32_t buffer_id);
+extern "C" volatile int g_rsx_grava_on;
 
 static int s_rsx_live = 0;   /* live engine selected AND up */
 
@@ -459,7 +474,11 @@ static void rsx_present_frame(void)
      * cellGcmGetCurrentDisplayBufferId() is set by cellGcmSetFlipCommand,
      * which the FIFO walker calls on this same thread before setting the
      * pending flag we are responding to, so it is current here. */
-    if (s_rsx_live) rsx_live_draw_present(cellGcmGetCurrentDisplayBufferId());
+    if (s_rsx_live) {
+        const uint32_t buf = cellGcmGetCurrentDisplayBufferId();
+        rsx_live_draw_present(buf);
+        if (g_rsx_grava_on) rsx_grava_apresentou(buf);   /* OTX: fim de um quadro da régua */
+    }
     else            rsx_backend_present();   /* platform backend: D3D12 / Metal / null */
 }
 static int rsx_pump_messages(void)
@@ -1771,7 +1790,7 @@ static DWORD WINAPI vblank_ticker(LPVOID)
     if (rsx_live_draw_enabled()) {
         rsx_ok = (rsx_null_backend_init(rsx_w, rsx_h, _title) == 0);
         if (rsx_ok && rsx_live_draw_init(rsx_null_backend_get_hwnd(), rsx_w, rsx_h,
-                                         rsx_live_guest_ptr, nullptr) == 0) {
+                                         rsx_grava_resolvedor(rsx_live_guest_ptr), nullptr) == 0) {
             s_rsx_live = 1;
             gowa_icone_janela((HWND)rsx_null_backend_get_hwnd());   /* 25/10: ícone na barra de tarefas */
             rsx_null_backend_suppress_present(1);
@@ -1870,6 +1889,7 @@ static DWORD WINAPI vblank_ticker(LPVOID)
             {
                 if (rsx_ok && cellGcm_take_flip_pending()) {
                     present_src_note(0);
+                    s_laco_fase = 1; s_laco_ms = GetTickCount64();
                     present_guest_frame();
                     last_flip = cellGcm_flip_request_count();
                 }
@@ -1878,7 +1898,7 @@ static DWORD WINAPI vblank_ticker(LPVOID)
              * labels (e.g. @0x03000410) that the game's per-frame logic blocks on.
              * Doing it here (not after present) keeps those fences advancing at 60Hz
              * even when present() throttles on a hidden/occluded window. */
-            if (rsx_ok) cellGcm_rsx_process_fifo();
+            if (rsx_ok) { s_laco_fase = 2; s_laco_ms = GetTickCount64(); cellGcm_rsx_process_fifo(); }
             next_tick += 16;                 /* ~60 Hz */
             fired++;
         }
@@ -1890,10 +1910,13 @@ static DWORD WINAPI vblank_ticker(LPVOID)
         if (rsx_ok) {
             if (cellGcm_take_flip_pending()) {
                 present_src_note(1);
+                s_laco_fase = 3; s_laco_ms = GetTickCount64();
                 present_guest_frame();
                 last_flip = cellGcm_flip_request_count();
             }
+            s_laco_fase = 4; s_laco_ms = GetTickCount64();
             cellGcm_rsx_process_fifo();
+            s_laco_fase = 0; s_laco_ms = GetTickCount64(); s_laco_voltas++;
         }
         /* YDKJ_INJECT_Q3: the main thread polls q3 (load/state-complete) each frame but
          * it's never posted (producer signals a condvar, never enqueues). Inject a q3
@@ -2039,6 +2062,25 @@ static void dump_threads(const char* label, HMODULE self)
         dbg_printf(" | 3BE0");
         for (uint32_t i = 0; i < 8; i++) dbg_printf(" %08X", be32(0xA03BE0u + 4u * i));
         dbg_printf("\n");
+        /* 02/11: a trava rara da carga / do menu: a thread principal no laço de sys_timer_usleep(30) da
+         * func_0039C640 (ou 0x39D824) esperando o ref (controle + 8, ponteiro em 0xA1AD04) alcançar o quadro
+         * em 0x9B4668 (+ folga), com a RSX ociosa; o mesmo laço zera o rótulo 0x4F0 (0xA1AC94 + 0x4F0 com o
+         * índice em 0xA1AC98), que um ACQUIRE da RSX espera em 0. */
+        { const uint32_t ptr = be32(0xA1AC94u), idx = be32(0xA1AC98u);
+          dbg_printf("[WATCHDOG] espera do ref: A1AC80");
+          for (uint32_t i = 0; i < 12; i++) dbg_printf(" %08X", be32(0xA1AC80u + 4u * i));
+          dbg_printf(" | rótulos %08X idx %u | controle %08X | 9B4668 %08X 83CBD8 %08X\n", ptr, idx, be32(0xA1AD04u),
+                     be32(0x9B4668u), be32(0x83CBD8u));
+          if (ppu_hle_inject_base) {
+              dbg_printf("[WATCHDOG] rótulos 0x400..0x5F0:");
+              for (uint32_t o = 0x400u; o < 0x600u; o += 0x10u) dbg_printf(" %X=%08X", o, be32(ppu_hle_inject_base + o));
+              dbg_printf("\n");
+          }
+          char est[768]; cellGcm_estado(est, sizeof est);
+          dbg_printf("[WATCHDOG] FIFO: %s\n", est);
+          dbg_printf("[WATCHDOG] laço da RSX: fase %d (0 espera, 1/3 Present, 2/4 FIFO) há %llu ms, voltas %llu\n",
+                     (int)s_laco_fase, (unsigned long long)(GetTickCount64() - s_laco_ms),
+                     (unsigned long long)s_laco_voltas); }
         gowa_watch_dump();
     }
     dbg_printf("[WATCHDOG] guest threads, by guest lr:\n");
@@ -2952,6 +2994,14 @@ int main(int argc, char** argv)
     ppu_vm_size = 0xE0000000u;
 #endif
     if (!vm_base) { printf("vm alloc failed\n"); return 1; }
+
+    /* OTX_RSX_REPRODUZ=<pasta>[;<saída>]: reproduz os quadros gravados da RSX
+     * (régua de imagem, rsx_grava.c) e sai -- sem o ELF, o disco nem as threads
+     * do jogo. OTX_RSX_GRAVA arma a gravação antes de o jogo rodar. */
+    if (const char* rr = getenv("OTX_RSX_REPRODUZ")) {
+        return rsx_grava_reproduz(rr);
+    }
+    rsx_grava_inicia();
 
     uint32_t entry = ppu_load_elf(elf);
     if (!entry) { printf("load failed\n"); return 1; }

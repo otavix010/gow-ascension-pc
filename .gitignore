@@ -45,6 +45,9 @@ saves/
 
 # ferramentas e fontes de terceiros baixados localmente
 dl/
+# a Otavix Engine PS3 compilada (o pacote que o gerar.ps1 baixa e confere)
+engine/
+engine.novo/
 ghidra-proj/
 rpcs3/
 ref-rpcs3/

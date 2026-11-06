@@ -26,7 +26,7 @@ Get-ChildItem (Join-Path $R 'port\spu') -Force -ErrorAction SilentlyContinue |
     Where-Object { $_.Name -ne 'gowanat_tspm' } | Remove-Item -Recurse -Force
 $sw = Join-Path $R 'out\spu_workloads'
 New-Item -ItemType Directory -Force $sw | Out-Null
-Rodar 'build_spu_workloads' @("$R\ps3recomp\tools\build_spu_workloads.py", '--input', "$R\jogo\GOWA.elf", '--input', "$R\fw\libsre.prx",
+Rodar 'build_spu_workloads' @("$s\otx\spu\workloads.py",'--input', "$R\jogo\GOWA.elf", '--input', "$R\fw\libsre.prx",
                               '--lifted', $sw, '--out', "$sw\spu_workloads.c", '--constructor', '--allow-partial')
 cmd /c "robocopy `"$sw`" `"$R\port\spu`" /E /NFL /NDL /NJH /NJS /NP" | Out-Null
 if ($LASTEXITCODE -ge 8) { throw "falhou a cópia de $sw ($LASTEXITCODE)" }

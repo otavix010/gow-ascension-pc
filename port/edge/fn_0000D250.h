@@ -61,7 +61,7 @@ static inline void d250_exato(const d250_k* k, uint32_t x, uint32_t y, uint32_t 
     o[0] = s[0]; o[1] = s[1]; o[2] = cod; o[3] = 0;
 }
 
-static const uint32_t d250_frest_lut[32] = {   /* a do runtime (spu_frest_fraction_lut) */
+static const uint32_t d250_frest_lut[32] = {   /* a do runtime (spu_frest_tab_medida) */
     0x7FFBE0, 0x7F87A6, 0x70EF72, 0x708B40, 0x638B12, 0x633AEA, 0x5792C4, 0x574AA0,
     0x4CCA7E, 0x4C9262, 0x430A44, 0x42D62A, 0x3A2E12, 0x39FDFA, 0x3215E4, 0x31F1D2,
     0x2AA9BE, 0x2A85AC, 0x23D59A, 0x23BD8E, 0x1D8576, 0x1D8576, 0x17AD5A, 0x17AD5A,

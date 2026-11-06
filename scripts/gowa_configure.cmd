@@ -7,6 +7,6 @@ set "PATH=C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tool
 cd /d %RAIZ%\port
 cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release ^
   -DCMAKE_C_COMPILER=clang-cl -DCMAKE_CXX_COMPILER=clang-cl ^
-  -DPS3RECOMP_DIR=%RAIZ_F%/ps3recomp ^
+  -DENGINE_PACOTE_DIR=%RAIZ_F%/engine ^
   -DRECOMP_DIR=%RAIZ_F%/port/recompiled %*
 echo exit=%ERRORLEVEL%
