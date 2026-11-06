@@ -4,6 +4,17 @@ O Otavix Launcher mostra este arquivo na página "Novidades" do jogo. Cada atual
 "## <data> · <versão>" e o texto em português (### pt), inglês (### en) e, quando houver, espanhol (### es).
 As mais novas ficam em cima.
 
+## 06/11/2026 · 56378a7
+### pt
+- **Motor novo:** o jogo passa a rodar sobre a Otavix Engine PS3, o nosso motor próprio, com o mesmo desempenho e a mesma imagem da versão anterior; as próximas correções e otimizações já saem sobre ele.
+- **Instalação:** a engine vem pronta num pacote baixado pelo gerador; a primeira atualização refaz a tradução do jogo (alguns minutos a mais, uma vez só). Disco, saves e opções continuam como estão.
+### en
+- **New engine:** the game now runs on the Otavix Engine PS3, our own engine, with the same performance and the same image as the previous version; upcoming fixes and optimizations will be built on it.
+- **Installation:** the engine comes ready in a package downloaded by the generator; the first update redoes the game's translation (a few extra minutes, only once). Disc, saves and options stay as they are.
+### es
+- **Motor nuevo:** el juego pasa a funcionar sobre Otavix Engine PS3, nuestro propio motor, con el mismo rendimiento y la misma imagen que la versión anterior; las próximas correcciones y optimizaciones ya se harán sobre él.
+- **Instalación:** el motor viene listo en un paquete que descarga el generador; la primera actualización rehace la traducción del juego (unos minutos más, una sola vez). El disco, las partidas guardadas y las opciones siguen como están.
+
 ## 06/11/2026 · f5f7dc9
 ### pt
 - **Instalação:** o gerador não deixa mais rodar duas gerações ao mesmo tempo na mesma pasta; a segunda para com um aviso, em vez de travar a primeira.
