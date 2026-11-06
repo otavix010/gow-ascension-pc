@@ -129,6 +129,18 @@ $faltam = @($sis | Where-Object { $noPath -notcontains $_ })
 if ($faltam) { $env:PATH = ($faltam -join ';') + ';' + $env:PATH }
 
 function Msg($t) { Write-Host "[gerar] $t" -ForegroundColor Cyan }
+
+# Report 902 (06/11): duas gerações ao mesmo tempo na mesma pasta brigavam pelos mesmos arquivos (o log
+# da etapa 4 "sendo usado por outro processo"). Uma trava por pasta de instalação: a segunda para logo,
+# com aviso. A trava some sozinha quando o processo termina (mesmo se ele for fechado à força).
+$nomeTrava = 'Local\OtavixGerar_' + [BitConverter]::ToString(
+    [Security.Cryptography.SHA1]::Create().ComputeHash([Text.Encoding]::UTF8.GetBytes($R.ToLowerInvariant()))).Replace('-', '').Substring(0, 16)
+$global:GerarTrava = New-Object Threading.Mutex($false, $nomeTrava)
+$temTrava = $false
+try { $temTrava = $global:GerarTrava.WaitOne(0) } catch [Threading.AbandonedMutexException] { $temTrava = $true }
+if (-not $temTrava) {
+    throw "já existe uma geração deste jogo rodando nesta pasta ($R). Espere ela terminar (ou feche a outra janela da geração) e tente de novo."
+}
 # roda um programa externo sem que o stderr dele vire exceção: no Windows PowerShell 5.1,
 # com ErrorActionPreference = Stop, qualquer linha no stderr de um comando nativo lança
 # (mesmo com 2>$null) antes do teste do $LASTEXITCODE. Quem chama confere o $LASTEXITCODE.
