@@ -1133,8 +1133,13 @@ static void gowa_register_jobmod_lifts(void)
      * traduzido; retraduzidos com lift_gowa_plugins.py --naofolha (spu_link e
      * volta do dreno relocados, funções que chamam o próprio fragmento),
      * GOWA_HOTDIFF sem divergências, A/B abw11 +1,3%. */
+    /* 07/11: DESLIGADO por padrão (GOWA_PLUGINS_W11=1 liga). Com os fragmentos do w11 nativos, a câmera
+     * do Amuleto de Ouroboros (cap. 13, a ponte de Delfos) não voltava ao Kratos depois da 1ª cutscene
+     * (reports 925/931/933): bisseção ao vivo -- tudo nativo trava, só o w11 interpretado não trava, e o
+     * mesmo save no RPCS3 não trava. Interpretados custam quase nada no PC (A/B 59,8 x 59,8 fps) e ~6% no notebook
+     * (13,4 -> 12,6 fps); volta ao nativo quando a corrida PPU x SPU for achada. */
     { const char* e = getenv("GOWA_PLUGINS_W11");
-      if (!(e && e[0] == '0')) {
+      if (e && e[0] == '1') {
           /* GOWA_PLUGINS_W11_FAIXA=a-b: só as entradas [a, b) da tabela (bissecção) */
           size_t fa = 0, fb = (size_t)-1;
           if (const char* fx = getenv("GOWA_PLUGINS_W11_FAIXA")) {
