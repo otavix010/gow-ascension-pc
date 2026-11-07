@@ -4,6 +4,14 @@ O Otavix Launcher mostra este arquivo na página "Novidades" do jogo. Cada atual
 "## <data> · <versão>" e o texto em português (### pt), inglês (### en) e, quando houver, espanhol (### es).
 As mais novas ficam em cima.
 
+## 07/11/2026 · c1fafcd
+### pt
+- **Correção:** no capítulo 13 (ponte de Delfos), a câmera volta a seguir o Kratos depois da cena do Amuleto de Ouroboros, em vez de ficar presa na ponte.
+### en
+- **Fix:** in chapter 13 (the Delphi bridge), the camera follows Kratos again after the Amulet of Uroboros scene, instead of staying stuck on the bridge.
+### es
+- **Corrección:** en el capítulo 13 (el puente de Delfos), la cámara vuelve a seguir a Kratos después de la escena del Amuleto de Uróboros, en lugar de quedarse atascada en el puente.
+
 ## 06/11/2026 · df2fcfc
 ### pt
 - **Diagnóstico:** o log do jogo registra mais detalhes quando o jogo fica parado esperando o processamento do SPURS, para corrigirmos as travadas e as pausas longas em algumas áreas.
