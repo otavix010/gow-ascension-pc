@@ -1355,7 +1355,9 @@ extern "C" void gowa_probe(unsigned int addr, ppu_context* ctx)
      * (rodada 24 do notebook, ibmfc). Parada aqui por mais de <ms>, a PPU reacende o aviso (readyCount = 4)
      * dos três a cada 100 ms: um aviso a mais só faz o PM conferir a fila e voltar. 0 desliga. */
     if (addr == 0x00415914u) {
-        static int s_lim = -1, s_log = -1; static ULONGLONG s_ini, s_ult, s_kick; static long s_n, s_nesta;
+        /* a espera é contada por thread (06/11): mais de uma thread pode passar por este laço */
+        static int s_lim = -1, s_log = -1; static long s_n;
+        static __declspec(thread) ULONGLONG s_ini, s_ult, s_kick; static __declspec(thread) long s_nesta;
         if (s_lim < 0) { const char* e = getenv("GOWA_RESGATE_415914"); s_lim = e ? atoi(e) : 0; }
         /* GOWA_ESPERA_LOG=<ms>: cada espera aqui mais longa que <ms>, ao terminar (com quantos avisos levou) */
         if (s_log < 0) { const char* e = getenv("GOWA_ESPERA_LOG"); s_log = e ? atoi(e) : 0; }
@@ -1363,7 +1365,8 @@ extern "C" void gowa_probe(unsigned int addr, ppu_context* ctx)
             const ULONGLONG now = GetTickCount64();
             if (now - s_ult > 50) {   /* espera nova */
                 if (s_log > 0 && s_ult && s_ult - s_ini >= (ULONGLONG)s_log)
-                    fprintf(stderr, "[espera] 0x415914 durou %llu ms (%ld avisos)\n", (unsigned long long)(s_ult - s_ini), s_nesta);
+                    fprintf(stderr, "[espera] 0x415914 thread %lu durou %llu ms (%ld avisos)\n", GetCurrentThreadId(),
+                            (unsigned long long)(s_ult - s_ini), s_nesta);
                 s_ini = now; s_kick = 0; s_nesta = 0;
             }
             s_ult = now;
@@ -1380,8 +1383,16 @@ extern "C" void gowa_probe(unsigned int addr, ppu_context* ctx)
                     }
                 }
                 ctx->reserve_addr = 0;
-                fprintf(stderr, "[resgate] 0x415914 parada há %llu ms (contadores %08X %08X %08X): aviso aos wids 19-21 (%ld)\n",
-                        (unsigned long long)(now - s_ini), vm_read32(0xA03240u), vm_read32(0xA03244u), vm_read32(0xA03248u), ++s_n);
+                /* 06/11 (reports 894/897/930): numa parada longa o log diz o estado da corrente -- a thread, os 3
+                 * contadores, o compartilhado 0xA03224 (dos jobs do wid 18), os readyCount dos wids 0-31 (bytes
+                 * 0x00-0x1F da linha) e a contenção (bytes 0x20+n: nibble baixo = SPUs no wid n, alto = no wid
+                 * 16+n). Pronto e sem SPU = as SPUs estão noutro workload. */
+                fprintf(stderr, "[resgate] 0x415914 thread %lu parada há %llu ms (contadores %08X %08X %08X, A03224 %08X, ready0-15 %08X%08X%08X%08X, ready16-31 %08X%08X%08X%08X, contencao %08X%08X%08X%08X): aviso aos wids 19-21 (%ld)\n",
+                        GetCurrentThreadId(), (unsigned long long)(now - s_ini), vm_read32(0xA03240u), vm_read32(0xA03244u),
+                        vm_read32(0xA03248u), vm_read32(0xA03224u), vm_read32(linha), vm_read32(linha + 0x4u),
+                        vm_read32(linha + 0x8u), vm_read32(linha + 0xCu), vm_read32(linha + 0x10u), vm_read32(linha + 0x14u),
+                        vm_read32(linha + 0x18u), vm_read32(linha + 0x1Cu), vm_read32(linha + 0x20u), vm_read32(linha + 0x24u),
+                        vm_read32(linha + 0x28u), vm_read32(linha + 0x2Cu), ++s_n);
             }
         }
     }
