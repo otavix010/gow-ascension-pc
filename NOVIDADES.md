@@ -4,6 +4,14 @@ O Otavix Launcher mostra este arquivo na página "Novidades" do jogo. Cada atual
 "## <data> · <versão>" e o texto em português (### pt), inglês (### en) e, quando houver, espanhol (### es).
 As mais novas ficam em cima.
 
+## 06/11/2026 · df2fcfc
+### pt
+- **Diagnóstico:** o log do jogo registra mais detalhes quando o jogo fica parado esperando o processamento do SPURS, para corrigirmos as travadas e as pausas longas em algumas áreas.
+### en
+- **Diagnostics:** the game log records more detail when the game stalls waiting for SPURS processing, so we can fix the freezes and long pauses in some areas.
+### es
+- **Diagnóstico:** el registro del juego guarda más detalles cuando el juego se queda esperando el procesamiento de SPURS, para que podamos corregir los congelamientos y las pausas largas en algunas zonas.
+
 ## 06/11/2026 · 56378a7
 ### pt
 - **Motor novo:** o jogo passa a rodar sobre a Otavix Engine PS3, o nosso motor próprio, com o mesmo desempenho e a mesma imagem da versão anterior; as próximas correções e otimizações já saem sobre ele.
