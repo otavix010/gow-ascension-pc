@@ -4,6 +4,14 @@ O Otavix Launcher mostra este arquivo na página "Novidades" do jogo. Cada atual
 "## <data> · <versão>" e o texto em português (### pt), inglês (### en) e, quando houver, espanhol (### es).
 As mais novas ficam em cima.
 
+## 07/11/2026 · engine 0.11.1
+### pt
+- **Correção:** em PCs com 16 GB de RAM ou menos, o jogo não fecha mais com o erro 0xC0000409 depois de alguns minutos; quando a memória do sistema fica apertada, o jogo passa a manter menos texturas carregadas ao mesmo tempo.
+### en
+- **Fix:** on PCs with 16 GB of RAM or less, the game no longer closes with error 0xC0000409 after a few minutes; when system memory runs low, the game now keeps fewer textures loaded at the same time.
+### es
+- **Corrección:** en PC con 16 GB de RAM o menos, el juego ya no se cierra con el error 0xC0000409 después de unos minutos; cuando la memoria del sistema se queda corta, el juego mantiene menos texturas cargadas al mismo tiempo.
+
 ## 07/11/2026 · c1fafcd
 ### pt
 - **Correção:** no capítulo 13 (ponte de Delfos), a câmera volta a seguir o Kratos depois da cena do Amuleto de Ouroboros, em vez de ficar presa na ponte.
