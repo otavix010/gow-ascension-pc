@@ -4,6 +4,20 @@ O Otavix Launcher mostra este arquivo na página "Novidades" do jogo. Cada atual
 "## <data> · <versão>" e o texto em português (### pt), inglês (### en) e, quando houver, espanhol (### es).
 As mais novas ficam em cima.
 
+## 07/11/2026 · engine 0.11.2
+### pt
+- **Correção:** em sessões longas, o jogo não para mais de gravar os checkpoints depois de algumas horas.
+- **Correção:** o som não some mais no meio do jogo, e o carregamento seguinte não fica mais infinito.
+- **Correção:** nas cenas, o Kratos e partes do cenário não somem mais por um instante (piscadas).
+### en
+- **Fix:** in long sessions, the game no longer stops saving checkpoints after a few hours.
+- **Fix:** the sound no longer cuts out mid-game, and the next loading screen no longer hangs forever.
+- **Fix:** in cutscenes, Kratos and parts of the scenery no longer vanish for a moment (flickering).
+### es
+- **Corrección:** en sesiones largas, el juego ya no deja de guardar los puntos de control después de algunas horas.
+- **Corrección:** el sonido ya no desaparece en mitad del juego, y la carga siguiente ya no se queda infinita.
+- **Corrección:** en las escenas, Kratos y partes del escenario ya no desaparecen por un instante (parpadeos).
+
 ## 07/11/2026 · engine 0.11.1
 ### pt
 - **Correção:** em PCs com 16 GB de RAM ou menos, o jogo não fecha mais com o erro 0xC0000409 depois de alguns minutos; quando a memória do sistema fica apertada, o jogo passa a manter menos texturas carregadas ao mesmo tempo.
@@ -14,11 +28,11 @@ As mais novas ficam em cima.
 
 ## 07/11/2026 · c1fafcd
 ### pt
-- **Correção:** no capítulo 13 (ponte de Delfos), a câmera volta a seguir o Kratos depois da cena do Amuleto de Ouroboros, em vez de ficar presa na ponte.
+- **Ajuste:** mudança no processamento do capítulo 13 (ponte de Delfos). A câmera presa depois da cena do Amuleto de Ouroboros ainda pode acontecer; para destravar, use o amuleto de novo no fim da ponte. A correção completa está em andamento.
 ### en
-- **Fix:** in chapter 13 (the Delphi bridge), the camera follows Kratos again after the Amulet of Uroboros scene, instead of staying stuck on the bridge.
+- **Adjustment:** processing change in chapter 13 (the Delphi bridge). The camera can still get stuck after the Amulet of Uroboros scene; to unstick it, use the amulet again at the end of the bridge. The full fix is in progress.
 ### es
-- **Corrección:** en el capítulo 13 (el puente de Delfos), la cámara vuelve a seguir a Kratos después de la escena del Amuleto de Uróboros, en lugar de quedarse atascada en el puente.
+- **Ajuste:** cambio en el procesamiento del capítulo 13 (el puente de Delfos). La cámara todavía puede quedarse atascada después de la escena del Amuleto de Uróboros; para destrabarla, usa el amuleto de nuevo al final del puente. La corrección completa está en curso.
 
 ## 06/11/2026 · df2fcfc
 ### pt
