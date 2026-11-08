@@ -42,8 +42,10 @@ def chaves_pkg(pasta):
     h = (Path(pasta) / 'key_vault.h').read_text(encoding='utf-8', errors='replace')
 
     def array(nome):
-        corpo = re.search(r'constexpr u8 ' + nome + r'\[[^\]]*\]\s*=\s*\{([^}]*)\}', h).group(1)
-        return bytes(int(x, 16) for x in re.findall(r'0x[0-9A-Fa-f]{2}', corpo))
+        m = re.search(r'constexpr u8 ' + nome + r'\[[^\]]*\]\s*=\s*\{([^}]*)\}', h)
+        if not m:
+            raise SystemExit(f'{nome} não está no key_vault.h de {pasta}: apague essa pasta e gere de novo (o arquivo é baixado outra vez)')
+        return bytes(int(x, 16) for x in re.findall(r'0x[0-9A-Fa-f]{2}', m.group(1)))
 
     return array('SCEPKG_ERK'), array('SCEPKG_RIV')
 

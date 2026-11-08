@@ -31,13 +31,30 @@ COMMIT_RPCS3 = '8b9ee60569753db8406b66d135cce112156172a1'
 URL = 'https://raw.githubusercontent.com/RPCS3/rpcs3/' + COMMIT_RPCS3 + '/rpcs3/Crypto/'
 
 
+# 08/11 (report 976): um key_vault.h estragado num download anterior (página de erro, download cortado, antivírus)
+# ficava na pasta para sempre -- o download é pulado quando o arquivo existe -- e a geração quebrava sempre na leitura
+# das chaves com um AttributeError. Agora o conteúdo é conferido antes de usar e um arquivo errado é baixado de novo.
+MARCAS_VAULT = {'key_vault.h': (b'SCEPKG_ERK', b'SCEPKG_RIV'), 'key_vault.cpp': (b'KeyVault::',)}
+
+
+def vault_valido(arq):
+    try:
+        dados = Path(arq).read_bytes()
+    except OSError:
+        return False
+    return all(m in dados for m in MARCAS_VAULT[Path(arq).name])
+
+
 def baixar_vault(pasta):
     pasta = Path(pasta)
     pasta.mkdir(parents=True, exist_ok=True)
     for nome in ('key_vault.cpp', 'key_vault.h'):
         destino = pasta / nome
         if destino.exists():
-            continue
+            if vault_valido(destino):
+                continue
+            print(f'{destino} não é o arquivo de chaves esperado (download anterior incompleto?); baixando de novo')
+            destino.unlink()
         print(f'baixando {nome} do RPCS3 ({URL}{nome})')
         try:
             with urllib.request.urlopen(URL + nome, timeout=60) as r:
@@ -55,6 +72,12 @@ def baixar_vault(pasta):
                 parcial.unlink(missing_ok=True)
                 raise
             parcial.replace(destino)
+        if not vault_valido(destino):
+            ruim = destino.with_suffix(destino.suffix + '.invalido')
+            destino.replace(ruim)
+            raise SystemExit(f'o {nome} baixado de {URL}{nome} não é o arquivo de chaves do RPCS3 (guardado em {ruim}). '
+                             'A conexão pode estar passando por um bloqueio (proxy, antivírus, rede da escola/trabalho) ou o '
+                             'GitHub limitou os downloads: tente de novo em alguns minutos ou em outra rede.')
 
 
 def carregar_vault(pasta):
@@ -70,8 +93,10 @@ def carregar_vault(pasta):
         return chaves
 
     def array(nome):
-        corpo = re.search(r'constexpr u8 ' + nome + r'\[[^\]]*\]\s*=\s*\{([^}]*)\}', h).group(1)
-        return bytes(int(x, 16) for x in re.findall(r'0x[0-9A-Fa-f]{2}', corpo))
+        m = re.search(r'constexpr u8 ' + nome + r'\[[^\]]*\]\s*=\s*\{([^}]*)\}', h)
+        if not m:
+            raise SystemExit(f'{nome} não está no key_vault.h de {pasta}: apague essa pasta e gere de novo (o arquivo é baixado outra vez)')
+        return bytes(int(x, 16) for x in re.findall(r'0x[0-9A-Fa-f]{2}', m.group(1)))
 
     return {
         KEY_APP: tabela('LoadSelfAPPKeys'),
