@@ -70,9 +70,21 @@ set "CLANGCL=%GOWA_VS%\VC\Tools\Llvm\x64\bin\clang-cl.exe"
 if not exist "%CLANGCL%" set "CLANGCL=clang-cl"
 set "CLANGCL_F=%CLANGCL:\=/%"
 if not exist "%DIR%\build.ninja" goto configura
-if "%CLANGCL%"=="clang-cl" goto compila
-findstr /i /l /c:"CMAKE_CXX_COMPILER:STRING=%CLANGCL_F%" "%DIR%\CMakeCache.txt" >nul 2>&1 && goto compila
+if "%CLANGCL%"=="clang-cl" goto confere_ninja
+findstr /i /l /c:"CMAKE_CXX_COMPILER:STRING=%CLANGCL_F%" "%DIR%\CMakeCache.txt" >nul 2>&1 && goto confere_ninja
 echo -- o cache do CMake aponta para outro compilador: configurando de novo com "%CLANGCL%"
+goto refaz
+rem Report 974 (08/11): o cache guardava o ninja por um caminho curto (C:/PROGRA~2/MICROS~3/...) que deixou de existir
+rem depois de o Visual Studio ser atualizado ou reinstalado, e toda compilação parava no project() do CMake ("ninja
+rem --version failed with: no such file or directory"). Um cache cujo ninja não existe mais é refeito (o que ainda existe
+rem fica: refazer o cache recompila o jogo inteiro).
+:confere_ninja
+set "NINJA_CACHE="
+for /f "usebackq tokens=1,* delims==" %%A in (`findstr /b /c:"CMAKE_MAKE_PROGRAM:FILEPATH=" "%DIR%\CMakeCache.txt"`) do set "NINJA_CACHE=%%B"
+if not defined NINJA_CACHE goto compila
+if exist "%NINJA_CACHE%" goto compila
+echo -- o cache do CMake aponta para um ninja que nao existe mais ("%NINJA_CACHE%"): configurando de novo com "%NINJA%"
+:refaz
 del /q "%DIR%\CMakeCache.txt" "%DIR%\build.ninja" 2>nul
 rd /s /q "%DIR%\CMakeFiles" 2>nul
 :configura
