@@ -4,6 +4,17 @@ O Otavix Launcher mostra este arquivo na página "Novidades" do jogo. Cada atual
 "## <data> · <versão>" e o texto em português (### pt), inglês (### en) e, quando houver, espanhol (### es).
 As mais novas ficam em cima.
 
+## 08/11/2026 · 73a3bc9
+### pt
+- **Correção:** a geração não para mais sempre no passo do firmware quando um download anterior das chaves veio incompleto: o arquivo é baixado de novo.
+- **Correção:** depois de uma atualização do Visual Studio, a compilação não para mais com "CMake Error at CMakeLists.txt:2 (project)".
+### en
+- **Fix:** generation no longer always stops at the firmware step when a previous download of the keys came incomplete: the file is downloaded again.
+- **Fix:** after a Visual Studio update, compiling no longer stops with "CMake Error at CMakeLists.txt:2 (project)".
+### es
+- **Corrección:** la generación ya no se detiene siempre en el paso del firmware cuando una descarga anterior de las claves llegó incompleta: el archivo se descarga de nuevo.
+- **Corrección:** después de una actualización de Visual Studio, la compilación ya no se detiene con "CMake Error at CMakeLists.txt:2 (project)".
+
 ## 08/11/2026 · engine 0.11.3
 ### pt
 - **Correção:** o jogo não trava mais de repente com a imagem e o som parados (podia acontecer logo nos primeiros minutos, inclusive no menu).
