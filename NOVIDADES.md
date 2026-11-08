@@ -4,6 +4,14 @@ O Otavix Launcher mostra este arquivo na página "Novidades" do jogo. Cada atual
 "## <data> · <versão>" e o texto em português (### pt), inglês (### en) e, quando houver, espanhol (### es).
 As mais novas ficam em cima.
 
+## 08/11/2026 · shaders
+### pt
+- **Desempenho:** menos travadas ao entrar em áreas novas: os shaders pré-compilados passaram a cobrir o jogo inteiro (de 1,9 mil para 13,4 mil). Basta atualizar pelo launcher.
+### en
+- **Performance:** fewer stutters when entering new areas: the precompiled shaders now cover the whole game (from 1.9k to 13.4k). Just update through the launcher.
+### es
+- **Rendimiento:** menos tirones al entrar en zonas nuevas: los shaders precompilados ahora cubren todo el juego (de 1,9 mil a 13,4 mil). Basta con actualizar desde el launcher.
+
 ## 08/11/2026 · 73a3bc9
 ### pt
 - **Correção:** a geração não para mais sempre no passo do firmware quando um download anterior das chaves veio incompleto: o arquivo é baixado de novo.
