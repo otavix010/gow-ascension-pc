@@ -4,6 +4,14 @@ O Otavix Launcher mostra este arquivo na página "Novidades" do jogo. Cada atual
 "## <data> · <versão>" e o texto em português (### pt), inglês (### en) e, quando houver, espanhol (### es).
 As mais novas ficam em cima.
 
+## 08/11/2026 · engine 0.11.3
+### pt
+- **Correção:** o jogo não trava mais de repente com a imagem e o som parados (podia acontecer logo nos primeiros minutos, inclusive no menu).
+### en
+- **Fix:** the game no longer suddenly freezes with the image and sound stopped (it could happen within the first few minutes, even in the menu).
+### es
+- **Corrección:** el juego ya no se congela de repente con la imagen y el sonido detenidos (podía ocurrir en los primeros minutos, incluso en el menú).
+
 ## 08/11/2026 · 3a6433d
 ### pt
 - **Correção:** no capítulo 19, a imagem do jogo não fica mais parada com rastros e luzes piscando quando os inimigos aparecem.
