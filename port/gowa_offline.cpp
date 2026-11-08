@@ -1014,6 +1014,48 @@ extern "C" void spu_interp_hot_register_reloc(uint32_t lifted_lsa, uint32_t len,
 extern "C" uint32_t spu_registry_size(void);
 extern "C" int spu_registry_entry_img(uint32_t i, void** host, uint32_t* ls_addr, int* image_id);
 extern "C" void gowa_conf_registrou(uint32_t va, int img);
+/* 08/11 (cap. 19, Stat500: cena congelada, rastros, inimigos com triângulos gigantes): a ponte dos plugins
+ * relocáveis (spu_hot_try_reloc) reconhece uma entrada pelos `len` bytes da função traduzida. Algumas entradas são
+ * curtas e o mesmo código aparece no começo de OUTRO plugin: os 32 bytes da 0x30000 do 0x752710 são iguais aos do
+ * 0x752D20 (não traduzido), que diverge no byte 55. Para o código traduzido isso não fazia mal (a função cobre só
+ * aqueles bytes e a cauda é reconhecida de novo), mas o nativo inteiro da 0x30000 (pl_00752710.h) fazia o trabalho do
+ * 0x752710 sobre os vértices do 0x752D20. Aqui cada entrada cujo padrão aparece em outro lugar da faixa dos plugins
+ * passa a comparar até 16 bytes depois do ponto em que as cópias divergem (sem passar do fim do próprio plugin); o
+ * plugin que só começa igual volta ao interpretador, como sem os nativos. GOWA_PLUGIN_LEN_UNICA=0 desliga (A/B). */
+template <class T>
+static uint32_t gowa_plugin_len_unica(const T* tab, size_t n, size_t k)
+{
+    const uint32_t len = tab[k].len;
+    static int s_on = -1;
+    if (s_on < 0) { const char* e = getenv("GOWA_PLUGIN_LEN_UNICA"); s_on = !(e && e[0] == '0'); }
+    if (!s_on || !vm_base || len < 4u) return len;
+    /* a faixa dos plugins da tabela e o fim do plugin desta entrada (a maior ls + len das funções dele) */
+    const uint32_t base = tab[k].ea - (tab[k].ls - 0x30000u);
+    uint32_t lo = 0xFFFFFFFFu, hi = 0, fim = 0;
+    for (size_t i = 0; i < n; i++) {
+        const uint32_t b = tab[i].ea - (tab[i].ls - 0x30000u), f = tab[i].ea + tab[i].len;
+        if (b < lo) lo = b;
+        if (f > hi) hi = f;
+        if (b == base && tab[i].ls + tab[i].len - 0x30000u > fim) fim = tab[i].ls + tab[i].len - 0x30000u;
+    }
+    const uint32_t ate_fim = fim - (tab[k].ls - 0x30000u);
+    const uint8_t* p = vm_base + tab[k].ea;
+    uint32_t igual = 0, achou = 0, onde = 0;
+    for (uint32_t a = lo & ~3u; a + len <= hi; a += 4) {
+        if (a == tab[k].ea || memcmp(vm_base + a, p, len)) continue;
+        uint32_t c = len;
+        while (c < ate_fim && a + c < hi && vm_base[a + c] == p[c]) c++;
+        achou++;
+        if (c > igual) { igual = c; onde = a; }
+    }
+    if (!achou || igual >= ate_fim) return len;   /* sem cópia, ou cópia do plugin inteiro (mesmo código) */
+    uint32_t novo = (igual + 16u + 3u) & ~3u;
+    if (novo > ate_fim) novo = ate_fim;
+    fprintf(stderr, "[gowa] plugin EA 0x%08X (LS 0x%05X): os %u bytes da entrada também estão em 0x%08X (iguais até +%u); compara %u\n",
+            tab[k].ea, tab[k].ls, len, onde, igual, novo);
+    return novo;
+}
+
 static void gowa_register_jobmod_lifts(void)
 {
     if (getenv("GOWA_NO_JOBLIFT")) return;
@@ -1120,7 +1162,9 @@ static void gowa_register_jobmod_lifts(void)
     { const char* e = getenv("GOWA_PLUGINS_NATIVE");
       if (!(e && e[0] == '0')) {
           for (size_t k = 0; k < sizeof g_gowa_plugin_fns / sizeof g_gowa_plugin_fns[0]; k++)
-              spu_interp_hot_register_reloc(g_gowa_plugin_fns[k].ls, g_gowa_plugin_fns[k].len, g_gowa_plugin_fns[k].ea,
+              spu_interp_hot_register_reloc(g_gowa_plugin_fns[k].ls,
+                                            gowa_plugin_len_unica(g_gowa_plugin_fns, sizeof g_gowa_plugin_fns / sizeof g_gowa_plugin_fns[0], k),
+                                            g_gowa_plugin_fns[k].ea,
                                             g_gowa_plugin_fns[k].w0, g_gowa_plugin_fns[k].fn);
           fprintf(stderr, "[gowa] %d funções de plugin SPU relocáveis nativas\n",
                   (int)(sizeof g_gowa_plugin_fns / sizeof g_gowa_plugin_fns[0]));
@@ -1148,7 +1192,9 @@ static void gowa_register_jobmod_lifts(void)
           }
           for (size_t k = 0; k < sizeof g_gowa_plugin_fns_w11 / sizeof g_gowa_plugin_fns_w11[0]; k++)
               if (k >= fa && k < fb)
-              spu_interp_hot_register_reloc(g_gowa_plugin_fns_w11[k].ls, g_gowa_plugin_fns_w11[k].len, g_gowa_plugin_fns_w11[k].ea,
+              spu_interp_hot_register_reloc(g_gowa_plugin_fns_w11[k].ls,
+                                            gowa_plugin_len_unica(g_gowa_plugin_fns_w11, sizeof g_gowa_plugin_fns_w11 / sizeof g_gowa_plugin_fns_w11[0], k),
+                                            g_gowa_plugin_fns_w11[k].ea,
                                             g_gowa_plugin_fns_w11[k].w0, g_gowa_plugin_fns_w11[k].fn);
           fprintf(stderr, "[gowa] %d funções de plugin do w11 relocáveis nativas\n",
                   (int)(sizeof g_gowa_plugin_fns_w11 / sizeof g_gowa_plugin_fns_w11[0]));
