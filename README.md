@@ -1,4 +1,25 @@
-# God of War: Ascension — port nativo para PC
+<h1 align="center">God of War: Ascension — port nativo para PC</h1>
+
+<p align="center">
+  <b>Recompilação estática do PS3 · Direct3D 12 · sem emulador · traga o seu disco</b>
+</p>
+
+<p align="center">
+  <a href="https://github.com/otavix010/otavix-launcher/releases/latest"><img alt="Baixar o Otavix Launcher" src="https://img.shields.io/github/v/release/otavix010/otavix-launcher?label=Otavix%20Launcher&color=b00020"></a>
+  <a href="NOVIDADES.md"><img alt="Último commit" src="https://img.shields.io/github/last-commit/otavix010/gow-ascension-pc?label=%C3%BAltima%20atualiza%C3%A7%C3%A3o"></a>
+  <a href="LICENSE"><img alt="Licença MIT" src="https://img.shields.io/badge/licen%C3%A7a-MIT-informational"></a>
+  <img alt="Plataforma Windows 10/11" src="https://img.shields.io/badge/plataforma-Windows%2010%2F11-0078d4">
+  <img alt="PS3 → PC" src="https://img.shields.io/badge/PS3-%E2%86%92%20PC-lightgrey">
+</p>
+
+<p align="center">
+  <a href="#como-jogar">Como jogar</a> ·
+  <a href="#estado-atual">Estado atual</a> ·
+  <a href="#requisitos">Requisitos</a> ·
+  <a href="#perguntas-frequentes">Perguntas frequentes</a> ·
+  <a href="NOVIDADES.md">Novidades</a> ·
+  <a href="#english-summary">English</a>
+</p>
 
 > **Projeto de fãs, sem fins lucrativos, sem relação com a Sony.** *God of War* é marca registrada da Sony Interactive Entertainment. Este repositório **não contém o jogo** nem o firmware: você precisa da **sua própria cópia** do jogo (BCUS98232). O **update 1.04** e o **firmware oficial do PS3** são **gratuitos**, baixados direto da Sony (links em [Como jogar](#como-jogar)).
 
@@ -82,10 +103,11 @@ O PS3 tem um processador central (PPU, PowerPC), seis co-processadores vetoriais
 
 ## Estado atual
 
-- Abre, passa pelos vídeos e menus, carrega saves e roda a **fase 1** e o **Capítulo 16** (a parte mais pesada que testamos) com imagem correta.
-- **60 FPS travados** nas duas cenas num Ryzen 7 9800X3D, com o limitador ligado (padrão).
-- O jogo inteiro, do começo ao fim, **ainda não foi verificado**.
-- Só a versão **BCUS98232 (EUA) 1.04**: o `gerar.ps1` confere o executável e recusa outras.
+- **A campanha foi jogada inteira**, do primeiro ao último capítulo, no port (08/11/2026, engine 0.11.2). Vídeos, menus e saves funcionam.
+- **60 FPS travados** em um Ryzen 7 9800X3D, com o limitador ligado (padrão). O desempenho depende muito da CPU (veja abaixo).
+- **Atualizações todos os dias**, a partir dos relatos dos jogadores. O que mudou em cada uma está em [NOVIDADES.md](NOVIDADES.md) (também na página "Novidades" do jogo no launcher).
+- Só a versão **BCUS98232 (EUA) com o update 1.04**: o `gerar.ps1` confere o executável e recusa outras.
+- Ainda em andamento: desempenho em PCs de 4 núcleos e em placas de 8 GB de VRAM, e alguns detalhes visuais pontuais.
 
 ## Desempenho medido
 
@@ -107,15 +129,35 @@ O que medimos num PC fraco (4 núcleos, sem AVX-512), o que ajudou, o que não a
 
 - **Windows 10/11 64 bits** e GPU com **Direct3D 12**.
 - **CPU com AVX2** (Intel Haswell em diante, AMD Zen em diante). **Com AVX-512** (Ryzen 7000/9000, Intel 11ª geração desktop) é muito mais rápido; o `gerar.ps1` escolhe sozinho.
-- 16 GB de RAM. Espaço: ~3 GB para a geração e a build (o disco do jogo não é copiado).
+- 16 GB de RAM. Espaço em disco: ~35 GB para o jogo extraído (se estiver compactado) e ~3 GB para a geração e a build; o disco do jogo em pasta não é copiado.
 
 ## Problemas conhecidos
 
-- **Engasgo na primeira entrada de cada área**: os pipelines de shader são compilados na hora e ficam em cache; da segunda vez some.
+- **Engasgo na primeira entrada de cada área**: os shaders são compilados na hora e ficam em cache. O port já traz um pacote de **13,4 mil shaders pré-compilados**, que cobre o jogo inteiro, então isso deve ser raro.
 - **Sem o limitador de 60** o jogo **acelera**, porque parte da lógica avança por quadro.
-- **Trava do leitor da GPU em PC lento**: corrigida. O leitor executava blocos de comandos que a PPU ainda escrevia; na variante rara, ele saía de passo com o bloco (ficava no meio dos dados de um comando) e agora volta ao início do trecho. No notebook: antes, 4 travas em 9 rodadas; depois, 17 rodadas sem nenhuma. Se a imagem congelar, relate com o `out\jogo.log` (procure `[park-settle]`).
-- Travas raras de carregamento ainda em investigação.
-- PC fraco (4 núcleos, sem AVX-512) roda, mas abaixo de 10 FPS nas partes pesadas.
+- **Quedas de FPS em cenas pesadas** (muitos personagens e efeitos ao mesmo tempo) em CPUs mais antigas ou de 4 núcleos: entram na fase de otimização, depois da versão 1.0.
+- **Placas de 8 GB de VRAM** perto do limite podem trocar texturas sem parar (a textura some por um instante). Baixar a resolução interna ajuda.
+- PC com 4 núcleos e sem AVX-512 roda, mas abaixo de 10 FPS nas partes mais pesadas.
+
+## Perguntas frequentes
+
+**A geração parou dizendo que o disco é de outra versão.**
+O port só funciona com a versão americana, **BCUS98232**, com o update 1.04. Discos europeus (BCES01741) ou de outras regiões têm arquivos diferentes. No launcher, use **"Escolher o disco de novo"**.
+
+**A geração parou dizendo que a cópia está criptografada.**
+As `.iso` da Redump são cifradas (feitas para gravar discos). Use a pasta com `PS3_GAME` tirada do seu PS3 ou do RPCS3, ou uma `.iso` decriptada.
+
+**A geração parou dizendo que a cópia está incompleta.**
+Faltam arquivos do disco. Extraia ou copie o jogo de novo (confira o espaço livre e se o antivírus não apagou nada).
+
+**A geração parou dizendo que o processador não tem AVX2.**
+O port precisa de AVX2: Intel Core de 4ª geração (Haswell, 2013) em diante, ou AMD Ryzen. Nesses PCs o jogo não roda.
+
+**O jogo abre e fecha, ou a imagem e o som congelam.**
+Atualize o port pelo launcher (a engine 0.11.3 corrigiu uma trava com imagem e som parados). Se continuar, use **"Reportar problema"** logo depois, sem fechar o jogo: o relato leva o log.
+
+**Como relato um problema ou peço algo?**
+Pelo launcher, em **"Reportar problema"** na página do jogo. O relato já vai com o log, as configurações e as fotos, e é por ele que as correções saem mais rápido.
 
 ## Licença e créditos
 
