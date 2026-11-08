@@ -4,6 +4,14 @@ O Otavix Launcher mostra este arquivo na página "Novidades" do jogo. Cada atual
 "## <data> · <versão>" e o texto em português (### pt), inglês (### en) e, quando houver, espanhol (### es).
 As mais novas ficam em cima.
 
+## 08/11/2026 · 3a6433d
+### pt
+- **Correção:** no capítulo 19, a imagem do jogo não fica mais parada com rastros e luzes piscando quando os inimigos aparecem.
+### en
+- **Fix:** in chapter 19, the game image no longer freezes with trails and flickering lights when enemies show up.
+### es
+- **Corrección:** en el capítulo 19, la imagen del juego ya no se queda congelada con estelas y luces parpadeando cuando aparecen los enemigos.
+
 ## 07/11/2026 · engine 0.11.2
 ### pt
 - **Correção:** em sessões longas, o jogo não para mais de gravar os checkpoints depois de algumas horas.
