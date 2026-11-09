@@ -66,8 +66,12 @@ static inline __m256i d640_ld(const uint8_t* ls, __m256i off)
 /* bits de saída de 4 triângulos (bit k = k-ésimo) -> máscara do grupo (bit 3 = 1o triângulo) */
 static const uint8_t d640_inv4[16] = {0, 8, 4, 12, 2, 10, 6, 14, 1, 9, 5, 13, 3, 11, 7, 15};
 
-static int d640_decide(const uint8_t* ls, uint32_t ib, uint32_t pb, uint32_t nt, uint32_t ng, uint8_t* mascara)
+static int d640_decide(const uint8_t* ls, uint32_t ib, uint32_t pb, uint32_t nt, uint32_t ng, uint8_t* mascara, float esc)
 {
+    /* |x|, |y| e |x * esc| abaixo de 2^30 (o cflts satura diferente do cvttps); esc = 1 -> 2^30 */
+    const float lim_f = 1073741824.0f / esc;
+    int32_t lim_b;
+    memcpy(&lim_b, &lim_f, 4);
     const uint32_t total = 4u * ng;   /* inclui os que faltam no último grupo */
 #if D640_L == 16
     static const uint16_t perm[3][32] = {
@@ -78,8 +82,8 @@ static int d640_decide(const uint8_t* ls, uint32_t ib, uint32_t pb, uint32_t nt,
     const __m512i bs16 = _mm512_set4_epi32(0x0E0F0C0D, 0x0A0B0809, 0x06070405, 0x02030001);
     const __m512i base = _mm512_set1_epi32((int)pb), mls = _mm512_set1_epi32((int)(SPU_LS_MASK & ~15u));
     const __m512i quatro = _mm512_set1_epi32(4), oito = _mm512_set1_epi32(8);
-    const __m512i absm = _mm512_set1_epi32(0x7FFFFFFF), lim = _mm512_set1_epi32(0x4E800000);
-    const __m512 meio = _mm512_set1_ps(0.5f);
+    const __m512i absm = _mm512_set1_epi32(0x7FFFFFFF), lim = _mm512_set1_epi32(lim_b);
+    const __m512 meio = _mm512_set1_ps(0.5f), S = _mm512_set1_ps(esc);
     for (uint32_t t0 = 0; t0 < total; t0 += 16) {
         const uint8_t* ix = &ls[ib + 6u * t0];                       /* 96 bytes: 48 índices u16 big-endian */
         const __m512i w0 = _mm512_shuffle_epi8(_mm512_loadu_si512(ix), bs16);
@@ -100,10 +104,10 @@ static int d640_decide(const uint8_t* ls, uint32_t ib, uint32_t pb, uint32_t nt,
         const __mmask16 chave = _mm512_testn_epi32_mask(O, quatro) & _mm512_test_epi32_mask(A, _mm512_set1_epi32(2));
         const __m512 Xa = _mm512_castsi512_ps(xa), Xb = _mm512_castsi512_ps(xb), Xc = _mm512_castsi512_ps(xc);
         const __m512 Ya = _mm512_castsi512_ps(ya), Yb = _mm512_castsi512_ps(yb), Yc = _mm512_castsi512_ps(yc);
-        const __m512i ga = _mm512_cvttps_epi32(_mm512_add_round_ps(Xa, meio, D640_RZ)), gb = _mm512_cvttps_epi32(_mm512_add_round_ps(Xb, meio, D640_RZ)),
-                      gc = _mm512_cvttps_epi32(_mm512_add_round_ps(Xc, meio, D640_RZ));
-        const __m512i ha = _mm512_cvttps_epi32(_mm512_add_round_ps(Ya, meio, D640_RZ)), hb = _mm512_cvttps_epi32(_mm512_add_round_ps(Yb, meio, D640_RZ)),
-                      hc = _mm512_cvttps_epi32(_mm512_add_round_ps(Yc, meio, D640_RZ));
+        const __m512i ga = _mm512_cvttps_epi32(_mm512_fmadd_round_ps(Xa, S, meio, D640_RZ)), gb = _mm512_cvttps_epi32(_mm512_fmadd_round_ps(Xb, S, meio, D640_RZ)),
+                      gc = _mm512_cvttps_epi32(_mm512_fmadd_round_ps(Xc, S, meio, D640_RZ));
+        const __m512i ha = _mm512_cvttps_epi32(_mm512_fmadd_round_ps(Ya, S, meio, D640_RZ)), hb = _mm512_cvttps_epi32(_mm512_fmadd_round_ps(Yb, S, meio, D640_RZ)),
+                      hc = _mm512_cvttps_epi32(_mm512_fmadd_round_ps(Yc, S, meio, D640_RZ));
         const __mmask16 zero = (_mm512_cmpeq_epi32_mask(ga, gb) & _mm512_cmpeq_epi32_mask(gb, gc)) |
                                (_mm512_cmpeq_epi32_mask(ha, hb) & _mm512_cmpeq_epi32_mask(hb, hc));
         const __m512 ex1 = _mm512_sub_round_ps(Xb, Xa, D640_RZ), ey1 = _mm512_sub_round_ps(Yb, Ya, D640_RZ);
@@ -120,8 +124,8 @@ static int d640_decide(const uint8_t* ls, uint32_t ib, uint32_t pb, uint32_t nt,
                                          3, 2, 1, 0, 7, 6, 5, 4, 11, 10, 9, 8, 15, 14, 13, 12);
     const uint32_t vazio = pb & SPU_LS_MASK & ~15u;
     const __m256i quatro = _mm256_set1_epi32(4), zi = _mm256_setzero_si256();
-    const __m256i absm = _mm256_set1_epi32(0x7FFFFFFF), lim = _mm256_set1_epi32(0x4E7FFFFF);
-    const __m256 meio = _mm256_set1_ps(0.5f);
+    const __m256i absm = _mm256_set1_epi32(0x7FFFFFFF), lim = _mm256_set1_epi32(lim_b - 1);
+    const __m256 meio = _mm256_set1_ps(0.5f), S = _mm256_set1_ps(esc);
     for (uint32_t t0 = 0; t0 < total; t0 += 8) {
         __m256i xv[3], yv[3], fv[3];
         for (int v = 0; v < 3; v++) {
@@ -153,8 +157,8 @@ static int d640_decide(const uint8_t* ls, uint32_t ib, uint32_t pb, uint32_t nt,
         const __m256 Xa = _mm256_castsi256_ps(xa), Xb = _mm256_castsi256_ps(xb), Xc = _mm256_castsi256_ps(xc);
         const __m256 Ya = _mm256_castsi256_ps(ya), Yb = _mm256_castsi256_ps(yb), Yc = _mm256_castsi256_ps(yc);
         /* MXCSR da thread em para-zero (SPU_SX_RZ): as operações comuns já arredondam para zero */
-        const __m256i ga = _mm256_cvttps_epi32(_mm256_add_ps(Xa, meio)), gb = _mm256_cvttps_epi32(_mm256_add_ps(Xb, meio)), gc = _mm256_cvttps_epi32(_mm256_add_ps(Xc, meio));
-        const __m256i ha = _mm256_cvttps_epi32(_mm256_add_ps(Ya, meio)), hb = _mm256_cvttps_epi32(_mm256_add_ps(Yb, meio)), hc = _mm256_cvttps_epi32(_mm256_add_ps(Yc, meio));
+        const __m256i ga = _mm256_cvttps_epi32(_mm256_fmadd_ps(Xa, S, meio)), gb = _mm256_cvttps_epi32(_mm256_fmadd_ps(Xb, S, meio)), gc = _mm256_cvttps_epi32(_mm256_fmadd_ps(Xc, S, meio));
+        const __m256i ha = _mm256_cvttps_epi32(_mm256_fmadd_ps(Ya, S, meio)), hb = _mm256_cvttps_epi32(_mm256_fmadd_ps(Yb, S, meio)), hc = _mm256_cvttps_epi32(_mm256_fmadd_ps(Yc, S, meio));
         const __m256i zero = _mm256_or_si256(_mm256_and_si256(_mm256_cmpeq_epi32(ga, gb), _mm256_cmpeq_epi32(gb, gc)),
                                              _mm256_and_si256(_mm256_cmpeq_epi32(ha, hb), _mm256_cmpeq_epi32(hb, hc)));
         const __m256 ex1 = _mm256_sub_ps(Xb, Xa), ey1 = _mm256_sub_ps(Yb, Ya), ex2 = _mm256_sub_ps(Xc, Xa), ey2 = _mm256_sub_ps(Yc, Ya);
@@ -169,13 +173,46 @@ static int d640_decide(const uint8_t* ls, uint32_t ib, uint32_t pb, uint32_t nt,
 }
 #endif
 
+/* GOWA (09/11): a grade do descarte de área zero. O EDGE arredonda x*r39 + 0,5 e descarta o triângulo
+ * cujos 3 vértices caem na mesma coluna ou linha da grade; r39 = 1 (pixel) ou 2 (multiamostragem). Com
+ * a resolução interna (GOWA_RES_SCALE) a GPU desenha numa grade N vezes mais fina: um triângulo fino que
+ * não pega centro de pixel em 1280x720 pega em 3840x2160. A pré-passada de Z (que não passa por este
+ * descarte) grava a profundidade dele; a passada de cor (EQUAL, descartada aqui) não pinta, e o pixel
+ * fica com a cor de quadros antigos: os riscos brancos nas bordas e a "aura clara" dos personagens.
+ * Multiplicar r39 pela escala faz o teste na grade de verdade (vale também para o laço traduzido, que
+ * lê o mesmo r39). GOWA_EDGE_GRADE=0 volta à grade nativa. */
+static void d640_grade_da_escala(spu_context* ctx)
+{
+    static int s_k = -1;
+    if (s_k < 0) {
+        const char* e = getenv("GOWA_RES_SCALE");
+        const long k = e ? strtol(e, NULL, 10) : 1;
+        s_k = (k >= 1 && k <= 4) ? (int)k : 1;
+        const char* g = getenv("GOWA_EDGE_GRADE");
+        if (g && g[0] == '0') s_k = 1;
+    }
+    if (s_k == 1) return;
+    u128* r = &ctx->gpr[39];
+    for (int i = 0; i < 4; i++) {
+        float f;
+        memcpy(&f, &r->_u32[i], 4);
+        f *= (float)s_k;
+        memcpy(&r->_u32[i], &f, 4);
+    }
+}
+
 static __attribute__((noinline)) int fn_0000D640_laco_nativo(spu_context* ctx)
 {
+    d640_grade_da_escala(ctx);
     if (!D640_VETOR || !gowa_edge_nativo_on()) return 0;
 #if D640_VETOR
     u128* g = ctx->gpr;
-    /* o modo medido: escala 1, +0,5, sinal ligado, descarte de costas ligado */
-    if (!d640_splat(g[39], 0x3F800000u) || !d640_splat(g[38], 0x3F000000u) || !d640_splat(g[63], 0x80000000u) ||
+    /* o modo medido: grade inteira de 1 a 16 (1 ou 2 do jogo vezes GOWA_RES_SCALE), +0,5, sinal
+     * ligado, descarte de costas ligado */
+    const uint32_t e39 = g[39]._u32[0];
+    float esc;
+    memcpy(&esc, &e39, 4);
+    if (!d640_splat(g[39], e39) || !(esc >= 1.0f && esc <= 16.0f) || esc != (float)(int)esc || !d640_splat(g[38], 0x3F000000u) || !d640_splat(g[63], 0x80000000u) ||
         !d640_splat(g[55], 0xFFFFFFFFu))
         return 0;
     uint8_t* ls = SPU_LS_BASE(ctx);
@@ -187,7 +224,7 @@ static __attribute__((noinline)) int fn_0000D640_laco_nativo(spu_context* ctx)
         return 0;
     /* a decisão de todos os grupos (bit 3 = 1o triângulo; 1 = sai; triângulos que faltam no último = 1) */
     static SPU_THREAD_LOCAL uint8_t mascara[2048 + 4];
-    if (!d640_decide(ls, ib, pb, nt, ng, mascara)) return 0;
+    if (!d640_decide(ls, ib, pb, nt, ng, mascara, esc)) return 0;
     /* o caminho dos dados do original (mesma ordem; gb(r7) = a máscara do grupo da volta anterior) */
     u128 r2, r3 = g[3], r4, r5 = g[5], r8 = g[8], r9 = g[9], r10 = g[10], r11, r12 = g[12], r14, r18, r19, r20, r23,
          r25, r28, r30 = g[30], r31 = g[31], r32 = g[32], r33 = g[33], r34 = g[34], r41 = g[41], r46 = g[46],
