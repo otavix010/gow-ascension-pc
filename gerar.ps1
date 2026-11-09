@@ -193,6 +193,15 @@ if (-not $Disco -and ($Refazer -or -not (Test-Path $marcaJogo))) {
     $Disco = Escolher-Pasta 'Escolha a pasta com a cópia do DISCO do God of War: Ascension (BCUS98232) -- a que contém PS3_GAME'
     if (-not $Disco) { throw 'sem a pasta do disco' }
 }
+# reports 1011/1016 (09/11): o disco escolhido numa unidade que não existe (pendrive ou HD externo desligado, letra
+# trocada) parava com o erro cru do PowerShell no primeiro Join-Path
+if ($Disco) {
+    $unid = [IO.Path]::GetPathRoot($Disco)
+    if ($unid -and -not (Test-Path -LiteralPath $unid)) {
+        throw ("a unidade $unid do disco do jogo ($Disco) não existe neste PC agora. Se o jogo está num HD externo ou " +
+               "pendrive, ligue-o (a letra precisa ser a mesma) ou escolha de novo o arquivo ou a pasta do jogo no launcher.")
+    }
+}
 # sem -Update / -Firmware: baixa os oficiais (etapas 2 e 3)
 if (-not $Update) { $Update = 'auto' }
 if (-not $Firmware) { $Firmware = 'auto' }
@@ -433,7 +442,11 @@ Etapa '1_ferramentas' {
         if ($LASTEXITCODE -ne 0) { Msg 'pycryptodome não instalado; as ferramentas usam o AES do Windows' }
     }
     $ff = Join-Path $R "dl\ffmpeg9\$FFMPEG_NOME"
-    if (-not (Test-Path "$ff\include\libavcodec")) {
+    # report 1022 (09/11): o include estava lá e o bin não (DLLs levadas, provavelmente pelo antivírus); a conferência
+    # do começo derrubava a marca, mas aqui só se olhava o include, a etapa passava sem baixar e a cópia das DLLs
+    # quebrava na etapa 7. Faltando qualquer um dos dois, a pasta parcial sai e o FFmpeg vem inteiro de novo.
+    if (-not (Test-Path "$ff\include\libavcodec") -or -not (Test-Path "$ff\bin\*.dll")) {
+        if (Test-Path -LiteralPath $ff) { Remove-Item -LiteralPath $ff -Recurse -Force -ErrorAction SilentlyContinue }
         Msg "baixando o FFmpeg 9 (LGPL)"
         New-Item -ItemType Directory -Force (Join-Path $R 'dl\ffmpeg9') | Out-Null
         $zip = Join-Path $R "dl\$FFMPEG_NOME.zip"
@@ -478,6 +491,10 @@ Etapa '1_ferramentas' {
         # report 714 (02/11): apagar o zip deu acesso negado (antivírus com o arquivo preso) e a geração parou; o
         # FFmpeg já está extraído, então o zip que sobrar não atrapalha
         Remove-Item $zip -ErrorAction SilentlyContinue
+        if (-not (Test-Path "$ff\bin\*.dll")) {
+            throw ("o FFmpeg foi extraído, mas as DLLs dele (pasta $ff\bin) sumiram logo em seguida. Quase sempre é o " +
+                   "antivírus: libere a pasta do jogo nele e gere de novo.")
+        }
     }
 }
 $VS = Achar-VS
@@ -863,8 +880,11 @@ function Disco-Direto {
     $f = Arquivo-Direto
     if (-not (Test-Path -LiteralPath $f)) { return $null }
     $raiz = ([IO.File]::ReadAllText($f, [Text.Encoding]::UTF8)).Trim()
-    $p = Join-Path $raiz 'PS3_GAME'
-    if (Test-Path -LiteralPath (Join-Path $p 'USRDIR') -PathType Container) { return $p }
+    # report 1016 (09/11): o disco direto de uma instalação antiga estava em G:, que não existe mais; o Join-Path do
+    # PowerShell estoura com unidade inexistente. [IO.Path]::Combine não olha a unidade: o Test-Path diz que não há
+    # disco ali e a geração segue com o disco escolhido agora.
+    try { $p = [IO.Path]::Combine($raiz, 'PS3_GAME') } catch { return $null }
+    if (Test-Path -LiteralPath ([IO.Path]::Combine($p, 'USRDIR')) -PathType Container) { return $p }
     return $null
 }
 # a pasta do disco que o jogo lê: a direta, se houver, senão o vfs\PS3_GAME (junção, espelho ou cópia)
