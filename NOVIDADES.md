@@ -4,6 +4,29 @@ O Otavix Launcher mostra este arquivo na página "Novidades" do jogo. Cada atual
 "## <data> · <versão>" e o texto em português (### pt), inglês (### en) e, quando houver, espanhol (### es).
 As mais novas ficam em cima.
 
+## 09/11/2026 · engine 0.11.4
+### pt
+- **Correção:** a pele do Kratos e outras superfícies (como a cabeça de leão da ponte) não ficam mais com manchas e listras pretas nas placas RTX 30, 40 e 50 e nas AMD.
+- **Correção:** com a resolução interna em 2x a 4x, não aparecem mais riscos brancos nas bordas nem o contorno claro em volta dos personagens.
+- **Correção:** a tela não fica mais preta do vídeo de abertura em diante para quem ajustou o tamanho ou a posição da tela nas opções do jogo.
+- **Correção:** a geração não para mais na etapa 7 quando o antivírus apaga parte do FFmpeg: ele é baixado de novo.
+- **Correção:** com o disco do jogo numa unidade que não existe mais (HD externo ou pendrive desligado), a geração mostra uma mensagem clara em vez de um erro do PowerShell.
+- **Desempenho:** os shaders pré-compilados foram refeitos para a engine nova.
+### en
+- **Fix:** Kratos's skin and other surfaces (such as the lion head on the bridge) no longer show black blotches and stripes on RTX 30, 40 and 50 series and AMD cards.
+- **Fix:** with the internal resolution at 2x to 4x, white streaks on edges and the bright outline around characters no longer appear.
+- **Fix:** the screen no longer goes black from the opening video onward for players who adjusted the screen size or position in the game options.
+- **Fix:** generation no longer stops at step 7 when the antivirus deletes part of FFmpeg: it is downloaded again.
+- **Fix:** with the game disc on a drive that no longer exists (external drive or USB stick disconnected), generation shows a clear message instead of a PowerShell error.
+- **Performance:** the precompiled shaders were rebuilt for the new engine.
+### es
+- **Corrección:** la piel de Kratos y otras superficies (como la cabeza de león del puente) ya no tienen manchas y rayas negras en las tarjetas RTX 30, 40 y 50 y en las AMD.
+- **Corrección:** con la resolución interna en 2x a 4x, ya no aparecen rayas blancas en los bordes ni el contorno claro alrededor de los personajes.
+- **Corrección:** la pantalla ya no se queda negra desde el video de apertura en adelante para quien ajustó el tamaño o la posición de la pantalla en las opciones del juego.
+- **Corrección:** la generación ya no se detiene en el paso 7 cuando el antivirus borra parte de FFmpeg: se descarga de nuevo.
+- **Corrección:** con el disco del juego en una unidad que ya no existe (disco externo o memoria USB desconectados), la generación muestra un mensaje claro en lugar de un error de PowerShell.
+- **Rendimiento:** los shaders precompilados se rehicieron para la engine nueva.
+
 ## 08/11/2026 · shaders
 ### pt
 - **Desempenho:** menos travadas ao entrar em áreas novas: os shaders pré-compilados passaram a cobrir o jogo inteiro (de 1,9 mil para 13,4 mil). Basta atualizar pelo launcher.

@@ -83,10 +83,10 @@ $SHA_LIBSRE = '9e7ee6edc99b1d372686cf927b883b18f19ed4d32d1faf35e214cca4ae0737b6'
 # A Otavix Engine PS3 (06/11): a engine vem compilada num pacote (o runtime, os cabeçalhos que o código gerado inclui
 # e o tradutor do PPU e das SPUs em .exe), que vai para engine\. O código do jogo continua sendo traduzido e compilado
 # aqui, a partir do disco do jogador, pelo tradutor do pacote. -Engine <zip> usa um pacote local no lugar do baixado.
-$ENGINE_VERSAO = '0.11.3'
+$ENGINE_VERSAO = '0.11.4'
 $ENGINE_NOME = "otavix-engine-ps3-$ENGINE_VERSAO"
 $ENGINE_URLS = @("https://otavix-launcher.otavix-launcher-servidor.workers.dev/v1/arquivos/engine/ps3/$ENGINE_NOME.zip")
-$ENGINE_SHA = '46863cd095a9b9f95e4c5f12b16ca401786f45a5ffd32a2c8cb05815f07e2b9f'
+$ENGINE_SHA = '11b005d3783ad19d13a6a63777088ac6c4cd054e830e15f1ed0c0d8df7379d2a'
 $ENG = Join-Path $R 'engine'
 $ENGINE_BIN = Join-Path $ENG 'bin'
 # o tradutor das SPUs para os scripts de tradução do port (scripts\otx_ponte.py)
