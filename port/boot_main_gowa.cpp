@@ -2618,9 +2618,61 @@ static LONG WINAPI vm_commit_veh(EXCEPTION_POINTERS* ep)
 }
 #endif
 
+#ifdef _WIN32
+/* Report 1064 (10/11): as opções do launcher (resolução, fps, etc.) eram só
+ * variáveis de ambiente passadas ao abrir o jogo por ele; aberto direto da
+ * pasta, o gowa.exe ficava nos padrões. O launcher grava as mesmas opções em
+ * gowa_opcoes.txt na pasta do jogo e o exe as aplica aqui, antes de qualquer
+ * getenv. Procura na pasta do exe e em até duas acima (o exe fica em
+ * <jogo>\port\build_*\). Formato: uma linha NOME=valor, '#' comenta; só nomes
+ * GOWA_*, RSX_*, GCM_*, PAD_*, PS3_*. Uma variável já no ambiente vence. */
+static void gowa_opcoes_do_launcher(void)
+{
+    char pasta[MAX_PATH * 2];
+    DWORD n = GetModuleFileNameA(NULL, pasta, MAX_PATH);
+    if (!n || n >= MAX_PATH) return;
+    FILE* f = NULL; char cam[MAX_PATH * 2 + 32];
+    for (int nivel = 0; nivel < 3 && !f; nivel++) {
+        char* barra = strrchr(pasta, '\\');
+        if (!barra) return;
+        *barra = 0;                                 /* sobe uma pasta */
+        snprintf(cam, sizeof cam, "%s\\gowa_opcoes.txt", pasta);
+        f = fopen(cam, "rb");
+    }
+    if (!f) return;
+    static const char* const prefixos[] = { "GOWA_", "RSX_", "GCM_", "PAD_", "PS3_" };
+    char lin[2048]; int aplicadas = 0, ja = 0;
+    while (fgets(lin, sizeof lin, f)) {
+        char* p = lin;
+        if ((unsigned char)p[0] == 0xEF && (unsigned char)p[1] == 0xBB && (unsigned char)p[2] == 0xBF) p += 3;  /* BOM */
+        while (*p == ' ' || *p == '\t') p++;
+        if (*p == '#' || *p == ';' || !*p) continue;
+        char* igual = strchr(p, '=');
+        if (!igual) continue;
+        char* fim = igual;
+        while (fim > p && (fim[-1] == ' ' || fim[-1] == '\t')) fim--;
+        *fim = 0;
+        char* val = igual + 1;
+        while (*val == ' ' || *val == '\t') val++;
+        size_t lv = strlen(val);
+        while (lv && (val[lv - 1] == '\r' || val[lv - 1] == '\n' || val[lv - 1] == ' ' || val[lv - 1] == '\t')) val[--lv] = 0;
+        int ok = 0;
+        for (const char* pr : prefixos) if (!_strnicmp(p, pr, strlen(pr))) ok = 1;
+        for (const char* c = p; *c && ok; c++)
+            if (!((*c >= 'A' && *c <= 'Z') || (*c >= 'a' && *c <= 'z') || (*c >= '0' && *c <= '9') || *c == '_')) ok = 0;
+        if (!ok || !lv) continue;                  /* vazio = sem a opção (um "" ligaria os if (getenv)) */
+        if (GetEnvironmentVariableA(p, NULL, 0)) { ja++; continue; }   /* o ambiente vence */
+        if (SetEnvironmentVariableA(p, val)) aplicadas++;
+    }
+    fclose(f);
+    fprintf(stderr, "[gowa] opções do launcher: %s (%d aplicadas, %d já no ambiente)\n", cam, aplicadas, ja);
+}
+#endif
+
 int main(int argc, char** argv)
 {
 #ifdef _WIN32
+    gowa_opcoes_do_launcher();      /* report 1064: o exe aberto direto usa as opções do launcher */
     /* GOWA: padrões do port, antes de qualquer getenv (o cache de getenv acima
      * guarda o primeiro valor lido). Uma variável já definida no ambiente vence.
      *  YDKJ_NO_REENTRY_ISO=1 -- a ponte HLE->libsre desloca r1 em 0x1000 por

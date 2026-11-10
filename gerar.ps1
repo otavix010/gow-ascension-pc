@@ -1638,9 +1638,31 @@ function Compilar-Build([string]$a) {
     # atualização, um erro de compilação deixava o exe velho e a etapa dizia "ok". O exe de antes fica de lado e só
     # volta se a compilação não gerar outro (o jogo continua jogável e a etapa mostra o erro).
     $ant = Join-Path $R "port\$bd\gowa_anterior.exe"
+    # report 1063: a pasta do jogo mudou de disco (C: -> E:) e a configuração do CMake da build ainda apontava para o
+    # lugar antigo (VerifyGlobs.cmake "Not a file"). Uma build de outra pasta é refeita do zero; o exe fica de lado.
+    $cache = Join-Path $R "port\$bd\CMakeCache.txt"
+    if (Test-Path -LiteralPath $cache) {
+        $lin = Select-String -LiteralPath $cache -Pattern '^CMAKE_CACHEFILE_DIR:INTERNAL=(.*)$' | Select-Object -First 1
+        $aqui = (Join-Path $R "port\$bd") -replace '\\', '/'
+        if ($lin -and ($lin.Matches[0].Groups[1].Value.TrimEnd('/') -ne $aqui.TrimEnd('/'))) {
+            Msg "a compilação anterior foi feita em outra pasta ($($lin.Matches[0].Groups[1].Value)): compilando do zero aqui"
+            if (Test-Path $exe) { Move-Item -LiteralPath $exe -Destination (Join-Path $R "port\gowa_anterior_$bd.exe") -Force }
+            Remove-Item -LiteralPath (Join-Path $R "port\$bd") -Recurse -Force -ErrorAction SilentlyContinue
+            $sal = Join-Path $R "port\gowa_anterior_$bd.exe"
+            if (Test-Path $sal) { $null = New-Item -ItemType Directory -Force (Join-Path $R "port\$bd"); Move-Item -LiteralPath $sal -Destination $exe -Force }
+        }
+    }
     if (Test-Path $exe) { Move-Item -LiteralPath $exe -Destination $ant -Force }
     $l0 = (Get-Item -LiteralPath $LOG).Length
     Exec $LOG "`"$R\scripts\build_portatil.cmd`" $ba"
+    # report 1063: a configuração do CMake ficou corrompida (geração interrompida: VerifyGlobs.cmake ausente, "rebuilding
+    # build.ninja: subcommand failed"); a pasta da build some e configura de novo uma vez
+    if (-not (Test-Path $exe) -and ((Novo-No-Log $l0 'VerifyGlobs.cmake') -or (Novo-No-Log $l0 'rebuilding ''build.ninja'': subcommand failed') -or
+                                    (Novo-No-Log $l0 'rebuilding build.ninja: subcommand failed'))) {
+        Msg 'a configuração da compilação anterior estava corrompida: apagando a pasta da build e compilando de novo'
+        Remove-Item -LiteralPath (Join-Path $R "port\$bd") -Recurse -Force -ErrorAction SilentlyContinue
+        Exec $LOG "`"$R\scripts\build_portatil.cmd`" $ba"
+    }
     # o laço do ninja mesmo assim (relógio do Windows muito errado, ou datas que não deu para corrigir): a pasta da
     # build some e configura de novo uma vez
     if (-not (Test-Path $exe) -and (Novo-No-Log $l0 'still dirty after')) {
