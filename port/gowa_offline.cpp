@@ -138,6 +138,7 @@ static hfn handler_familia(const char* lib)
 }
 
 #include "win32_compat.h"
+#include "ps3_cpu_count.h"
 #include <timeapi.h>
 #pragma comment(lib, "winmm")
 /* GOWA_SLOW_JOBMOD=<EA do módulo de job, hex>:<µs> (experimento de caminho
@@ -1296,7 +1297,7 @@ static const int s_gowa_ppu_pause_init = [] {
      * i5-11400F (12 lógicas) ele ganhava do giro puro (+2,6% e +0,3%, CPU -7%), mas na fase 1
      * do mesmo PC (~40 FPS, quadros mais curtos) perdeu 5,5% (11 de 11 pares): o sono de 1 ms
      * atrasa a principal. Fica opcional (GOWA_PPU_PAUSE=3); padrão: modo 2 com < 12 lógicas. */
-    else { SYSTEM_INFO si; GetSystemInfo(&si); if (si.dwNumberOfProcessors < 12) g_gowa_ppu_pause = 2; }
+    else { if (ps3_logical_cpus() < 12) g_gowa_ppu_pause = 2; }
     return 0;
 }();
 extern "C" void gowa_ppu_espera(void)

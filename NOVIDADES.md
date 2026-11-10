@@ -4,6 +4,14 @@ O Otavix Launcher mostra este arquivo na página "Novidades" do jogo. Cada atual
 "## <data> · <versão>" e o texto em português (### pt), inglês (### en) e, quando houver, espanhol (### es).
 As mais novas ficam em cima.
 
+## 09/11/2026 · engine 0.11.5
+### pt
+- **Desempenho:** quando o jogo fica limitado a menos núcleos (pelo Gerenciador de Tarefas, por programas de energia ou em máquinas virtuais), ele passa a contar só os núcleos liberados e liga o modo de economia de CPU. Com 2 núcleos o jogo deixa de travar (de 4 para 30 a 40 fps), e com 4 núcleos o Stint sobe de 56 para 60 fps.
+### en
+- **Performance:** when the game is limited to fewer cores (by Task Manager, power tools or in virtual machines), it now counts only the cores it is allowed to use and turns on the CPU-saving mode. On 2 cores the game no longer stalls (from 4 to 30–40 fps), and on 4 cores the Stint area goes from 56 to 60 fps.
+### es
+- **Rendimiento:** cuando el juego queda limitado a menos núcleos (por el Administrador de tareas, programas de energía o en máquinas virtuales), ahora cuenta solo los núcleos permitidos y activa el modo de ahorro de CPU. Con 2 núcleos el juego ya no se traba (de 4 a 30–40 fps), y con 4 núcleos la zona Stint sube de 56 a 60 fps.
+
 ## 09/11/2026 · engine 0.11.4
 ### pt
 - **Correção:** a pele do Kratos e outras superfícies (como a cabeça de leão da ponte) não ficam mais com manchas e listras pretas nas placas RTX 30, 40 e 50 e nas AMD.

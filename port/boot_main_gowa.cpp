@@ -32,6 +32,7 @@
  * reachable definition. */
 #include "ppu_tls.h"
 #include "win32_compat.h"      /* Sleep, GetTickCount64, threads on POSIX */
+#include "ps3_cpu_count.h"
 #include "win32_backtrace.h"   /* RtlCaptureStackBackTrace / GetModuleHandleA on POSIX */
 /* The lifted ppu_recomp.h already defines `struct ppu_context` (identical to
  * runtime/ppu/ppu_context.h by design -- "keep the two in sync"). A syscall
@@ -2692,11 +2693,11 @@ int main(int argc, char** argv)
      *  volta ao antigo.
      *  30/10: só com mais de 8 CPUs lógicas. Num i5-10300H (4 núcleos / 8 lógicas) a 7a SPU disputa a CPU com a
      *  PPU e a RSX: cap. 16 com 6 SPUs 11,0 / 10,4 / 10,2 x 7 SPUs 10,4 / 9,6 / 9,8 (+6%, 3 de 3 pares). */
-    { SYSTEM_INFO si_ns; GetSystemInfo(&si_ns);
-      if (!GetEnvironmentVariableA("GOWA_SPURS_NSPU", NULL, 0) && si_ns.dwNumberOfProcessors <= 8) {
+    { const unsigned ncpu_ns = ps3_logical_cpus();
+      if (!GetEnvironmentVariableA("GOWA_SPURS_NSPU", NULL, 0) && ncpu_ns <= 8) {
           SetEnvironmentVariableA("GOWA_SPURS_NSPU", "6");
           fprintf(stderr, "[spurs] 6 SPUs (%lu CPUs lógicas; a 7a só com mais de 8; GOWA_SPURS_NSPU=7 força)\n",
-                  (unsigned long)si_ns.dwNumberOfProcessors);
+                  (unsigned long)ncpu_ns);
       } }
     if (!GetEnvironmentVariableA("GOWA_SPURS_NSPU", NULL, 0)) {
         SetEnvironmentVariableA("GOWA_SPURS_NSPU", "7");
@@ -3239,13 +3240,13 @@ int main(int argc, char** argv)
      * 3 pares). Num i5-11400F (6 núcleos / 12 lógicas, AVX-512), sem fixar: 32,80 / 32,54
      * / 32,78 x 30,41 / 31,34 / 31,23 (+5%, 3 pares, mesma carga de fundo). */
     { const char* pe = getenv("GOWA_PIN");
-      SYSTEM_INFO si; GetSystemInfo(&si);
       const int nucleos = gowa_nucleos_fisicos();
-      const int pin = pe ? (*pe != '0') : (nucleos >= 8 && (int)si.dwNumberOfProcessors > nucleos);
+      const unsigned ncpu_pin = ps3_logical_cpus();
+      const int pin = pe ? (*pe != '0') : (nucleos >= 8 && (int)ncpu_pin > nucleos);
       { extern int g_gowa_pin_on; g_gowa_pin_on = pin; }   /* desempenho.json */
       if (pin) CreateThread(NULL, 0, gowa_pin_thread, NULL, 0, NULL);
       else if (!pe) fprintf(stderr, "[pin] desligado: %d núcleos físicos, %lu CPUs lógicas (fixa só com 8 núcleos ou mais e SMT; GOWA_PIN=1 força)\n",
-                            nucleos, (unsigned long)si.dwNumberOfProcessors); }
+                            nucleos, (unsigned long)ncpu_pin); }
     if (getenv("GOWA_GUESTPROF"))
         CreateThread(NULL, 0, gowa_guestprof_thread, NULL, 0, NULL);
     if (getenv("GOWA_GUARD"))
