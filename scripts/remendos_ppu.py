@@ -23,7 +23,7 @@ import shutil
 import sys
 from pathlib import Path
 
-DIR = Path(_os_raiz.path.join(RAIZ, r'port\recompiled'))
+DIR = Path(_os_raiz.path.join(RAIZ, 'port/recompiled'))
 MARCA = '/*REMENDO*/'
 DECL = 'extern "C" void gowa_texstream_wait(void); ' + MARCA
 

@@ -14,7 +14,7 @@ import re
 import shutil
 import sys
 
-R = _os_raiz.path.join(RAIZ, r'port\spu')
+R = _os_raiz.path.join(RAIZ, 'port/spu')
 CONST_DE = 'spu_ls_read128(ctx, 0x1C0)'
 CONST_PARA = 'spu_ls_read128_kc(ctx)'
 # spu_ls_read128(ctx, <registrador>._u32[0] + 0xC0)

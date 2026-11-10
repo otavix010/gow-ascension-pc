@@ -15,7 +15,7 @@ import re
 import sys
 from pathlib import Path
 
-DIR = Path(_os_raiz.path.join(RAIZ, r'port\recompiled'))
+DIR = Path(_os_raiz.path.join(RAIZ, 'port/recompiled'))
 MARCA = '/*SONDA*/'
 DECL = 'extern "C" void gowa_probe(unsigned int addr, ppu_context* ctx); ' + MARCA + '\n'
 

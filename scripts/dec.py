@@ -11,7 +11,7 @@ import json
 import sys
 from pathlib import Path
 
-D = Path(_os_raiz.path.join(RAIZ, r'out\ghidra'))
+D = Path(_os_raiz.path.join(RAIZ, 'out/ghidra'))
 _dec = None
 
 

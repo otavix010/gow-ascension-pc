@@ -10,7 +10,7 @@ import os
 import struct
 import sys
 
-D = _os_raiz.path.join(RAIZ, r'out\fndump')
+D = _os_raiz.path.join(RAIZ, 'out/fndump')
 fn = sys.argv[1].upper().rjust(4, '0')
 ks = [int(x) for x in sys.argv[2:] if x.isdigit()]
 mostra_floats = '--floats' in sys.argv

@@ -16,7 +16,7 @@ RAIZ = _os_raiz.environ.get('GOWA_RAIZ') or _os_raiz.path.dirname(_os_raiz.path.
 import sys
 from pathlib import Path
 
-F = Path(_os_raiz.path.join(RAIZ, r'port\spu\gowajm_0072DF80\spu_recomp.c'))
+F = Path(_os_raiz.path.join(RAIZ, 'port/spu/gowajm_0072DF80/spu_recomp.c'))
 s = F.read_text(encoding='latin-1')
 nl = '\r\n' if '\r\n' in s else '\n'
 TESTE = 'if (ctx->gpr[84]._u32[0] != 0)'

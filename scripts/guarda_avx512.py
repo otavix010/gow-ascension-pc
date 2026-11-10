@@ -5,7 +5,7 @@ RAIZ = _os_raiz.environ.get('GOWA_RAIZ') or _os_raiz.path.dirname(_os_raiz.path.
 # exatamente o que ela devolve com GOWA_VK=0: o código traduzido faz o laço inteiro.
 # uso: guarda_avx512.py aplicar|tirar
 import glob, os, re, sys
-R = _os_raiz.path.join(RAIZ, r'port\spu')
+R = _os_raiz.path.join(RAIZ, 'port/spu')
 MARCA = '/* GOWA_AVX512_GUARDA */'
 COND = '#if (defined(__AVX512F__) && defined(__AVX512BW__) && defined(__AVX512VL__) && defined(__AVX512DQ__)) || defined(GOWA_VK_AVX2)'
 modo = sys.argv[1]

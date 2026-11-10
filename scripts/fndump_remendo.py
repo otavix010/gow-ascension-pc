@@ -12,7 +12,7 @@ import shutil
 import sys
 from pathlib import Path
 
-D = Path(_os_raiz.path.join(RAIZ, r'port\spu\gowajm_0072DF80'))
+D = Path(_os_raiz.path.join(RAIZ, 'port/spu/gowajm_0072DF80'))
 F = D / 'spu_recomp.c'
 BAK = D / 'spu_recomp.c.antes_fndump'
 

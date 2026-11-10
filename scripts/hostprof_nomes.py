@@ -8,7 +8,7 @@ RAIZ = _os_raiz.environ.get('GOWA_RAIZ') or _os_raiz.path.dirname(_os_raiz.path.
 import bisect, re, sys
 
 log = sys.argv[1]
-mapf = sys.argv[2] if len(sys.argv) > 2 else _os_raiz.path.join(RAIZ, r'port\build\gowa.map')
+mapf = sys.argv[2] if len(sys.argv) > 2 else _os_raiz.path.join(RAIZ, 'port/build/gowa.map')
 top = int(sys.argv[3]) if len(sys.argv) > 3 else 12
 
 base = 0x140000000

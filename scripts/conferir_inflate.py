@@ -16,7 +16,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent))
 from psarc import Psarc  # noqa: E402
 
-USR = Path(_os_raiz.path.join(RAIZ, r'vfs\PS3_GAME\USRDIR'))
+USR = Path(_os_raiz.path.join(RAIZ, 'vfs/PS3_GAME/USRDIR'))
 ARQS = ['GAME.PSARC', 'SHELL.PSARC', 'INTROCIN.PSARC', 'RESOURCES.PSARC', 'HECA.PSARC',
         'ENGLISH.PSARC', 'MP-ENGLISH.PSARC']
 

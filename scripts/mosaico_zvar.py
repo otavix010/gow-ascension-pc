@@ -8,7 +8,7 @@ import os
 import sys
 from PIL import Image, ImageDraw
 
-R = _os_raiz.path.join(RAIZ, r'out\zvar')
+R = _os_raiz.path.join(RAIZ, 'out/zvar')
 out = sys.argv[1] if len(sys.argv) > 1 else os.path.join(R, 'mosaico.png')
 vars_ = [v for v in ['o0', 'o1', 'o2', 'o3', 'off'] if os.path.isdir(os.path.join(R, v))]
 cols = 3

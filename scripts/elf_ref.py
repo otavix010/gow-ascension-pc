@@ -8,7 +8,7 @@ RAIZ = _os_raiz.environ.get('GOWA_RAIZ') or _os_raiz.path.dirname(_os_raiz.path.
 import struct
 import sys
 
-elf = open(_os_raiz.path.join(RAIZ, r'jogo\GOWA.elf'), 'rb').read()
+elf = open(_os_raiz.path.join(RAIZ, 'jogo/GOWA.elf'), 'rb').read()
 phoff = struct.unpack_from('>Q', elf, 0x20)[0]
 phentsize, phnum = struct.unpack_from('>HH', elf, 0x36)
 segs = []

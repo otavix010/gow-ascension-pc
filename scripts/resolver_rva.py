@@ -10,7 +10,7 @@ import sys
 from collections import defaultdict
 
 log = sys.argv[1]
-mapf = sys.argv[2] if len(sys.argv) > 2 else _os_raiz.path.join(RAIZ, r'port\build\gowa.map')
+mapf = sys.argv[2] if len(sys.argv) > 2 else _os_raiz.path.join(RAIZ, 'port/build/gowa.map')
 
 base = 0x140000000
 syms = []

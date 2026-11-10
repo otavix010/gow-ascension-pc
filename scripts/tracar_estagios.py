@@ -11,7 +11,7 @@ import re
 import sys
 from pathlib import Path
 
-F = Path(_os_raiz.path.join(RAIZ, r'port\spu\gowajm_0072DF80\spu_recomp.c'))
+F = Path(_os_raiz.path.join(RAIZ, 'port/spu/gowajm_0072DF80/spu_recomp.c'))
 MOD = 'gowajm_0072DF80'
 MARCA = '/* tracar_estagios.py */'
 ESTAGIOS = ('53B0 E4D0 67C0 5E30 B600 D618 BEE0 A880 B638 73E0 6AC8 7040 9A60 BFA8 B618 B630 E550 F538 '

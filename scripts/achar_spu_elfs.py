@@ -6,7 +6,7 @@ RAIZ = _os_raiz.environ.get('GOWA_RAIZ') or _os_raiz.path.dirname(_os_raiz.path.
 import struct
 import sys
 
-ELF = _os_raiz.path.join(RAIZ, r'jogo\GOWA.elf')
+ELF = _os_raiz.path.join(RAIZ, 'jogo/GOWA.elf')
 data = open(ELF, 'rb').read()
 pos = 0
 while True:

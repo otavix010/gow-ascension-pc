@@ -8,7 +8,7 @@ import re
 import sys
 from pathlib import Path
 
-DIR = Path(_os_raiz.path.join(RAIZ, r'port\recompiled'))
+DIR = Path(_os_raiz.path.join(RAIZ, 'port/recompiled'))
 
 SUBS = [
     # addi com carry: { uint64_t _a = ctx->gpr[A]; uint64_t _r = _a + (uint64_t)(int64_t)(IMM); ctx->gpr[D] = _r; ... }

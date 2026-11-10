@@ -23,7 +23,7 @@ import shutil
 import sys
 from pathlib import Path
 
-H = Path(_os_raiz.path.join(RAIZ, r'ps3recomp\runtime\spu\spu_helpers.h'))
+H = Path(_os_raiz.path.join(RAIZ, 'ps3recomp/runtime/spu/spu_helpers.h'))
 BAK = H.with_name(H.name + '.sem_xv')
 
 L = 'spu__xv_ld'

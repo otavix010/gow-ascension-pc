@@ -17,13 +17,25 @@ LIFTER = os.environ.get('OTX_SPU_LIFTER') or os.path.join(_BIN, 'spu_traduz.exe'
 PONTE = os.environ.get('OTX_SPU_PONTE') or os.path.join(_BIN, 'spu_ponte.exe')
 
 
+def _exe(caminho):
+    """um .exe da engine: direto no Windows; no Linux, pelo wine de OTX_WINE (o gerar do Linux define). O wine
+    roda na pasta atual, que fica no drive Z:, então os caminhos /home/... chegam ao exe como Z:\\home\\..."""
+    if os.name == 'nt':
+        return [caminho]
+    wine = os.environ.get('OTX_WINE')
+    if not wine:
+        raise RuntimeError(f'{os.path.basename(caminho)} é um programa de Windows: no Linux, OTX_WINE precisa '
+                           'apontar para o wine (o gerar do Linux define)')
+    return [wine, caminho]
+
+
 def comando_lifter():
     """o começo da linha de comando do tradutor (um .exe roda direto; um .py, pelo Python)"""
-    return [LIFTER] if LIFTER.lower().endswith('.exe') else [sys.executable, LIFTER]
+    return _exe(LIFTER) if LIFTER.lower().endswith('.exe') else [sys.executable, LIFTER]
 
 
 def _roda(args):
-    r = subprocess.run([PONTE] + [str(a) for a in args], capture_output=True)
+    r = subprocess.run(_exe(PONTE) + [str(a) for a in args], capture_output=True)
     if r.returncode != 0:
         raise RuntimeError(f'{os.path.basename(PONTE)} {args[0]} falhou ({r.returncode}): '
                            f'{r.stderr.decode("utf-8", "replace")[-400:]}')
