@@ -4,6 +4,20 @@ O Otavix Launcher mostra este arquivo na página "Novidades" do jogo. Cada atual
 "## <data> · <versão>" e o texto em português (### pt), inglês (### en) e, quando houver, espanhol (### es).
 As mais novas ficam em cima.
 
+## 10/11/2026 · gerador
+### pt
+- **Correção:** a geração não para mais com "Access is denied" quando o único Python instalado é o da Microsoft Store: o gerador usa o atalho de execução da loja.
+- **Correção:** com uma cópia reduzida do jogo que circula (sem os idiomas, o multiplayer e os extras), a geração explica que é preciso o disco completo, em vez de pedir para copiar de novo.
+- **Mensagem:** o aviso de processador sem AVX2 cita os APUs AMD A4/A6/A8/A10 de mesa das séries 6000 a 8000, que não têm AVX2.
+### en
+- **Fix:** generation no longer stops with "Access is denied" when the only Python installed is the Microsoft Store one: the generator uses the Store execution alias.
+- **Fix:** with a reduced copy of the game that circulates (without the languages, multiplayer and extras), generation explains that the complete disc is needed instead of asking to copy it again.
+- **Message:** the warning for processors without AVX2 now names the AMD A4/A6/A8/A10 desktop APUs of the 6000 to 8000 series, which lack AVX2.
+### es
+- **Corrección:** la generación ya no se detiene con "Access is denied" cuando el único Python instalado es el de Microsoft Store: el generador usa el alias de ejecución de la tienda.
+- **Corrección:** con una copia reducida del juego que circula (sin los idiomas, el multijugador y los extras), la generación explica que hace falta el disco completo, en lugar de pedir copiarlo de nuevo.
+- **Mensaje:** el aviso de procesador sin AVX2 menciona las APU AMD A4/A6/A8/A10 de escritorio de las series 6000 a 8000, que no tienen AVX2.
+
 ## 09/11/2026 · engine 0.11.5
 ### pt
 - **Desempenho:** quando o jogo fica limitado a menos núcleos (pelo Gerenciador de Tarefas, por programas de energia ou em máquinas virtuais), ele passa a contar só os núcleos liberados e liga o modo de economia de CPU. Com 2 núcleos o jogo deixa de travar (de 4 para 30 a 40 fps), e com 4 núcleos o Stint sobe de 56 para 60 fps.

@@ -357,7 +357,18 @@ function Escolher-Python {
     }
     # reports 470/473/474: o Python da Microsoft Store (real, não o atalho que abre a loja) só existe em \WindowsApps\;
     # por último, ele serve se rodar e for 3.10+ (o atalho falha na conferência da versão)
-    foreach ($c in ($cands | Where-Object { $_ -match '\\WindowsApps\\' } | Select-Object -Unique)) {
+    # report 1034: o executável dentro de C:\Program Files\WindowsApps\ não roda direto ("Access is denied"); o que roda
+    # é o alias de execução em %LOCALAPPDATA%\Microsoft\WindowsApps. Os aliases vêm antes, o python.exe primeiro (as
+    # ferramentas chamam "python" pelo PATH), e a pasta de Program Files nunca entra no PATH.
+    $alias = Join-Path $env:LOCALAPPDATA 'Microsoft\WindowsApps'
+    $loja = @()
+    if (Test-Path -LiteralPath $alias) {
+        $loja += @('python.exe', 'python3.exe' | ForEach-Object { Join-Path $alias $_ } | Where-Object { Test-Path -LiteralPath $_ })
+        $loja += @(Get-ChildItem -LiteralPath $alias -Filter 'python3.*.exe' -ErrorAction SilentlyContinue |
+                   Sort-Object Name -Descending | ForEach-Object { $_.FullName })
+    }
+    $loja += @($cands | Where-Object { $_ -match '\\WindowsApps\\' -and $_ -notmatch '\\Program Files\\WindowsApps\\' })
+    foreach ($c in ($loja | Where-Object { $_ } | Select-Object -Unique)) {
         $v = SemExcecao { & $c -c $TESTE_PY 2>$null }
         if ("$(@($v)[0])" -match '^\d+$' -and [int]"$(@($v)[0])" -ge 310) { return $c }
     }
@@ -434,11 +445,13 @@ Etapa '1_ferramentas' {
                   "`r`n    winget install Microsoft.VisualStudio.2022.BuildTools --override `"--quiet --wait --add Microsoft.VisualStudio.Workload.VCTools --add Microsoft.VisualStudio.Component.VC.Llvm.Clang --add Microsoft.VisualStudio.Component.VC.CMake.Project --includeRecommended`""
     }
     if ($falta) { throw ("Falta instalar:`r`n  - " + ($falta -join "`r`n  - ")) }
-    SemExcecao { & python -c "import Crypto" 2>$null }
+    # report 1034: o Python escolhido, não o "python" solto do PATH (que podia ser o da Microsoft Store em
+    # C:\Program Files\WindowsApps, que não roda direto: "Access is denied")
+    SemExcecao { & $py -c "import Crypto" 2>$null }
     # o pycryptodome é só o AES mais rápido: sem ele (sem pip, ou as DLLs bloqueadas pelo Controle Inteligente de
     # Aplicativos, reports 331/334/336) as ferramentas usam o AES do Windows
     if ($LASTEXITCODE -ne 0) {
-        $null = SemExcecao { cmd /c "python -m pip install --user pycryptodome >> `"$LOG`" 2>&1" }
+        $null = SemExcecao { cmd /c "`"$py`" -m pip install --user pycryptodome >> `"$LOG`" 2>&1" }
         if ($LASTEXITCODE -ne 0) { Msg 'pycryptodome não instalado; as ferramentas usam o AES do Windows' }
     }
     $ff = Join-Path $R "dl\ffmpeg9\$FFMPEG_NOME"
@@ -549,7 +562,9 @@ function Conferir-Processador {
     $nome = "$((Get-CimInstance Win32_Processor -ErrorAction SilentlyContinue | Select-Object -First 1).Name)".Trim()
     if (-not $nome) { $nome = 'sem nome no Windows' }
     throw ("o seu processador ($nome) não tem AVX2, e o port precisa dele: Intel Core de 4ª geração (Haswell, 2013) " +
-           'em diante, ou AMD Ryzen ou FX da série Excavator (2015) em diante. O jogo também pede um processador forte: ' +
+           'em diante, ou AMD Ryzen, ou AMD com núcleos Excavator (2015). Os APUs AMD A4/A6/A8/A10 de mesa das séries ' +
+           '6000, 7000 e 8000 (Kaveri e Godavari, como o A8-8650B) têm núcleos Steamroller e não têm AVX2 (report 1038). ' +
+           'O jogo também pede um processador forte: ' +
            'mesmo com AVX2, os de 4 núcleos ficam abaixo de 15 fps.')
 }
 Conferir-Processador
@@ -1129,6 +1144,16 @@ function Conferir-Arquivos([string]$pg) {
         }
         if (-not $f) { $ruins += "$nome (falta)" }
         elseif ($f.Length -ne [int64]$tam) { $ruins += ("{0} ({1:N0} bytes, deviam ser {2:N0})" -f $nome, $f.Length, [int64]$tam) }
+    }
+    # Reports 1026-1029, 1033, 1036, 1037, 1043, 1045 (09/11): vários jogadores com a MESMA cópia, GAME.PSARC com
+    # 4.801.906 bytes e sem os pacotes de idiomas, do multiplayer e dos extras: uma versão reduzida que circula, não uma
+    # cópia interrompida. Copiar de novo não resolve; a mensagem diz isso.
+    $gp = Get-Item -LiteralPath (Join-Path $pg 'USRDIR\GAME.PSARC') -Force -ErrorAction SilentlyContinue
+    if ($ruins -and $gp -and $gp.Length -eq 4801906) {
+        throw ("a sua cópia do jogo é uma versão reduzida (sem os idiomas, o multiplayer e os extras, e com o " +
+               "GAME.PSARC modificado), e o port precisa do disco completo: $($ruins.Count) arquivo(s) faltando ou " +
+               "diferentes. Copiar de novo a mesma versão não resolve: use uma cópia completa do disco americano " +
+               '(BCUS98232) e, no launcher, clique em "Escolher o disco de novo".')
     }
     if ($ruins) {
         throw ("a sua cópia do jogo está incompleta: $($ruins.Count) arquivo(s) do disco faltando ou cortados: " +

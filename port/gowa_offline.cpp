@@ -1236,13 +1236,23 @@ static void gowa_register_task_lifts(void)
 {
     gowa_register_jobmod_lifts();
     if (getenv("GOWA_NO_TASKLIFT")) return;
-    spu_begin_image(GOWA_IMG_TASK_8E4F);
-    spu_8e4f213617fb468dc09ae1a03a0b333b6f22ccbb4c24ee36d3a0e11c0a94b4d8_spu_recomp_register();
-    spu_begin_image(0);
-    spu_overlay_register_region(0x006C8600u, 0x9900u, GOWA_IMG_TASK_8E4F);
-    fprintf(stderr, "[gowa] tarefas do taskset (ELF 0x6C8500) registradas como overlay nativo (imagem %d)\n",
-            GOWA_IMG_TASK_8E4F);
+    /* 10/11 (report 1050 e outro jogador): a câmera presa no alto da ponte do Amuleto de Ouroboros (cap. 13), sem a
+     * cutscene seguinte. Bisseção com a repetição do controle (PAD_REPETE): só a tarefa ELF 0x6BA800 nativa causa
+     * (pular ela: 5 de 6 rodadas boas; pular qualquer outra: 0 de 2; sem pular: ~1 de 13). Ela quase não roda fora
+     * das cenas do amuleto (Stint e Lan260 com o mesmo fps), e nelas interpretada custa ~20% (54 -> 43 fps).
+     * Interpretada por padrão NÃO serve: na área Cyn, parado, o jogo cai de 51 para 10,7 fps (2x). Fica nativa;
+     * GOWA_TASKLIFT_SKIP=6BA800 só para a bancada, até achar a divergência da tradução. */
     const char* skip = getenv("GOWA_TASKLIFT_SKIP");
+    /* 10/11: GOWA_TASKLIFT_SKIP=6C8500 também deixa interpretadas as tarefas do taskset wid 3 (bisseção da câmera
+     * do Ouroboros, reports 1050 e afins) */
+    if (!(skip && strstr(skip, "6C8500"))) {
+        spu_begin_image(GOWA_IMG_TASK_8E4F);
+        spu_8e4f213617fb468dc09ae1a03a0b333b6f22ccbb4c24ee36d3a0e11c0a94b4d8_spu_recomp_register();
+        spu_begin_image(0);
+        spu_overlay_register_region(0x006C8600u, 0x9900u, GOWA_IMG_TASK_8E4F);
+        fprintf(stderr, "[gowa] tarefas do taskset (ELF 0x6C8500) registradas como overlay nativo (imagem %d)\n",
+                GOWA_IMG_TASK_8E4F);
+    }
     for (size_t i = 0; i < sizeof g_gowa_tasks / sizeof g_gowa_tasks[0]; i++) {
         char key[16]; snprintf(key, sizeof key, "%X", g_gowa_tasks[i].elf_va);
         if (skip && strstr(skip, key)) continue;
