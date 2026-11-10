@@ -4,6 +4,17 @@ O Otavix Launcher mostra este arquivo na página "Novidades" do jogo. Cada atual
 "## <data> · <versão>" e o texto em português (### pt), inglês (### en) e, quando houver, espanhol (### es).
 As mais novas ficam em cima.
 
+## 10/11/2026 · launcher 1.0.90
+### pt
+- **Opções:** o gowa.exe aberto direto da pasta passa a usar as opções salvas no launcher (resolução, fps e as demais); abrindo pelo launcher, nada muda.
+- **Correção:** a geração não para mais na compilação quando o jogo foi movido de disco ou uma geração anterior foi interrompida ("VerifyGlobs.cmake"): o gerador refaz a compilação do zero.
+### en
+- **Options:** gowa.exe opened directly from its folder now uses the options saved in the launcher (resolution, fps and the rest); opening it through the launcher works as before.
+- **Fix:** generation no longer stops at the build step when the game was moved to another drive or an earlier generation was interrupted ("VerifyGlobs.cmake"): the generator redoes the build from scratch.
+### es
+- **Opciones:** el gowa.exe abierto directamente desde su carpeta ahora usa las opciones guardadas en el launcher (resolución, fps y las demás); al abrirlo desde el launcher, nada cambia.
+- **Corrección:** la generación ya no se detiene en la compilación cuando el juego se movió a otro disco o una generación anterior se interrumpió ("VerifyGlobs.cmake"): el generador rehace la compilación desde cero.
+
 ## 10/11/2026 · engine 0.11.6
 ### pt
 - **Correção:** controles paralelos (clones) de PS4 que se apresentam como DualShock 4 mas mandam os dados noutro formato, e que o jogo ignorava, passam a ser lidos como controle genérico.
