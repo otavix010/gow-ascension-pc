@@ -244,6 +244,15 @@ function Baixar([string]$url, [string]$destino) {
             # curl 35 (CRYPT_E_NO_REVOCATION_CHECK): a rede ou o antivírus do jogador não deixa o schannel consultar a
             # revogação do certificado (report 47 do launcher, no Dante); de novo sem essa consulta, o certificado ainda conferido
             if ($cod -eq 35) { $cod = Curl-Com-Progresso $curl.Source $url $part '--ssl-no-revoke' }
+            # reports 1057 e 1061 (10/11): conexão cortada no meio (curl 56) ou resposta vazia (curl 52), comuns em
+            # redes que derrubam conexões longas; o --retry do curl não repete esses. Até 3 tentativas a mais, com
+            # espera crescente, continuando de onde parou (-C -), antes do download pelo PowerShell.
+            for ($t = 1; $t -le 3 -and $cod -in 7, 18, 28, 52, 55, 56; $t++) {
+                Msg "a conexão caiu no download (curl $cod); tentando de novo em $(5 * $t) s ($t de 3)"
+                Start-Sleep -Seconds (5 * $t)
+                $cod = Curl-Com-Progresso $curl.Source $url $part '-C - --retry-all-errors --retry-delay 3'
+                if ($cod -eq 33) { Remove-Item $part -ErrorAction SilentlyContinue; $cod = Curl-Com-Progresso $curl.Source $url $part '--retry-all-errors --retry-delay 3' }
+            }
             if ($cod -ne 0) { $erroCurl = "curl $cod" }
         } catch {
             $erroCurl = "o curl.exe não pôde rodar: $($_.Exception.Message)"
@@ -281,7 +290,16 @@ function Exec([string]$log, [string]$linha) {
     Anotar $log "`r`n> $linha"
     cmd /c "$linha >> `"$log`" 2>&1"
     if ($LASTEXITCODE -ne 0) {
-        Write-Host (Get-Content $log -Tail 25 | Out-String) -ForegroundColor DarkGray
+        $cauda = Get-Content $log -Tail 25 | Out-String
+        Write-Host $cauda -ForegroundColor DarkGray
+        # reports 1047, 1049 e 1062 (10/11): o Windows bloqueou um programa do gerador ("bloqueado pela política do
+        # Device Guard", o Controle Inteligente de Aplicativos ou o Controle de Aplicativos do Windows Defender)
+        if ($cauda -match 'Device Guard|Application Control|Controle de Aplicativos|Controle Inteligente|Smart App Control') {
+            throw ("o Windows bloqueou um programa do gerador (o Controle Inteligente de Aplicativos, também chamado " +
+                   "Device Guard): $linha. Em Segurança do Windows > Controle de aplicativos e navegador > Controle " +
+                   "Inteligente de Aplicativos, deixe Desativado e gere de novo. Atenção: depois de desligado, o Windows " +
+                   "só deixa ligar de novo reinstalando o sistema.`r`nlog completo: $log")
+        }
         throw "falhou (código $LASTEXITCODE): $linha`r`nlog completo: $log"
     }
 }
@@ -918,7 +936,19 @@ function Tirar-Ligacao([string]$pg) {
     $it = Get-Item -LiteralPath $pg -Force -ErrorAction SilentlyContinue
     if (-not $it) { return }
     if ($it.LinkType) { SemExcecao { cmd /c "rmdir `"$pg`" 2>&1" } | Out-Null; return }   # só a junção
-    if (Test-Path -LiteralPath (Join-Path $pg $MARCA_ESPELHO)) { SemExcecao { cmd /c "rmdir /s /q `"$pg`" 2>&1" } | Out-Null }
+    if (Test-Path -LiteralPath (Join-Path $pg $MARCA_ESPELHO)) { SemExcecao { cmd /c "rmdir /s /q `"$pg`" 2>&1" } | Out-Null; return }
+    # report 1054 (10/11): uma PASTA de verdade de uma geração antiga no lugar da ligação; o mklink /J falhava as três
+    # vezes ("a junção do disco não abriu") e o plano B parava pedindo para apagá-la. Vazia, sai; com conteúdo (pode
+    # ser uma cópia posta ali à mão), é renomeada, nunca apagada, e a ligação nova segue.
+    if (-not @(Get-ChildItem -LiteralPath $pg -Force -ErrorAction SilentlyContinue).Count) {
+        Remove-Item -LiteralPath $pg -Force -ErrorAction SilentlyContinue
+        return
+    }
+    $novo = "$pg.antigo-$(Get-Date -Format yyyyMMdd-HHmmss)"
+    try {
+        Rename-Item -LiteralPath $pg -NewName (Split-Path -Leaf $novo) -ErrorAction Stop
+        Msg "$pg era uma pasta de verdade de uma geração antiga: renomeada para $novo (nada foi apagado)"
+    } catch { Msg "$pg é uma pasta de verdade e não deu para renomeá-la: $($_.Exception.Message)" }
 }
 function Espelhar-Disco([string]$de, [string]$para) {
     if (-not ('LinkFisico' -as [type])) { throw 'links físicos indisponíveis neste PC' }
@@ -1293,7 +1323,14 @@ Etapa '2_jogo' {
         $Update = Join-Path $R 'dl\BCUS98232_update_1.04.pkg'
         if (-not (Test-Path -LiteralPath $Update) -or (Get-FileHash -LiteralPath $Update -Algorithm SHA1).Hash.ToLower() -ne $UPDATE_SHA1) {
             Msg 'baixando o update 1.04 oficial do servidor da PlayStation (235 MB)'
-            Baixar $UPDATE_URL $Update
+            # report 1057 (10/11): o servidor da Sony fechou a conexão sem resposta (curl 52) mesmo depois das novas
+            # tentativas; o jogador baixa pelo navegador e escolhe o arquivo no launcher (o gerador aceita o .pkg)
+            try { Baixar $UPDATE_URL $Update }
+            catch {
+                throw ("não deu para baixar o update 1.04 do servidor da PlayStation ($($_.Exception.Message)). Baixe-o " +
+                       "pelo navegador neste endereço: $UPDATE_URL -- e, no launcher, escolha esse arquivo .pkg como update " +
+                       '(ou ponha o .pkg na pasta do disco do jogo) e gere de novo.')
+            }
         }
         if ((Get-FileHash -LiteralPath $Update -Algorithm SHA1).Hash.ToLower() -ne $UPDATE_SHA1) {
             Remove-Item -LiteralPath $Update -Force

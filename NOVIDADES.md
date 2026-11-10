@@ -10,16 +10,28 @@ As mais novas ficam em cima.
 - **Correção:** a geração não para mais com "Access is denied" quando o único Python instalado é o da Microsoft Store: o gerador usa o atalho de execução da loja.
 - **Correção:** com uma cópia reduzida do jogo que circula (sem os idiomas, o multiplayer e os extras), a geração explica que é preciso o disco completo, em vez de pedir para copiar de novo.
 - **Mensagem:** o aviso de processador sem AVX2 cita os APUs AMD A4/A6/A8/A10 de mesa das séries 6000 a 8000, que não têm AVX2.
+- **Correção:** downloads que caíam no meio (engine, FFmpeg e update 1.04) são retomados de onde pararam, até 3 vezes, antes de desistir; se o update da Sony ainda não baixar, a mensagem diz como baixá-lo pelo navegador.
+- **Correção:** uma pasta PS3_GAME de uma geração antiga não impede mais a ligação do disco ("a junção do disco não abriu"): o gerador a renomeia, sem apagar nada.
+- **Mensagem:** quando o Windows bloqueia um programa do gerador (Controle Inteligente de Aplicativos / Device Guard), a mensagem explica onde desligar e avisa que só volta reinstalando o Windows.
+- **Opções:** os nomes da resolução mostram o fator (1x a 4x) e em que telas cada uma funciona como supersampling.
 ### en
 - **Fix:** third-party (clone) PS4 controllers that identify as a DualShock 4 but send data in another format, which the game ignored, are now read as a generic controller.
 - **Fix:** generation no longer stops with "Access is denied" when the only Python installed is the Microsoft Store one: the generator uses the Store execution alias.
 - **Fix:** with a reduced copy of the game that circulates (without the languages, multiplayer and extras), generation explains that the complete disc is needed instead of asking to copy it again.
 - **Message:** the warning for processors without AVX2 now names the AMD A4/A6/A8/A10 desktop APUs of the 6000 to 8000 series, which lack AVX2.
+- **Fix:** downloads that dropped midway (engine, FFmpeg and the 1.04 update) resume where they stopped, up to 3 times, before giving up; if the Sony update still does not download, the message explains how to get it through the browser.
+- **Fix:** a PS3_GAME folder left by an older generation no longer blocks linking the disc ("the disc junction did not open"): the generator renames it, deleting nothing.
+- **Message:** when Windows blocks a generator program (Smart App Control / Device Guard), the message explains where to turn it off and warns that it only comes back by reinstalling Windows.
+- **Options:** the resolution names show the factor (1x to 4x) and on which screens each one works as supersampling.
 ### es
 - **Corrección:** los mandos de PS4 genéricos (clones) que se presentan como DualShock 4 pero envían los datos en otro formato, y que el juego ignoraba, ahora se leen como mando genérico.
 - **Corrección:** la generación ya no se detiene con "Access is denied" cuando el único Python instalado es el de Microsoft Store: el generador usa el alias de ejecución de la tienda.
 - **Corrección:** con una copia reducida del juego que circula (sin los idiomas, el multijugador y los extras), la generación explica que hace falta el disco completo, en lugar de pedir copiarlo de nuevo.
 - **Mensaje:** el aviso de procesador sin AVX2 menciona las APU AMD A4/A6/A8/A10 de escritorio de las series 6000 a 8000, que no tienen AVX2.
+- **Corrección:** las descargas que se cortaban a mitad (engine, FFmpeg y update 1.04) se reanudan donde quedaron, hasta 3 veces, antes de desistir; si el update de Sony aún no baja, el mensaje explica cómo descargarlo con el navegador.
+- **Corrección:** una carpeta PS3_GAME de una generación anterior ya no impide enlazar el disco ("la unión del disco no se abrió"): el generador la renombra, sin borrar nada.
+- **Mensaje:** cuando Windows bloquea un programa del generador (Control inteligente de aplicaciones / Device Guard), el mensaje explica dónde desactivarlo y avisa que solo vuelve reinstalando Windows.
+- **Opciones:** los nombres de la resolución muestran el factor (1x a 4x) y en qué pantallas cada una funciona como supersampling.
 
 ## 09/11/2026 · engine 0.11.5
 ### pt
