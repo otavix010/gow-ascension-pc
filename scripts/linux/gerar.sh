@@ -299,7 +299,15 @@ ppu() {
     ex "$PY" scripts/remendos_ppu.py aplicar
     ex "$PY" scripts/sonda.py por func_001C05A4 loc_0039C710 loc_00415914 func_00415120
     ex "$PY" scripts/gerar_imports_inc.py
+    md5_ppu > "$R/port/recompiled/lifter_md5.txt"
 }
+# a tradução do PPU é refeita quando muda o que a gera (o tradutor no pacote da engine, o preâmbulo ou os remendos;
+# 11/11: o remendo do Ouroboros só chega a quem já gerou traduzindo de novo), como no gerar.ps1; sem marca, também refaz
+md5_ppu() { cat "$R/engine/manifesto.json" "$R/port/ppu_recomp_preambulo.h" "$R/scripts/remendos_ppu.py" 2>/dev/null | md5sum | cut -d' ' -f1; }
+if [ -f "$OUT/4_ppu.ok" ] && [ "$(cat "$R/port/recompiled/lifter_md5.txt" 2>/dev/null)" != "$(md5_ppu)" ]; then
+    msg "4_ppu: o tradutor do PPU ou os remendos mudaram nesta atualização; traduzindo de novo"
+    rm -f "$OUT/4_ppu.ok" "$OUT/6_compilar.ok" "$OUT/7_jogar.ok"
+fi
 etapa 4_ppu ppu
 
 # ---------------------------------------------------------------------------- SPU

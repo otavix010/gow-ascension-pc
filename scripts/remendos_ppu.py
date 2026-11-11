@@ -15,6 +15,8 @@ Remendos:
   0x9AA4A4) nas esperas do próprio jogo, que leem 0x9AA4A8 (nunca escrito), e na
   entrada de quem grava a tabela de estado do heap de VRAM. Detalhes em
   gowa_texstream_wait (port/gowa_offline.cpp) e no PROGRESSO.md (17/10).
+  ouroboros -- soft lock da 2a levantada da ponte do Ouroboros (câmera presa, a cena
+  do Oráculo não sai): detalhes em port/gowa_ouroboros.cpp (11/11).
 """
 import os as _os_raiz
 RAIZ = _os_raiz.environ.get('GOWA_RAIZ') or _os_raiz.path.dirname(_os_raiz.path.dirname(_os_raiz.path.abspath(__file__)))  # raiz do projeto
@@ -25,7 +27,7 @@ from pathlib import Path
 
 DIR = Path(_os_raiz.path.join(RAIZ, 'port/recompiled'))
 MARCA = '/*REMENDO*/'
-DECL = 'extern "C" void gowa_texstream_wait(void); ' + MARCA
+DECL = 'extern "C" void gowa_texstream_wait(void); extern "C" void gowa_ouroboros_posta(ppu_context*); ' + MARCA
 
 # (função, linha a inserir logo após a abertura)
 ENTRADAS = [
@@ -34,6 +36,9 @@ ENTRADAS = [
     ('func_003973C8', 'gowa_texstream_wait(); ' + MARCA),   # escritores da tabela (carga de recurso,
     ('func_0039490C', 'gowa_texstream_wait(); ' + MARCA),   #  streaming) -- vistos com GOWA_TSRACE e
     ('func_00395AE8', 'gowa_texstream_wait(); ' + MARCA),   #  GOWA_WGUARD com o job em voo
+    # 11/11, Ouroboros (2a levantada da ponte): quem posta os eventos de animação; port/gowa_ouroboros.cpp posta o
+    # "abaixar o amuleto" que a cena espera quando o Kratos sai da trava fora do amuleto
+    ('func_001FED58', 'gowa_ouroboros_posta(ctx); ' + MARCA),
 ]
 
 

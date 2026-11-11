@@ -117,7 +117,8 @@ foreach ($c in @(@('2_jogo', 'jogo\GOWA.elf'), @('3_firmware', 'fw\lle\libsre_im
 $marcaLifter = Join-Path $R 'port\recompiled\lifter_md5.txt'
 function Md5-Lifter {
     $arqs = @(Get-Item -LiteralPath (Join-Path $ENG 'manifesto.json') -ErrorAction SilentlyContinue) +
-            @(Get-Item -LiteralPath (Join-Path $R 'port\ppu_recomp_preambulo.h'))
+            @(Get-Item -LiteralPath (Join-Path $R 'port\ppu_recomp_preambulo.h')) +
+            @(Get-Item -LiteralPath (Join-Path $R 'scripts\remendos_ppu.py'))   # 11/11: remendo novo (Ouroboros) só chega traduzindo de novo
     $linhas = $arqs | Sort-Object FullName | ForEach-Object {
         "$($_.FullName.Substring($R.Length)) $((Get-FileHash -LiteralPath $_.FullName -Algorithm MD5).Hash)" }
     $md5 = [Security.Cryptography.MD5]::Create()

@@ -176,6 +176,7 @@ add_executable(${PROJECT_NAME}
     ${GOWA_MAIN}
     stubs.cpp
     gowa_offline.cpp
+    gowa_ouroboros.cpp                 # Ouroboros: evento do amuleto que a cena espera (soft lock da 2a ponte)
     gowa_confere.cpp                   # conferência dos jobs de SPU (GOWA_CONF / GOWA_CONF_REPLAY)
     otavix_osd.c                       # o medidor padrÃ£o dos ports Otavix (F10)
     otavix_legenda.c                   # a legenda das teclas (F1)

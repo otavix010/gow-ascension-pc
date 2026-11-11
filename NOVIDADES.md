@@ -4,6 +4,17 @@ O Otavix Launcher mostra este arquivo na página "Novidades" do jogo. Cada atual
 "## <data> · <versão>" e o texto em português (### pt), inglês (### en) e, quando houver, espanhol (### es).
 As mais novas ficam em cima.
 
+## 11/11/2026 · correção do Ouroboros
+### pt
+- **Correção:** na segunda vez que se ergue a ponte com o Amuleto de Uroboros, soltar o analógico logo antes de a ponte ficar inteira deixava a câmera presa e a cena do Oráculo não começava. Agora a cena começa normalmente.
+- **Atualização:** nesta versão o gerador traduz o código do jogo de novo e recompila, o que leva alguns minutos a mais na primeira vez.
+### en
+- **Fix:** the second time the bridge is raised with the Amulet of Uroboros, letting go of the stick just before the bridge was whole left the camera stuck and the Oracle cutscene never started. The cutscene now starts normally.
+- **Update:** with this version the generator translates the game code again and rebuilds, which takes a few extra minutes the first time.
+### es
+- **Corrección:** la segunda vez que se levanta el puente con el Amuleto de Uróboros, soltar el analógico justo antes de que el puente estuviera entero dejaba la cámara trabada y la escena del Oráculo no empezaba. Ahora la escena empieza con normalidad.
+- **Actualización:** con esta versión el generador traduce el código del juego de nuevo y recompila, lo que tarda unos minutos más la primera vez.
+
 ## 11/11/2026 · versão Linux (beta) · engine 0.11.7
 ### pt
 - **Novo:** versão para Linux em beta, testada no SteamOS (Legion Go): o gerador roda no próprio Linux e o jogo abre pelo Proton, com o controle, no modo jogo da Steam. Outras distribuições ainda não foram testadas.
