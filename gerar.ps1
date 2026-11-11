@@ -713,6 +713,19 @@ function Achar-PS3Game([string]$raiz) {
     if ($p) { return $p.Parent.FullName }
     return $null
 }
+# o arquivo do disco (.iso/.7z/.zip/.rar) na pasta ou até $prof níveis abaixo: um só, ou, com vários, a única .iso
+# (report 1077: a .iso e o .zip dela lado a lado). Partes 2+ de um .rar dividido e as pastas do launcher/port não contam.
+function Arquivo-Do-Disco([string]$d, [int]$prof = 3) {
+    $raizPort = [IO.Path]::GetFullPath($R).TrimEnd('\')
+    $c = @(Get-ChildItem -LiteralPath $d -Recurse -Depth $prof -File -Force -ErrorAction SilentlyContinue |
+           Where-Object { $_.Name -match '\.(7z|zip|rar|iso)$' -and $_.Name -notmatch '\.part0*([2-9]|[1-9]\d+)\.rar$' -and
+                          -not $_.FullName.StartsWith($raizPort, [StringComparison]::OrdinalIgnoreCase) -and
+                          $_.FullName -notmatch '\\Otavix[^\\]*\\' -and $_.Length -gt 100MB })
+    if ($c.Count -eq 1) { return $c[0].FullName }
+    $iso = @($c | Where-Object { $_.Extension -ieq '.iso' })
+    if ($iso.Count -eq 1) { return $iso[0].FullName }
+    return $null
+}
 # o disco também pode vir compactado: extrai uma vez para disco\ (o tar do Windows lê 7z, zip, rar e iso)
 function Achar-Disco([string]$d) {
     # report 818: o disco salvo está num drive que não está conectado agora (HD externo, pendrive, drive virtual)
@@ -742,7 +755,11 @@ function Achar-Disco([string]$d) {
             Msg "extraindo $d para $dx (uns 35 GB; leva alguns minutos)"
             New-Item -ItemType Directory -Force $dx | Out-Null
             SemExcecao { & "$env:SystemRoot\System32\tar.exe" -xf $d -C $dx }
-            if ($LASTEXITCODE -ne 0) { throw "falhou a extração de $d (tar $LASTEXITCODE). Extraia o arquivo numa pasta e escolha a pasta." }
+            if ($LASTEXITCODE -ne 0) {
+                # o tar do Windows não junta as partes de um .rar dividido (.part1.rar, .r00)
+                $partes = if ($d -match '\.(part0*1\.rar|r00)$') { ' Ele é a 1a parte de um arquivo dividido: o tar do Windows não junta as partes.' } else { '' }
+                throw "falhou a extração de $d (tar $LASTEXITCODE).$partes Extraia o arquivo com o 7-Zip ou o WinRAR numa pasta e escolha a pasta."
+            }
             $achou = Achar-PS3Game $dx
             # um .7z/.zip com a .iso dentro: extrai a .iso também e apaga a intermediária
             if (-not $achou) {
@@ -799,9 +816,33 @@ function Achar-Disco([string]$d) {
     }
     $achou = Achar-PS3Game $d
     if (-not $achou) {
-        # uma pasta com só o arquivo do disco dentro
-        $arq = @(Get-ChildItem -LiteralPath $d -File -ErrorAction SilentlyContinue | Where-Object { $_.Name -match '\.(7z|zip|rar|iso)$' })
-        if ($arq.Count -eq 1) { return (Achar-Disco $arq[0].FullName) }
+        # o arquivo do disco nesta pasta ou até 3 níveis abaixo (reports 1072/1080/1081: a pasta do release dentro da
+        # pasta escolhida, com o arquivo lá dentro)
+        $arq = Arquivo-Do-Disco $d
+        if ($arq) { Msg "usando o arquivo do jogo $arq"; return (Achar-Disco $arq) }
+        $cheio0 = [IO.Path]::GetFullPath($d).TrimEnd('\')
+        # report 1067: a pasta PS3_UPDATE do disco (a atualização do sistema do PS3 que vem nele, PS3UPDAT.PUP) não é o
+        # jogo; o jogo é a pasta de cima
+        if ((Split-Path -Leaf $cheio0) -ieq 'PS3_UPDATE') {
+            $pai = Split-Path $cheio0
+            $vizinho = if ($pai) { Achar-PS3Game $pai } else { $null }
+            if ($vizinho) { Msg "a pasta escolhida é a PS3_UPDATE do disco (a atualização do sistema do PS3), não o jogo; usando o disco em $vizinho"; return $vizinho }
+        }
+        # report 1073: a pasta só com o README (ou outros textos) que veio com o arquivo; o arquivo do jogo costuma
+        # estar na pasta de cima
+        $soTexto = @(Get-ChildItem -LiteralPath $d -Force -ErrorAction SilentlyContinue |
+                     Where-Object { $_.PSIsContainer -or $_.Extension -notmatch '^\.(txt|nfo|url|diz|sfv|md5|jpg|png|ini)$' }).Count -eq 0
+        if ($soTexto) {
+            $pai = Split-Path $cheio0
+            if ($pai) {
+                $vizinho = Achar-PS3Game $pai
+                if ($vizinho) { Msg "a pasta escolhida só tem textos (README); usando o jogo em $vizinho"; return $vizinho }
+                $arqPai = Arquivo-Do-Disco $pai 0
+                if ($arqPai) { Msg "a pasta escolhida só tem textos (README); usando o arquivo do jogo $arqPai"; return (Achar-Disco $arqPai) }
+            }
+        }
+        $rarPartes = @(Get-ChildItem -LiteralPath $d -Recurse -Depth 3 -File -ErrorAction SilentlyContinue |
+                       Where-Object { $_.Name -match '\.(part0*1\.rar|r00|001)$' } | Select-Object -First 1)
         # a PS3_GAME there that is a link leading nowhere (moved, or a circle back to the port's vfs): said as it is
         $como = ''
         if (Test-Path -LiteralPath (Join-Path $d 'PS3_GAME')) { $como = " (o PS3_GAME de lá é um atalho que não leva ao jogo: $(Descrever-Atalhos (Join-Path $d 'PS3_GAME')))" }
@@ -842,9 +883,18 @@ function Achar-Disco([string]$d) {
             $como = (' (essa pasta tem um update do jogo, o .pkg, não o disco: o update 1.04 o gerador baixa sozinho. ' +
                      'Escolha a pasta do disco, a que tem PS3_GAME, ou o arquivo .iso/.7z/.zip/.rar dele)')
         }
-        # o que há lá dentro, para quem escolheu uma pasta com nome de .iso ou a pasta errada
+        # um .rar dividido em partes (.part1.rar, .r00, .001) que não deu para usar sozinho
+        elseif ($rarPartes) {
+            $como = (" (lá dentro há um arquivo dividido em partes, $($rarPartes[0].Name): extraia-o com o 7-Zip ou o WinRAR " +
+                     'numa pasta e escolha essa pasta, a que fica com PS3_GAME)')
+        }
+        # o que há lá dentro (e um nível abaixo), para quem escolheu uma pasta com nome de .iso ou a pasta errada
         if (-not $como) {
-            $dentro = @(Get-ChildItem -LiteralPath $d -Force -ErrorAction SilentlyContinue | Select-Object -First 6 | ForEach-Object Name)
+            $dentro = @(Get-ChildItem -LiteralPath $d -Force -ErrorAction SilentlyContinue | Select-Object -First 6 | ForEach-Object {
+                if ($_.PSIsContainer) {
+                    $sub = @(Get-ChildItem -LiteralPath $_.FullName -Force -ErrorAction SilentlyContinue | Select-Object -First 4 | ForEach-Object Name)
+                    "$($_.Name)\ [$(if ($sub) { $sub -join ', ' } else { 'vazia' })]"
+                } else { "$($_.Name) ($([math]::Round($_.Length / 1MB)) MB)" } })
             $como = " (dentro dela há: $(if ($dentro) { $dentro -join ', ' } else { 'nada' }))"
         }
         throw ("não achei o jogo (PS3_GAME com USRDIR) em $d$como. No launcher, clique em `"Escolher o disco de novo`" e " +
@@ -1748,9 +1798,35 @@ $usada = if ($bdir -eq 'build_native') { 'nativa' } else { 'portatil' }
 Msg "versão da build: escolhida $escolha, usada $usada ($motivo)"
 
 # ---------------------------------------------------------------------------- jogar.cmd
+# report 1074: a cópia das DLLs do FFmpeg parava com "avcodec-63.dll em uso por outro processo" (o gowa.exe de uma
+# geração anterior aberto, ou o antivírus examinando o arquivo). As iguais às de lá ficam (gerar de novo com o jogo
+# aberto não precisa trocar nada); as outras, com algumas tentativas, e no fim uma mensagem que diz o que segura o arquivo.
+function Copiar-Dlls([string]$de, [string]$para) {
+    foreach ($f in @(Get-ChildItem -Path $de -Filter *.dll -File)) {
+        $alvo = Join-Path $para $f.Name
+        $igual = $false
+        try {
+            $igual = (Test-Path -LiteralPath $alvo -PathType Leaf) -and (Get-Item -LiteralPath $alvo).Length -eq $f.Length -and
+                     (Get-FileHash -LiteralPath $alvo -Algorithm SHA256 -ErrorAction Stop).Hash -eq (Get-FileHash -LiteralPath $f.FullName -Algorithm SHA256).Hash
+        } catch { }   # a de lá nem se lê (travada de vez): tenta copiar, e a mensagem do fim explica
+        if ($igual) { continue }
+        $ultimo = $null
+        foreach ($t in 1..6) {
+            try { Copy-Item -LiteralPath $f.FullName -Destination $alvo -Force -ErrorAction Stop; $ultimo = $null; break }
+            catch { $ultimo = $_; Start-Sleep -Seconds 3 }
+        }
+        if ($ultimo) {
+            $abertos = @(Get-Process -Name gowa -ErrorAction SilentlyContinue | Where-Object {
+                try { $_.Path -and $_.Path.StartsWith($R, [StringComparison]::OrdinalIgnoreCase) } catch { $false } })
+            $quem = if ($abertos) { "o jogo ainda está aberto (gowa.exe, processo $(($abertos | ForEach-Object Id) -join ', ')): feche o jogo" }
+                    else { 'outro programa está usando o arquivo (em geral o antivírus examinando a DLL): espere um pouco ou libere a pasta do port no antivírus' }
+            throw "não consegui copiar $($f.Name) para $para ($($ultimo.Exception.Message)). Provável causa: $quem, e gere de novo."
+        }
+    }
+}
 Etapa '7_jogar' {
     $b = Join-Path $R "port\$bdir"
-    Copy-Item (Join-Path $R "dl\ffmpeg9\$FFMPEG_NOME\bin\*.dll") $b -Force
+    Copiar-Dlls (Join-Path $R "dl\ffmpeg9\$FFMPEG_NOME\bin") $b
     $j = Join-Path $R 'jogar.cmd'
     Set-Content -Path $j -Encoding ASCII -Value @(
         '@echo off',
