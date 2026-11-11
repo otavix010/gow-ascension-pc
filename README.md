@@ -44,7 +44,7 @@ O port tem **duas versões**, geradas a partir do mesmo código e do mesmo disco
 | Sistema | Windows 10/11 64 bits, GPU com Direct3D 12 | SteamOS (Steam Deck, Legion Go S) e Linux 64 bits, pelo Proton |
 | Como jogar | pelo launcher, ou `gerar.cmd` e `jogar.cmd` | pelo launcher, ou `scripts/linux/gerar.sh` e `jogar.sh` |
 | Vídeo | Direct3D 12 | Direct3D 12 pelo Proton (vkd3d, sobre Vulkan) |
-| Build | AVX-512 se a CPU tiver, senão AVX2 | portátil (AVX2) |
+| Build | AVX-512 se a CPU tiver, senão AVX2, senão a **compatível** (sem AVX2, mais lenta) | portátil (AVX2) |
 | Desempenho medido | [tabela abaixo](#desempenho-medido) | [tabela abaixo](#desempenho-medido) e [docs/desempenho_portatil.md](docs/desempenho_portatil.md) |
 
 Nas duas, **você traz o seu disco**: o launcher gera o jogo no seu aparelho a partir da sua cópia. Detalhes do Linux: [Linux / SteamOS (beta)](#linux--steamos-beta).
@@ -141,6 +141,16 @@ O PS3 tem um processador central (PPU, PowerPC), seis co-processadores vetoriais
 | **Notebook** | Windows | Core i5-10300H (4/8, sem AVX-512, ~2,8 GHz sustentado) | GTX 1650 | sem AVX-512 | **~8** | — |
 | **Portátil** | **Linux** (SteamOS) | Ryzen Z1 Extreme (8/16), 15 W | Radeon 780M (integrada) | portátil (AVX2) | não medido | veja abaixo |
 
+### Versão Compatível (sem AVX2) × versão normal
+
+A diferença vem só das instruções (a mesma máquina nas duas), sem limitador, médias de 5 s, 0 travamentos. Combate pesado = checkpoint Cyn300; começo do jogo = checkpoint Stint500. Num processador antigo de verdade, com núcleos mais lentos, a queda é maior.
+
+| Máquina | Cena | Versão normal (AVX2) | Versão compatível (sem AVX2) |
+|---|---|---|---|
+| **PC 1** (Ryzen 7 9800X3D, Windows) | combate pesado | 67,7–69,3 FPS | 24,0–24,3 FPS |
+| **Portátil** (Legion Go S, SteamOS, 15 W) | combate pesado | ~25 FPS | 9,7 FPS |
+| **Portátil** (15 W) | começo do jogo | ~48 FPS | 24,6 FPS |
+
 ### Portátil (Linux): Lenovo Legion Go S
 
 Hardware: Lenovo Legion Go S (83N6), **AMD Ryzen Z1 Extreme** (8 núcleos, 16 threads), GPU integrada **Radeon 780M** (RDNA3), 32 GB de RAM de fábrica, com 8 GB reservados para a GPU (VRAM) e ~23 GB para o sistema (a VRAM reservada é configurável; ainda vamos testar com mais), SteamOS 3.10, Proton GE-Proton11-7. Port: build portátil (AVX2), 6 SPUs (padrão em aparelho com bateria), resolução interna 1280x720. Medido **sem o limitador de 60**, em 15 amostras de 5 s depois de carregar o checkpoint, com o Kratos parado na cena (não é o Cap. 16 nem a fase 1 do PC):
@@ -163,6 +173,7 @@ O que medimos num PC fraco (4 núcleos, sem AVX-512), o que ajudou, o que não a
 
 - **Windows 10/11 64 bits** e GPU com **Direct3D 12**, ou **Linux/SteamOS** com Proton (beta, veja [acima](#linux--steamos-beta); precisa de CPU com AVX2 e uns 15 GB livres).
 - **CPU com AVX2** (Intel Haswell em diante, AMD Zen em diante). **Com AVX-512** (Ryzen 7000/9000, Intel 11ª geração desktop) é muito mais rápido; o `gerar.ps1` escolhe sozinho.
+- **Sem AVX2** (Core i de 1ª, 2ª e 3ª geração, Xeon E3/E5 v1 e v2, AMD FX, APUs A8): existe a versão **Compatível**, que o gerador escolhe sozinho. Ela roda, mas com cerca de **um terço dos FPS** da versão normal. O mínimo é **SSE4.2**; Phenom II, Athlon II e Core 2 ficam de fora. Na opção "Versão do executável" do launcher dá para escolher "Compatível (sem AVX2, mais lenta)" à mão.
 - 16 GB de RAM. Espaço em disco: ~35 GB para o jogo extraído (se estiver compactado) e ~3 GB para a geração e a build; o disco do jogo em pasta não é copiado.
 
 ## Problemas conhecidos
@@ -184,8 +195,8 @@ As `.iso` da Redump são cifradas (feitas para gravar discos). Use a pasta com `
 **A geração parou dizendo que a cópia está incompleta.**
 Faltam arquivos do disco. Extraia ou copie o jogo de novo (confira o espaço livre e se o antivírus não apagou nada).
 
-**A geração parou dizendo que o processador não tem AVX2.**
-O port precisa de AVX2: Intel Core de 4ª geração (Haswell, 2013) em diante, ou AMD Ryzen. Nesses PCs o jogo não roda.
+**O meu processador não tem AVX2. Roda?**
+Roda, pela versão **Compatível**: atualize o port no launcher e gere de novo, que o gerador escolhe sozinho. Ela é bem mais lenta (cerca de um terço dos FPS da versão normal, e num 4 núcleos dessa época serão poucos FPS). O mínimo é SSE4.2 (Core i de 1ª geração em diante, AMD FX e os APUs A8); Phenom II, Athlon II e Core 2 não servem.
 
 **O jogo abre e fecha, ou a imagem e o som congelam.**
 Atualize o port pelo launcher (a engine 0.11.3 corrigiu uma trava com imagem e som parados). Se continuar, use **"Reportar problema"** logo depois, sem fechar o jogo: o relato leva o log.
