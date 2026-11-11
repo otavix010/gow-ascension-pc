@@ -8,11 +8,12 @@
   <a href="https://github.com/otavix010/otavix-launcher/releases/latest"><img alt="Baixar o Otavix Launcher" src="https://img.shields.io/github/v/release/otavix010/otavix-launcher?label=Otavix%20Launcher&color=b00020"></a>
   <a href="NOVIDADES.md"><img alt="Último commit" src="https://img.shields.io/github/last-commit/otavix010/gow-ascension-pc?label=%C3%BAltima%20atualiza%C3%A7%C3%A3o"></a>
   <a href="LICENSE"><img alt="Licença MIT" src="https://img.shields.io/badge/licen%C3%A7a-MIT-informational"></a>
-  <img alt="Plataforma Windows 10/11" src="https://img.shields.io/badge/plataforma-Windows%2010%2F11-0078d4">
+  <img alt="Plataformas Windows 10/11 e Linux/SteamOS" src="https://img.shields.io/badge/plataformas-Windows%20%7C%20Linux%20(beta)-0078d4">
   <img alt="PS3 → PC" src="https://img.shields.io/badge/PS3-%E2%86%92%20PC-lightgrey">
 </p>
 
 <p align="center">
+  <a href="#vers%C3%B5es-windows-e-linux">Windows e Linux</a> ·
   <a href="#como-jogar">Como jogar</a> ·
   <a href="#estado-atual">Estado atual</a> ·
   <a href="#requisitos">Requisitos</a> ·
@@ -32,9 +33,24 @@
 
 [English summary below](#english-summary)
 
+## Versões: Windows e Linux
+
+O port tem **duas versões**, geradas a partir do mesmo código e do mesmo disco:
+
+| | **Windows** | **Linux / SteamOS** |
+|---|---|---|
+| Situação | **estável**, campanha completa jogada | **beta** (desde o Otavix Launcher 1.0.92) |
+| Sistema | Windows 10/11 64 bits, GPU com Direct3D 12 | SteamOS (Steam Deck, Legion Go S) e Linux 64 bits, pelo Proton |
+| Como jogar | pelo launcher, ou `gerar.cmd` e `jogar.cmd` | pelo launcher, ou `scripts/linux/gerar.sh` e `jogar.sh` |
+| Vídeo | Direct3D 12 | Direct3D 12 pelo Proton (vkd3d, sobre Vulkan) |
+| Build | AVX-512 se a CPU tiver, senão AVX2 | portátil (AVX2) |
+| Desempenho medido | [tabela abaixo](#desempenho-medido) | [tabela abaixo](#desempenho-medido) e [docs/desempenho_portatil.md](docs/desempenho_portatil.md) |
+
+Nas duas, **você traz o seu disco**: o launcher gera o jogo no seu aparelho a partir da sua cópia. Detalhes do Linux: [Linux / SteamOS (beta)](#linux--steamos-beta).
+
 ## O que é
 
-Um port **nativo** do *God of War: Ascension* (PS3, 2013) para Windows. Não é um emulador: o código do jogo é **traduzido para C/C++ e compilado** para x86-64 (recompilação estática), em cima do [ps3recomp](https://github.com/sp00nznet/ps3recomp) do sp00nznet.
+Um port **nativo** do *God of War: Ascension* (PS3, 2013) para Windows e Linux. Não é um emulador: o código do jogo é **traduzido para C/C++ e compilado** para x86-64 (recompilação estática), em cima do [ps3recomp](https://github.com/sp00nznet/ps3recomp) do sp00nznet.
 
 Como o código do jogo não pode ser distribuído, **o seu PC gera e compila a parte do jogo a partir da sua cópia**. Um comando só faz tudo.
 
@@ -93,7 +109,7 @@ Detalhes de cada etapa, e como fazer à mão: [docs/COMO_GERAR.md](docs/COMO_GER
 
 ### Linux / SteamOS (beta)
 
-O port também roda no Linux e no SteamOS (Steam Deck, Legion Go S), pelo Proton: o launcher gera e abre o jogo (versão 1.0.92 ou mais nova do Otavix Launcher). Precisa de um Proton instalado na Steam, de `curl`, `python3`, `tar` e `xz`, de um processador com AVX2 e de uns 15 GB livres. À mão: `bash scripts/linux/gerar.sh --disco <pasta ou arquivo do disco>` (o update e o firmware são opcionais: `--update`, `--firmware`) e depois `bash jogar.sh`. O log fica em `out/jogo.log`. Sempre chame os dois scripts pelo `bash`.
+A versão Linux roda no SteamOS (Steam Deck, Legion Go S) e em outros Linux, pelo Proton. Já foi testada de ponta a ponta num **Legion Go S** (veja o desempenho): o launcher gera e abre o jogo (versão 1.0.92 ou mais nova do Otavix Launcher). Precisa de um Proton instalado na Steam, de `curl`, `python3`, `tar` e `xz`, de um processador com AVX2 e de uns 15 GB livres. À mão: `bash scripts/linux/gerar.sh --disco <pasta ou arquivo do disco>` (o update e o firmware são opcionais: `--update`, `--firmware`) e depois `bash jogar.sh`. O log fica em `out/jogo.log`. Sempre chame os dois scripts pelo `bash`. No SteamOS o launcher também cria o atalho do jogo na Steam. A geração é feita no próprio aparelho (traduz e compila o jogo uma vez, leva um bom tempo num portátil).
 
 ## Como funciona
 
@@ -117,11 +133,24 @@ O PS3 tem um processador central (PPU, PowerPC), seis co-processadores vetoriais
 
 **Capítulo 16** (a cena mais pesada) e **fase 1**, em FPS de jogo, **sem o limitador de 60** (é como dá para comparar máquinas). **O hardware muda tudo**: o gargalo é a CPU, e CPUs com AVX-512 rodam bem mais rápido.
 
-| PC | CPU | GPU | Build | Cap. 16 | Fase 1 |
-|---|---|---|---|---|---|
-| Principal | Ryzen 7 9800X3D (8/16, AVX-512) | RTX 5080 | AVX-512 | **~68** | **~84** |
-| PC teste 2 | Core i5-11400F (6/12, AVX-512) | RX 9060 XT | AVX-512 (Rocket Lake) | **~32** (1ª execução) | — |
-| Notebook | Core i5-10300H (4/8, sem AVX-512, ~2,8 GHz sustentado) | GTX 1650 | sem AVX-512 | **~8** | — |
+| Máquina | Sistema | CPU | GPU | Build | Cap. 16 | Fase 1 |
+|---|---|---|---|---|---|---|
+| **PC 1** | Windows | Ryzen 7 9800X3D (8/16, AVX-512) | RTX 5080 | AVX-512 | **~68** | **~84** |
+| **PC 2** | Windows | Core i5-11400F (6/12, AVX-512) | RX 9060 XT | AVX-512 (Rocket Lake) | **~32** (1ª execução) | — |
+| **Notebook** | Windows | Core i5-10300H (4/8, sem AVX-512, ~2,8 GHz sustentado) | GTX 1650 | sem AVX-512 | **~8** | — |
+| **Portátil** | **Linux** (SteamOS) | Ryzen Z1 Extreme (8/16), 15 W | Radeon 780M (integrada) | portátil (AVX2) | não medido | veja abaixo |
+
+### Portátil (Linux): Lenovo Legion Go S
+
+Hardware: Lenovo Legion Go S (83N6), **AMD Ryzen Z1 Extreme** (8 núcleos, 16 threads), GPU integrada **Radeon 780M** (RDNA3), 32 GB de RAM de fábrica (o sistema mostra ~23 GB, o resto fica com a GPU), SteamOS 3.10, Proton GE-Proton11-7. Port: build portátil (AVX2), 6 SPUs (padrão em aparelho com bateria), resolução interna 1280x720. Medido **sem o limitador de 60**, em 15 amostras de 5 s depois de carregar o checkpoint, com o Kratos parado na cena (não é o Cap. 16 nem a fase 1 do PC):
+
+| Cena | 15 W | 30 W |
+|---|---|---|
+| Começo do jogo | **46–49 FPS** (25 min seguidos: média 48, mínimo 42,7, sem queda) | — |
+| Cenas médias (Lan260, Fury300) | **~44 FPS** (mín. ~39–41) | **65–68 FPS** (mín. ~59–67; com o limitador de 60 fica travado em 60) |
+| Combate pesado, muitos inimigos (Cyn300) | **~24 FPS** (mín. ~23), áudio pode cortar | em medição |
+
+Nenhum travamento nem queda do jogo em cerca de 140 rodadas de teste. O combate pesado é o que estamos otimizando agora (no PC 1, essa mesma cena roda a ~48 FPS sem limitador). Os números por rodada estão em [docs/desempenho_portatil.md](docs/desempenho_portatil.md); o arquivo bruto fica no próprio aparelho de teste (`~/gowa-linux-teste/banc/resultados.txt`).
 
 > **A build que o `gerar.cmd` produz agora tem o mesmo desempenho da nossa.** Os passes de desempenho que aplicamos ao longo do desenvolvimento entram na geração (`scripts/otimizar.py`). No notebook, no cap. 16, a build gerada empatou com a nossa (antes da automação, ela dava 3,9 FPS). Depois disso, com a fixação de threads desligada em CPUs com menos de 12 processadores lógicos, ela chegou a **~8 FPS** (média de 200 s de fase, rodadas intercaladas). O PGO fica de fora; o que ainda difere está no fim de [docs/COMO_GERAR.md](docs/COMO_GERAR.md).
 
@@ -131,7 +160,7 @@ O que medimos num PC fraco (4 núcleos, sem AVX-512), o que ajudou, o que não a
 
 ## Requisitos
 
-- **Windows 10/11 64 bits** e GPU com **Direct3D 12**.
+- **Windows 10/11 64 bits** e GPU com **Direct3D 12**, ou **Linux/SteamOS** com Proton (beta, veja [acima](#linux--steamos-beta); precisa de CPU com AVX2 e uns 15 GB livres).
 - **CPU com AVX2** (Intel Haswell em diante, AMD Zen em diante). **Com AVX-512** (Ryzen 7000/9000, Intel 11ª geração desktop) é muito mais rápido; o `gerar.ps1` escolhe sozinho.
 - 16 GB de RAM. Espaço em disco: ~35 GB para o jogo extraído (se estiver compactado) e ~3 GB para a geração e a build; o disco do jogo em pasta não é copiado.
 
@@ -176,9 +205,11 @@ Pelo launcher, em **"Reportar problema"** na página do jogo. O relato já vai c
 
 ## English summary
 
-A **native PC port** of *God of War: Ascension* (PS3), made by **static recompilation**: the game's PPU and SPU code is translated to C/C++ and compiled for x86-64 on top of [ps3recomp](https://github.com/sp00nznet/ps3recomp). The GPU command stream is rendered with Direct3D 12, and SPURS runs the official libsre module (LLE).
+A **native PC port** of *God of War: Ascension* (PS3) **for Windows and for Linux/SteamOS (beta)**, made by **static recompilation**: the game's PPU and SPU code is translated to C/C++ and compiled for x86-64 on top of [ps3recomp](https://github.com/sp00nznet/ps3recomp). The GPU command stream is rendered with Direct3D 12, and SPURS runs the official libsre module (LLE).
 
 **Easiest: the [Otavix Launcher](https://github.com/otavix010/otavix-launcher/releases/latest)**, which downloads this port, asks for your folders, generates the game for your CPU and starts it. **Bring your own disc**: no game code or data and no firmware here. You need your own copy of the game (BCUS98232). Update 1.04 and the official PS3 firmware are free from Sony, and `gerar.cmd` downloads both from Sony's servers by itself (or use your own: [update 1.04 .pkg](http://b0.ww.np.dl.playstation.net/tppkg/np/BCUS98232/BCUS98232_T76/5525fbb7b6b5456d/UP9000-BCUS98232_00-GOWABDPATCH00001-A0104-V0100-PE.pkg) (must be exactly 1.04), and `PS3UPDAT.PUP` from [PlayStation's PS3 system software page](https://www.playstation.com/en-us/support/hardware/ps3/system-software/); RPCS3 is no longer needed). Install Python and the Visual Studio 2022 Build Tools with Clang (commands above), download this repository to a path without spaces, double-click **`gerar.cmd`** (it asks for the disc folder, then downloads the update and firmware, decrypts your copy, translates and builds; ~4 minutes on an 8-core Ryzen 7 9800X3D), then play with **`jogar.cmd`**.
+
+Platforms: **Windows 10/11** (stable) and **Linux/SteamOS** (beta, through Proton, since Otavix Launcher 1.0.92; tested end to end on a Lenovo Legion Go S, Ryzen Z1 Extreme, SteamOS 3.10). Handheld results, uncapped: 46-49 fps at the start of the game at 15 W, ~44 fps in medium scenes at 15 W and 65-68 fps at 30 W, ~24 fps in heavy combat at 15 W (being optimized); details in [docs/desempenho_portatil.md](docs/desempenho_portatil.md). In the tables the machines are named PC 1 (Ryzen 7 9800X3D), PC 2 (i5-11400F), Notebook (i5-10300H) and Handheld (Legion Go S).
 
 Status: boots, menus, chapter 1 and chapter 16 play with correct image, 60 FPS locked on a Ryzen 7 9800X3D; the full game is not verified yet. Performance is CPU-bound and much better with AVX-512: ~68 FPS uncapped in chapter 16 on a 9800X3D, ~32 on an i5-11400F, ~8 on a 4-core laptop without AVX-512. The build `gerar.cmd` produces includes the same performance passes as ours (`scripts/otimizar.py`); only PGO is left out. Thread pinning is now off on CPUs with fewer than 12 logical processors (+4% on the laptop), and the GPU command reader no longer hangs on slow PCs.
 
