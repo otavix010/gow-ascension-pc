@@ -2767,6 +2767,8 @@ int main(int argc, char** argv)
               FindClose(h_ns);
           }
       }
+      fprintf(stderr, "[spurs] energia: BatteryFlag=%u ACLine=%u wine=%d -> bateria=%d (%u CPUs lógicas)\n", ps_ns.BatteryFlag,
+              ps_ns.ACLineStatus, GetProcAddress(GetModuleHandleA("ntdll.dll"), "wine_get_version") != NULL, (int)bateria_ns, ncpu_ns);
       if (!GetEnvironmentVariableA("GOWA_SPURS_NSPU", NULL, 0) && (ncpu_ns <= 8 || bateria_ns)) {
           SetEnvironmentVariableA("GOWA_SPURS_NSPU", "6");
           fprintf(stderr, "[spurs] 6 SPUs (%lu CPUs lógicas%s; a 7a só com mais de 8 e sem bateria; GOWA_SPURS_NSPU=7 força)\n",
