@@ -2745,11 +2745,32 @@ int main(int argc, char** argv)
      *  volta ao antigo.
      *  30/10: só com mais de 8 CPUs lógicas. Num i5-10300H (4 núcleos / 8 lógicas) a 7a SPU disputa a CPU com a
      *  PPU e a RSX: cap. 16 com 6 SPUs 11,0 / 10,4 / 10,2 x 7 SPUs 10,4 / 9,6 / 9,8 (+6%, 3 de 3 pares). */
+    /*  10/11: também com bateria (portáteis e notebooks: o limite é a potência, não os núcleos). Legion Go (Z1
+     *  Extreme, 8 núcleos / 16 lógicas) a 15 W pelo Proton: 6 SPUs ganha nos 8 checkpoints da régua, média
+     *  40,8 -> 43,3 fps (+6%), mínimos 39 -> 40-41, menos CPU (5,6 x 5,9 núcleos) e mais GPU (51% x 46%). */
     { const unsigned ncpu_ns = ps3_logical_cpus();
-      if (!GetEnvironmentVariableA("GOWA_SPURS_NSPU", NULL, 0) && ncpu_ns <= 8) {
+      SYSTEM_POWER_STATUS ps_ns = {};
+      bool bateria_ns = GetSystemPowerStatus(&ps_ns) && ps_ns.BatteryFlag != 128 && ps_ns.BatteryFlag != 255;
+      /* 11/11: pelo Proton o GetSystemPowerStatus responde "desconhecido" (255) mesmo com bateria (Legion Go a 98%):
+       * no wine, a bateria do Linux em Z:\sys\class\power_supply\<x>\type = "Battery" */
+      if (!bateria_ns && ps_ns.BatteryFlag == 255 && GetProcAddress(GetModuleHandleA("ntdll.dll"), "wine_get_version")) {
+          WIN32_FIND_DATAA fd_ns;
+          HANDLE h_ns = FindFirstFileA("Z:\\sys\\class\\power_supply\\*", &fd_ns);
+          if (h_ns != INVALID_HANDLE_VALUE) {
+              do {
+                  if (fd_ns.cFileName[0] == '.') continue;
+                  char tipo[300], buf[16] = {};
+                  snprintf(tipo, sizeof tipo, "Z:\\sys\\class\\power_supply\\%s\\type", fd_ns.cFileName);
+                  if (FILE* f = fopen(tipo, "rb")) { fread(buf, 1, sizeof buf - 1, f); fclose(f); }
+                  if (!strncmp(buf, "Battery", 7)) bateria_ns = true;
+              } while (!bateria_ns && FindNextFileA(h_ns, &fd_ns));
+              FindClose(h_ns);
+          }
+      }
+      if (!GetEnvironmentVariableA("GOWA_SPURS_NSPU", NULL, 0) && (ncpu_ns <= 8 || bateria_ns)) {
           SetEnvironmentVariableA("GOWA_SPURS_NSPU", "6");
-          fprintf(stderr, "[spurs] 6 SPUs (%lu CPUs lógicas; a 7a só com mais de 8; GOWA_SPURS_NSPU=7 força)\n",
-                  (unsigned long)ncpu_ns);
+          fprintf(stderr, "[spurs] 6 SPUs (%lu CPUs lógicas%s; a 7a só com mais de 8 e sem bateria; GOWA_SPURS_NSPU=7 força)\n",
+                  (unsigned long)ncpu_ns, bateria_ns ? ", com bateria" : "");
       } }
     if (!GetEnvironmentVariableA("GOWA_SPURS_NSPU", NULL, 0)) {
         SetEnvironmentVariableA("GOWA_SPURS_NSPU", "7");
