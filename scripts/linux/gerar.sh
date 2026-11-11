@@ -280,6 +280,21 @@ export WINEDEBUG=-all WINEDLLOVERRIDES="d3d12,d3d12core,dxgi=n,b;d3dcompiler_47=
 export PS3_VFS_ROOT=\$(z "\$R/vfs") PS3_LIBSRE_IMAGE=\$(z "\$R/fw/lle/libsre_image.bin")
 export PS3_SAVE_ROOT=\${PS3_SAVE_ROOT:-\$(z "\$R/saves")} GOWA_CACHE_DIR=\${GOWA_CACHE_DIR:-\$(z "\$R/cache")}
 mkdir -p "\$R/saves" "\$R/cache" "\$R/out"
+# idioma: o wine informa ao jogo o idioma do LANG do processo, que muda conforme quem abre o jogo (modo jogo da Steam,
+# launcher, terminal) -- e o jogo grava no save o idioma que recebeu. Sem PS3_IDIOMA escolhido (no ambiente ou no
+# gowa_opcoes.txt do launcher; "auto" não conta), decide aqui: no SteamOS, o idioma da Steam; fora dele, o
+# LC_ALL/LC_MESSAGES/LANG e, se vazios, o da Steam
+idioma_de() { case "\$1" in pt*|brazilian|portuguese) echo pt-br ;; fr*|french) echo fr ;; es*|spanish|latam) echo es ;; en*|english) echo en ;; esac; }
+idioma_steam() { sed -n 's/.*"language"[[:space:]]*"\([a-z]*\)".*/\1/p' "\$HOME/.steam/registry.vdf" 2>/dev/null | head -1; }
+OP=("\$R/port/build_v3rz/gowa_opcoes.txt" "\$R/port/gowa_opcoes.txt" "\$R/gowa_opcoes.txt")
+if { [ -z "\${PS3_IDIOMA:-}" ] || [ "\$PS3_IDIOMA" = auto ]; } && ! grep -hs '^PS3_IDIOMA=' "\${OP[@]}" | tr -d '\r' | grep -qvE '=(auto)?\$'; then
+    L=\${LC_ALL:-\${LC_MESSAGES:-\${LANG:-}}}
+    case "\$L" in C|C.*|POSIX|POSIX.*) L= ;; esac
+    I=
+    if grep -qs '^ID=steamos' /etc/os-release || [ -z "\$L" ]; then I=\$(idioma_de "\$(idioma_steam)"); fi
+    [ -z "\$I" ] && I=\$(idioma_de "\$L")
+    [ -n "\$I" ] && export PS3_IDIOMA=\$I
+fi
 cd "\$R/port/build_v3rz" && exec "\$W" gowa.exe "\$(z "\$R/jogo/GOWA.elf")" > "\$R/out/jogo.log" 2>&1
 EOF
     chmod +x "$R/jogar.sh"
