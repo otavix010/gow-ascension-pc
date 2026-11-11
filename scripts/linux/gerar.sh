@@ -39,7 +39,17 @@ ENGINE_NOME=otavix-engine-ps3-$ENGINE_VERSAO
 
 msg() { echo "[gerar] $*" | tee -a "$LOG"; }
 falha() { echo "[gerar] ERRO: $*" | tee -a "$LOG"; exit 1; }
-ex() { echo "> $*" >> "$LOG"; "$@" >> "$LOG" 2>&1 || falha "$(basename "$1") falhou (veja $LOG)"; }
+# 11/11 (report 1107: "wine falhou (veja ...gerar.log)" e nada mais): a falha diz qual programa do wine parou e traz
+# as últimas linhas da saída dele, que vão para o report do launcher
+ex() {
+    echo "> $*" >> "$LOG"
+    local antes; antes=$(wc -l < "$LOG")
+    "$@" >> "$LOG" 2>&1 && return 0
+    local quem; quem=$(basename "$1"); [ "$1" = "$WINE" ] && [ -n "${2:-}" ] && quem="$(basename "$2") (pelo wine)"
+    local fim; fim=$(tail -n +$((antes + 1)) "$LOG" | grep -av "^\s*$" | tail -12)
+    [ -n "$fim" ] && echo "$fim" | sed "s/^/[gerar]   /"
+    falha "$quem falhou (veja $LOG)"
+}
 baixar() {   # url destino: retoma quedas (como o Baixar do gerar.ps1)
     local i
     for i in 1 2 3 4; do

@@ -4,6 +4,23 @@ O Otavix Launcher mostra este arquivo na página "Novidades" do jogo. Cada atual
 "## <data> · <versão>" e o texto em português (### pt), inglês (### en) e, quando houver, espanhol (### es).
 As mais novas ficam em cima.
 
+## 11/11/2026 · correções da tarde · engine 0.11.9
+### pt
+- **Correção:** o jogo não é mais encerrado pelo Windows como "não está respondendo" quando o quadro demora alguns segundos (mais comum em gráficos integrados): a janela agora responde numa linha de execução própria.
+- **Correção:** o uso de memória de vídeo fica abaixo de 70% do que o sistema reserva para o jogo, em vez de subir até quase toda a placa.
+- **Correção (Linux):** a geração não para mais na etapa das SPUs quando uma tentativa anterior foi interrompida, e uma falha agora mostra as últimas linhas do registro na própria mensagem.
+- **Desempenho:** a cópia dos vértices dos personagens animados ficou mais leve (cerca de 2% a mais de fps nos combates de um portátil a 15 W).
+### en
+- **Fix:** Windows no longer closes the game as "not responding" when a frame takes a few seconds (more common on integrated graphics): the window now responds on its own thread.
+- **Fix:** video memory use stays below 70% of what the system reserves for the game, instead of climbing to almost the whole card.
+- **Fix (Linux):** generation no longer stops at the SPU step after a previous attempt was interrupted, and a failure now shows the last lines of the log in the message itself.
+- **Performance:** copying the vertices of animated characters is lighter (about 2% more fps in combat on a handheld at 15 W).
+### es
+- **Corrección:** Windows ya no cierra el juego como "no responde" cuando un fotograma tarda unos segundos (más común en gráficos integrados): la ventana ahora responde en su propio hilo.
+- **Corrección:** el uso de memoria de video se mantiene por debajo del 70% de lo que el sistema reserva para el juego, en lugar de subir hasta casi toda la tarjeta.
+- **Corrección (Linux):** la generación ya no se detiene en la etapa de las SPU cuando un intento anterior fue interrumpido, y un fallo ahora muestra las últimas líneas del registro en el propio mensaje.
+- **Rendimiento:** la copia de los vértices de los personajes animados es más ligera (cerca de 2% más de fps en combates en un portátil a 15 W).
+
 ## 11/11/2026 · versão compatível (processadores sem AVX2) · engine 0.11.8
 ### pt
 - **Novo:** o jogo agora também roda em processadores sem AVX2 (por exemplo, Intel Core i de 2ª e 3ª geração e AMD FX). O gerador escolhe sozinho a versão compatível quando o processador não tem AVX2; no launcher, a versão também pode ser escolhida à mão (Automático, Portátil, Nativa ou Compatível).
