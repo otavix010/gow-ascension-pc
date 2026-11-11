@@ -9,7 +9,7 @@ Resultados do God of War: Ascension no **Portátil** da nossa bancada, a versão
 | Modelo | Lenovo Legion Go S (83N6) |
 | CPU | AMD Ryzen Z1 Extreme, 8 núcleos / 16 threads |
 | GPU | Radeon 780M integrada (RDNA3) |
-| RAM | 32 GB de fábrica: 8 GB reservados para a GPU (VRAM) e ~23 GB para o sistema. A VRAM reservada é configurável; ainda vamos testar com mais (estouro de RAM/VRAM é uma das causas das quedas) |
+| RAM | 32 GB de fábrica: 8 GB reservados para a GPU (VRAM) e ~23 GB para o sistema. Todas as rodadas abaixo usaram 8 GB de VRAM. A VRAM reservada é configurável; ainda vamos testar com mais |
 | Sistema | SteamOS 3.10 |
 | Proton | GE-Proton11-7 |
 | Port | build portátil (AVX2), 6 SPUs (padrão em aparelho com bateria), resolução interna 1280x720 |
@@ -29,6 +29,8 @@ Sem o limitador de 60 (`GOWA_FLIP_HZ=0`). Cada medida são 15 amostras de 5 s, d
 | Lan260 e Fury300 | 30 W | 65–68 (mínimo ~59–67); com o limitador de 60, travado em 60 |
 | Combate pesado com muitos inimigos (Cyn300) | 15 W | ~24 (mínimo ~23); o áudio corta (até 25% dos blocos atrasados) |
 | Combate pesado (Cyn300) | 25–30 W | em medição |
+
+No combate pesado a 15 W, a VRAM usada era 2,6 de 8 GB e a GTT (RAM do sistema usada pela GPU) 0,5 de 11,6 GB: **não há estouro de memória nessa cena**; a queda tem outra causa, que estamos investigando.
 
 Para comparar: nessa mesma cena de combate pesado, o PC 1 (Ryzen 7 9800X3D) roda a ~48 FPS sem limitador.
 
