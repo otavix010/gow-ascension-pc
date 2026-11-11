@@ -4,6 +4,20 @@ O Otavix Launcher mostra este arquivo na página "Novidades" do jogo. Cada atual
 "## <data> · <versão>" e o texto em português (### pt), inglês (### en) e, quando houver, espanhol (### es).
 As mais novas ficam em cima.
 
+## 11/11/2026 · versão Linux (beta) · engine 0.11.7
+### pt
+- **Novo:** versão para Linux em beta, testada no SteamOS (Legion Go): o gerador roda no próprio Linux e o jogo abre pelo Proton, com o controle, no modo jogo da Steam. Outras distribuições ainda não foram testadas.
+- **Desempenho:** em portáteis e notebooks (aparelhos com bateria) o jogo usa 6 SPUs em vez de 7, o que deixa mais energia para a GPU: na Legion Go a 15 W, cerca de 6% mais fps; a 30 W, cerca de 4%.
+- **Idioma:** no Linux o jogo segue o idioma da Steam (ou do sistema), e não mais o inglês quando aberto fora da Steam.
+### en
+- **New:** Linux version in beta, tested on SteamOS (Legion Go): the generator runs on Linux itself and the game opens through Proton, with controller support, in Steam's game mode. Other distributions have not been tested yet.
+- **Performance:** on handhelds and laptops (devices with a battery) the game uses 6 SPUs instead of 7, leaving more power for the GPU: about 6% more fps on the Legion Go at 15 W and about 4% at 30 W.
+- **Language:** on Linux the game follows Steam's language (or the system's) and no longer falls back to English when opened outside Steam.
+### es
+- **Nuevo:** versión para Linux en beta, probada en SteamOS (Legion Go): el generador corre en el propio Linux y el juego se abre con Proton, con el control, en el modo juego de Steam. Otras distribuciones aún no se han probado.
+- **Rendimiento:** en portátiles y notebooks (equipos con batería) el juego usa 6 SPU en lugar de 7, lo que deja más energía para la GPU: en la Legion Go a 15 W, cerca de 6% más fps; a 30 W, cerca de 4%.
+- **Idioma:** en Linux el juego sigue el idioma de Steam (o del sistema) y ya no queda en inglés al abrirse fuera de Steam.
+
 ## 10/11/2026 · gerador
 ### pt
 - **Correção:** o gerador acha o jogo em mais situações: o arquivo do jogo (.iso, .7z, .zip ou .rar) dentro de subpastas da pasta escolhida, a .iso quando ela está ao lado do .zip, a pasta de cima quando a escolhida só tem o README, e o disco quando a pasta escolhida é a PS3_UPDATE dele. Um .rar dividido em partes passa a pedir a extração pelo 7-Zip ou WinRAR.
