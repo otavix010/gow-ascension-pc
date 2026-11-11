@@ -4,6 +4,20 @@ O Otavix Launcher mostra este arquivo na página "Novidades" do jogo. Cada atual
 "## <data> · <versão>" e o texto em português (### pt), inglês (### en) e, quando houver, espanhol (### es).
 As mais novas ficam em cima.
 
+## 11/11/2026 · versão compatível (processadores sem AVX2) · engine 0.11.8
+### pt
+- **Novo:** o jogo agora também roda em processadores sem AVX2 (por exemplo, Intel Core i de 2ª e 3ª geração e AMD FX). O gerador escolhe sozinho a versão compatível quando o processador não tem AVX2; no launcher, a versão também pode ser escolhida à mão (Automático, Portátil, Nativa ou Compatível).
+- **Desempenho:** a versão compatível é bem mais lenta: no mesmo processador, cerca de um terço dos fps da versão normal. Em processadores antigos de 4 núcleos, espere poucos fps.
+- **Mínimo:** o processador precisa ter SSE4.2 (Intel Core i de 1ª geração em diante, AMD FX e Ryzen). Phenom II, Athlon II e Core 2 continuam fora.
+### en
+- **New:** the game now also runs on processors without AVX2 (for example, 2nd and 3rd generation Intel Core i and AMD FX). The generator picks the compatible version by itself when the processor has no AVX2; in the launcher the version can also be chosen by hand (Automatic, Portable, Native or Compatible).
+- **Performance:** the compatible version is much slower: on the same processor, about a third of the fps of the regular version. On older 4-core processors, expect low fps.
+- **Minimum:** the processor needs SSE4.2 (Intel Core i 1st generation onwards, AMD FX and Ryzen). Phenom II, Athlon II and Core 2 are still not supported.
+### es
+- **Nuevo:** el juego ahora también funciona en procesadores sin AVX2 (por ejemplo, Intel Core i de 2.ª y 3.ª generación y AMD FX). El generador elige solo la versión compatible cuando el procesador no tiene AVX2; en el launcher la versión también se puede elegir a mano (Automático, Portátil, Nativa o Compatible).
+- **Rendimiento:** la versión compatible es mucho más lenta: en el mismo procesador, cerca de un tercio de los fps de la versión normal. En procesadores antiguos de 4 núcleos, espera pocos fps.
+- **Mínimo:** el procesador necesita SSE4.2 (Intel Core i de 1.ª generación en adelante, AMD FX y Ryzen). Phenom II, Athlon II y Core 2 siguen fuera.
+
 ## 11/11/2026 · correção do Ouroboros
 ### pt
 - **Correção:** na segunda vez que se ergue a ponte com o Amuleto de Uroboros, soltar o analógico logo antes de a ponte ficar inteira deixava a câmera presa e a cena do Oráculo não começava. Agora a cena começa normalmente.

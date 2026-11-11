@@ -583,11 +583,11 @@ function Conferir-Processador {
     if (-not $nome) { $nome = 'sem nome no Windows' }
     # 11/11 (pedido do usuário; reports 1086/1087/1095/1097, i5-2500 e i5-2500S): sem AVX2, mas com SSE4.2 e POPCNT
     # (Intel Core i de 1ª geração em diante, como Sandy e Ivy Bridge; AMD FX), a build compatível (x86-64-v2): o mesmo
-    # jogo sem AVX2/FMA, sem os atalhos do EDGE em AVX2 -- roda, mas bem mais devagar (no PC de testes, metade dos fps)
+    # jogo sem AVX2/FMA, sem os atalhos do EDGE em AVX2 -- roda, mas bem mais devagar (no PC de testes, um terço dos fps)
     if ($def -match '__SSE4_2__' -and $def -match '__POPCNT__') {
         $script:SemAvx2 = $true
         Msg ("AVISO: o seu processador ($nome) não tem AVX2: o jogo vai ser gerado na versão compatível, que roda em " +
-             'processadores mais antigos, mas bem mais devagar (no mesmo PC, cerca de metade dos fps da versão normal; ' +
+             'processadores mais antigos, mas bem mais devagar (no mesmo PC, cerca de um terço dos fps da versão normal; ' +
              'num processador de 4 núcleos dessa época, espere poucos fps)')
         return
     }
