@@ -329,7 +329,7 @@ etapa 5_spu spu
 # ---------------------------------------------------------------------------- compilar (portátil: AVX2, para-zero)
 compilar() {
     export FFMPEG_DIR=$R/dl/ffmpeg9/$FFMPEG_NOME GOWA_PY_EXE=$PY GOWA_JOBS=$JOBS
-    ex "$R/scripts/linux/build_linux.sh" x86-64-v3 rz
+    ex bash "$R/scripts/linux/build_linux.sh" x86-64-v3 rz   # pelo bash: o zip do port pode chegar sem a permissão de execução
     [ -f "$R/port/build_v3rz/gowa.exe" ] || falha 'o gowa.exe não foi gerado (veja o log)'
 }
 etapa 6_compilar compilar
