@@ -142,7 +142,7 @@ O PS3 tem um processador central (PPU, PowerPC), seis co-processadores vetoriais
 
 ### Portátil (Linux): Lenovo Legion Go S
 
-Hardware: Lenovo Legion Go S (83N6), **AMD Ryzen Z1 Extreme** (8 núcleos, 16 threads), GPU integrada **Radeon 780M** (RDNA3), 32 GB de RAM de fábrica (o sistema mostra ~23 GB, o resto fica com a GPU), SteamOS 3.10, Proton GE-Proton11-7. Port: build portátil (AVX2), 6 SPUs (padrão em aparelho com bateria), resolução interna 1280x720. Medido **sem o limitador de 60**, em 15 amostras de 5 s depois de carregar o checkpoint, com o Kratos parado na cena (não é o Cap. 16 nem a fase 1 do PC):
+Hardware: Lenovo Legion Go S (83N6), **AMD Ryzen Z1 Extreme** (8 núcleos, 16 threads), GPU integrada **Radeon 780M** (RDNA3), 32 GB de RAM de fábrica, com 8 GB reservados para a GPU (VRAM) e ~23 GB para o sistema (a VRAM reservada é configurável; ainda vamos testar com mais), SteamOS 3.10, Proton GE-Proton11-7. Port: build portátil (AVX2), 6 SPUs (padrão em aparelho com bateria), resolução interna 1280x720. Medido **sem o limitador de 60**, em 15 amostras de 5 s depois de carregar o checkpoint, com o Kratos parado na cena (não é o Cap. 16 nem a fase 1 do PC):
 
 | Cena | 15 W | 30 W |
 |---|---|---|

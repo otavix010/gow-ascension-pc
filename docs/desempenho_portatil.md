@@ -9,7 +9,7 @@ Resultados do God of War: Ascension no **Portátil** da nossa bancada, a versão
 | Modelo | Lenovo Legion Go S (83N6) |
 | CPU | AMD Ryzen Z1 Extreme, 8 núcleos / 16 threads |
 | GPU | Radeon 780M integrada (RDNA3) |
-| RAM | 32 GB de fábrica (o sistema mostra ~23 GB; o resto fica com a GPU) |
+| RAM | 32 GB de fábrica: 8 GB reservados para a GPU (VRAM) e ~23 GB para o sistema. A VRAM reservada é configurável; ainda vamos testar com mais (estouro de RAM/VRAM é uma das causas das quedas) |
 | Sistema | SteamOS 3.10 |
 | Proton | GE-Proton11-7 |
 | Port | build portátil (AVX2), 6 SPUs (padrão em aparelho com bateria), resolução interna 1280x720 |
