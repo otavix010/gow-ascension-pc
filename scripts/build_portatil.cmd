@@ -15,6 +15,9 @@ if not "%MARCH%"=="x86-64-v3" set "DIR=%RAIZ%\port\build_%MARCH%"
 set "RZ=OFF"
 if /i "%~2"=="rz" set "RZ=ON"
 if /i "%~2"=="rz" set "DIR=%DIR%rz"
+rem 11/11 (no comeco: o "goto configura" de uma pasta nova pula o que vem depois): x86-64-v2 = a build compativel (processadores sem AVX2): sem FMA, SSE4.2 em tudo, a engine "compativel"
+set "OPC_CPU=-DGOWA_PPU_MARCH=x86-64-v3 -DGOWA_SPU_X86_V3=ON -DGOWA_HOST_FMA=ON -DGOWA_RUNTIME_FAST=ON"
+if "%MARCH%"=="x86-64-v2" set "OPC_CPU=-DGOWA_PPU_MARCH= -DGOWA_SPU_X86_V3=ON -DGOWA_HOST_FMA=OFF -DGOWA_RUNTIME_FAST=OFF -DGOWA_ENGINE_VARIANTE=compativel"
 rem PGO só se houver perfil (port\pgo\gowa.profdata: gerado por quem roda o jogo com GOWA_PGO=gen)
 set "PGO_MODO=-DGOWA_PGO="
 set "PGO_PERFIL=-DGOWA_PGO_PROFILE="
@@ -87,9 +90,6 @@ echo -- o cache do CMake aponta para um ninja que nao existe mais ("%NINJA_CACHE
 :refaz
 del /q "%DIR%\CMakeCache.txt" "%DIR%\build.ninja" 2>nul
 rd /s /q "%DIR%\CMakeFiles" 2>nul
-rem 11/11: x86-64-v2 = a build compativel (processadores sem AVX2): sem FMA, SSE4.2 em tudo, a engine "compativel"
-set "OPC_CPU=-DGOWA_PPU_MARCH=x86-64-v3 -DGOWA_SPU_X86_V3=ON -DGOWA_HOST_FMA=ON -DGOWA_RUNTIME_FAST=ON"
-if "%MARCH%"=="x86-64-v2" set "OPC_CPU=-DGOWA_PPU_MARCH= -DGOWA_SPU_X86_V3=ON -DGOWA_HOST_FMA=OFF -DGOWA_RUNTIME_FAST=OFF -DGOWA_ENGINE_VARIANTE=compativel"
 :configura
 "%CMAKE%" -S "%RAIZ%\port" -B "%DIR%" -G Ninja ^
   "-DCMAKE_MAKE_PROGRAM=%NINJA_F%" ^
