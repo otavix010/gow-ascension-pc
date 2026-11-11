@@ -56,6 +56,23 @@ etapa() {   # nome função: pula as etapas feitas (marcadas), a não ser a part
     msg "$1"; "$2"; touch "$OUT/$1.ok"
 }
 
+# ---------------------------------------------------------------------------- pré-requisitos
+# o que o gerador usa do sistema (o resto ele baixa): falha logo no começo, com a lista do que falta
+prerequisitos() {
+    local falta='' c
+    for c in curl python3 tar xz sha256sum sha1sum find; do command -v "$c" >/dev/null 2>&1 || falta="$falta $c"; done
+    python3 -c 'import venv, ensurepip' >/dev/null 2>&1 || falta="$falta python3-venv"
+    [ "$(uname -m)" = x86_64 ] || falha "o port precisa de um PC x86-64 (este é $(uname -m))"
+    grep -qw avx2 /proc/cpuinfo || falha 'o processador não tem AVX2 (o port precisa dele; os Intel desde 2013 e os AMD desde 2015 têm)'
+    [ -z "$falta" ] || falha "faltam programas do sistema:$falta (no SteamOS já vêm; em outras distros, instale pelo gerenciador de pacotes)"
+    if [ -n "$DISCO" ] && [ -f "$DISCO" ] && ! command -v bsdtar >/dev/null 2>&1; then
+        falha 'para abrir o arquivo do jogo (.iso/.7z/.zip/.rar) é preciso o bsdtar (pacote libarchive); ou extraia o arquivo e escolha a pasta'
+    fi
+    local livre; livre=$(df -Pk "$R" | awk 'NR==2{print int($4/1048576)}')
+    [ "${livre:-99}" -ge 15 ] || falha "pouco espaço em $(df -P "$R" | awk 'NR==2{print $6}'): ${livre} GB livres, e a geração precisa de uns 15 GB"
+}
+prerequisitos
+
 # ---------------------------------------------------------------------------- ferramentas
 F=${GOWA_FERR:-$HOME/.local/share/otavix/ferr}
 export GOWA_FERR=$F
@@ -95,10 +112,10 @@ ferramentas() {
     venv/bin/python -c 'import Crypto' 2>/dev/null || venv/bin/pip install -q pycryptodome >> "$LOG" 2>&1 || falha 'o pycryptodome não instalou'
     cd "$R"
 }
+WINE=$(achar_wine)
+[ -n "$WINE" ] || falha 'nenhum Proton achado: na Steam, instale o "Proton Experimental" ou o GE-Proton (ou defina OTX_WINE com o caminho de um wine)'
 etapa 1_ferramentas ferramentas
 PY=$F/venv/bin/python
-WINE=$(achar_wine)
-[ -n "$WINE" ] || falha 'nenhum wine/Proton achado: instale o Proton pela Steam (ou defina OTX_WINE)'
 export OTX_WINE=$WINE WINEDEBUG=-all WINEPREFIX=${GOWA_WINEPREFIX:-$R/out/wineprefix}
 mkdir -p "$WINEPREFIX"
 msg "wine: $WINE"
@@ -146,18 +163,79 @@ engine_ffmpeg() {
 etapa 1_engine engine_ffmpeg
 
 # ---------------------------------------------------------------------------- disco, update e o executável do jogo
+# a pasta do disco (a que tem PS3_GAME/USRDIR) na escolhida, nela mesma (PS3_GAME ou USRDIR escolhidos) ou até 4 níveis abaixo
+achar_ps3game() {
+    local r=${1%/} b p
+    [ -d "$r" ] || return 1
+    [ -d "$r/PS3_GAME/USRDIR" ] && { echo "$r"; return 0; }
+    b=$(basename "$r")
+    [ "${b^^}" = PS3_GAME ] && [ -d "$r/USRDIR" ] && { dirname "$r"; return 0; }
+    [ "${b^^}" = USRDIR ] && [ "$(basename "$(dirname "$r")")" = PS3_GAME ] && { dirname "$(dirname "$r")"; return 0; }
+    # vários discos (uma pasta de ROMs com outros jogos): o do God of War: Ascension primeiro, pelo PARAM.SFO
+    local todos; todos=$(find "$r" -mindepth 1 -maxdepth 4 -type d -name PS3_GAME 2>/dev/null | while read -r x; do [ -d "$x/USRDIR" ] && echo "$x"; done)
+    p=$(echo "$todos" | while read -r x; do [ -n "$x" ] && grep -aq 'BCUS98232' "$x/PARAM.SFO" 2>/dev/null && { echo "$x"; break; }; done)
+    [ -z "$p" ] && p=$(echo "$todos" | head -1)
+    [ -n "$p" ] && { dirname "$p"; return 0; }
+    return 1
+}
+# o arquivo do disco (.iso/.7z/.zip/.rar, > 100 MB) na pasta ou até $2 níveis abaixo: um só, ou com vários a única .iso;
+# as partes 2+ de um .rar dividido não contam
+arquivo_do_disco() {
+    local l; l=$(find "$1" -mindepth 1 -maxdepth $((${2:-3} + 1)) -type f -size +100M \( -iname '*.iso' -o -iname '*.7z' -o -iname '*.zip' -o -iname '*.rar' \) 2>/dev/null |
+                 grep -viE '\.part0*([2-9]|[1-9][0-9]+)\.rar$' | grep -v "^$R/")
+    [ -z "$l" ] && return 1
+    [ "$(echo "$l" | wc -l)" -eq 1 ] && { echo "$l"; return 0; }
+    local iso; iso=$(echo "$l" | grep -iE '\.iso$')
+    [ -n "$iso" ] && [ "$(echo "$iso" | wc -l)" -eq 1 ] && { echo "$iso"; return 0; }
+    return 1
+}
+achar_disco() {
+    local d=${1%/} a pai
+    if [ -f "$d" ]; then   # um arquivo: extrai uma vez em disco/ (bsdtar abre iso, 7z, zip e rar)
+        local x=$R/disco
+        if ! achar_ps3game "$x" >/dev/null; then
+            command -v bsdtar >/dev/null || falha 'para abrir o arquivo do jogo é preciso o bsdtar (pacote libarchive); ou extraia o arquivo e escolha a pasta'
+            msg "extraindo $d (uns 35 GB; leva alguns minutos)"; rm -rf "$x"; mkdir -p "$x"
+            if ! bsdtar -xf "$d" -C "$x" >> "$LOG" 2>&1; then
+                case "$d" in *.part1.rar|*.part01.rar|*.r00) falha "$d é a 1a parte de um arquivo dividido: extraia-o com o 7-Zip/unrar numa pasta e escolha a pasta" ;; esac
+                falha "falhou a extração de $d: extraia o arquivo numa pasta e escolha a pasta"
+            fi
+            # um .7z/.zip com a .iso dentro: extrai a .iso também
+            if ! achar_ps3game "$x" >/dev/null; then
+                local iso; iso=$(find "$x" -type f -iname '*.iso' | head -1)
+                [ -n "$iso" ] && { msg "extraindo $(basename "$iso")"; ex bsdtar -xf "$iso" -C "$x"; rm -f "$iso"; }
+            fi
+        fi
+        ACHADO=$(achar_ps3game "$x") || falha "não achei PS3_GAME/USRDIR dentro de $d (uma .iso criptografada, como as da Redump, não serve)"
+        return 0
+    fi
+    [ -d "$d" ] || falha "a pasta do jogo $d não existe (foi movida ou renomeada?)"
+    ACHADO=$(achar_ps3game "$d") && return 0
+    a=$(arquivo_do_disco "$d" 3) && { msg "usando o arquivo do jogo $a"; achar_disco "$a"; return 0; }
+    pai=$(dirname "$d")
+    # a pasta PS3_UPDATE do disco (a atualização do sistema do PS3) não é o jogo: o disco é a pasta de cima
+    if [ "$(basename "$d")" = PS3_UPDATE ] && achar_ps3game "$pai" >/dev/null; then msg 'a pasta escolhida é a PS3_UPDATE do disco; usando o disco da pasta de cima'; ACHADO=$(achar_ps3game "$pai"); return 0; fi
+    # só textos (o README que veio com o arquivo): o jogo ou o arquivo dele costuma estar na pasta de cima
+    if [ -z "$(find "$d" -mindepth 1 -maxdepth 1 ! -iregex '.*\.\(txt\|nfo\|url\|diz\|sfv\|md5\|jpg\|png\|ini\)' | head -1)" ]; then
+        achar_ps3game "$pai" >/dev/null && { msg 'a pasta escolhida só tem textos (README); usando o jogo da pasta de cima'; ACHADO=$(achar_ps3game "$pai"); return 0; }
+        a=$(arquivo_do_disco "$pai" 0) && { msg "a pasta escolhida só tem textos (README); usando o arquivo $a"; achar_disco "$a"; return 0; }
+    fi
+    local partes; partes=$(find "$d" -maxdepth 4 -type f \( -iname '*.part1.rar' -o -iname '*.part01.rar' -o -iname '*.r00' \) | head -1)
+    [ -n "$partes" ] && falha "lá dentro há um arquivo dividido em partes ($(basename "$partes")): extraia-o com o 7-Zip/unrar numa pasta e escolha essa pasta"
+    falha "não achei o jogo (PS3_GAME com USRDIR) em $d (dentro dela há: $(ls -A "$d" 2>/dev/null | head -6 | tr '\n' ',' | sed 's/,$//; s/,/, /g')). Escolha o arquivo do jogo (.iso, .7z, .zip ou .rar) ou a pasta onde ele foi extraído."
+}
 jogo() {
     [ -n "$DISCO" ] || falha 'falta --disco (a pasta com PS3_GAME, ou o .iso/.7z/.zip/.rar do jogo)'
-    local d=$DISCO
-    if [ -f "$d" ]; then   # um arquivo: extrai uma vez ao lado (bsdtar abre iso, 7z, zip e rar)
-        local x=$R/disco
-        if [ ! -d "$x/PS3_GAME/USRDIR" ]; then
-            command -v bsdtar >/dev/null || falha 'para abrir o arquivo do jogo é preciso o bsdtar (libarchive); ou extraia e passe a pasta'
-            msg "extraindo $d (uns minutos)"; rm -rf "$x"; mkdir -p "$x"; ex bsdtar -xf "$d" -C "$x"
-        fi
-        d=$(dirname "$(find "$x" -maxdepth 3 -type d -name PS3_GAME | head -1)")
-    fi
+    ACHADO=''; achar_disco "$DISCO"; local d=$ACHADO
     [ -d "$d/PS3_GAME/USRDIR" ] || falha "não achei PS3_GAME/USRDIR em $d"
+    # o port é da versão americana (BCUS98232): a europeia (BCES01741) e as outras não servem
+    local id; id=$(grep -aoE 'B[CL][EUAJ][SM][0-9]{5}' "$d/PS3_GAME/PARAM.SFO" 2>/dev/null | head -1)
+    case "$id" in
+        ''|BCUS98232) ;;
+        B?ES*) falha "este disco é a versão europeia do God of War: Ascension ($id). O port só funciona com a versão americana (BCUS98232)." ;;
+        *) falha "este disco é de outra versão do God of War: Ascension ($id). O port só funciona com a versão americana (BCUS98232)." ;;
+    esac
+    msg "disco: $d"
     mkdir -p "$R/vfs"
     rm -f "$R/vfs/PS3_GAME"; [ -e "$R/vfs/PS3_GAME" ] && mv "$R/vfs/PS3_GAME" "$R/vfs/PS3_GAME.antigo-$(date +%Y%m%d%H%M%S)"
     ln -s "$(cd "$d/PS3_GAME" && pwd)" "$R/vfs/PS3_GAME"   # o vfs do jogo vê o disco sem copiar 34 GB
@@ -255,6 +333,11 @@ compilar() {
     [ -f "$R/port/build_v3rz/gowa.exe" ] || falha 'o gowa.exe não foi gerado (veja o log)'
 }
 etapa 6_compilar compilar
+# o mesmo port/build.txt do gerar.ps1 (o launcher manda nos reports qual build o jogador usa): no Linux é sempre a
+# portátil (AVX2), a que roda pelo Proton
+printf 'escolhida=portatil\nusada=portatil\npasta=build_v3rz\nexe=port/build_v3rz/gowa.exe\nmotivo=Linux (%s, Proton %s): build portátil (AVX2)\n' \
+    "$(. /etc/os-release 2>/dev/null; echo "${PRETTY_NAME:-Linux}")" "$(basename "$(dirname "$(dirname "$(dirname "$WINE")")")")" > "$R/port/build.txt"
+msg "versão da build: portátil (AVX2), pelo Proton"
 
 # ---------------------------------------------------------------------------- jogar (pelo Proton)
 jogar() {
