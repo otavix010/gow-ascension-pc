@@ -1,14 +1,15 @@
 <h1 align="center">God of War: Ascension — port nativo para PC</h1>
 
 <p align="center">
-  <b>Recompilação estática do PS3 · Direct3D 12 · sem emulador · traga o seu disco</b>
+  <b>Recompilação estática do PS3 · Windows e Linux (SteamOS) · Direct3D 12 · sem emulador · traga o seu disco</b>
 </p>
 
 <p align="center">
   <a href="https://github.com/otavix010/otavix-launcher/releases/latest"><img alt="Baixar o Otavix Launcher" src="https://img.shields.io/github/v/release/otavix010/otavix-launcher?label=Otavix%20Launcher&color=b00020"></a>
   <a href="NOVIDADES.md"><img alt="Último commit" src="https://img.shields.io/github/last-commit/otavix010/gow-ascension-pc?label=%C3%BAltima%20atualiza%C3%A7%C3%A3o"></a>
   <a href="LICENSE"><img alt="Licença MIT" src="https://img.shields.io/badge/licen%C3%A7a-MIT-informational"></a>
-  <img alt="Plataformas Windows 10/11 e Linux/SteamOS" src="https://img.shields.io/badge/plataformas-Windows%20%7C%20Linux%20(beta)-0078d4">
+  <img alt="Windows 10/11" src="https://img.shields.io/badge/Windows-10%2F11-0078d4">
+  <img alt="Linux e SteamOS (beta)" src="https://img.shields.io/badge/Linux%20%2F%20SteamOS-beta-f5a623">
   <img alt="PS3 → PC" src="https://img.shields.io/badge/PS3-%E2%86%92%20PC-lightgrey">
 </p>
 
