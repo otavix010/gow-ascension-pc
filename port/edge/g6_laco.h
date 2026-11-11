@@ -20,6 +20,7 @@
 #define GOWA_G6_LACO_H
 #include "g6_ruido.h"
 
+#if defined(__AVX2__) && defined(__FMA__)
 #define G6L_LIM 0x53FFFFFFu   /* |x| < 2^40 */
 
 static inline uint32_t g6l_be32(const uint8_t* ls, uint32_t a) { return _byteswap_ulong(*(const uint32_t*)(ls + a)); }
@@ -181,4 +182,7 @@ static int g6_laco63_nativo(spu_context* ctx)
     gowa_edge_conta("g6_laco", conta, 1);
     return 1;
 }
+#else   /* 11/11: build compatível (sem AVX2/FMA): o laço traduzido */
+static int g6_laco63_nativo(spu_context* ctx) { (void)ctx; return 0; }
+#endif
 #endif

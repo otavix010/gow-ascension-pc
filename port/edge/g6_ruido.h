@@ -23,6 +23,7 @@ int gowa_vc_gowajm_00727200_00004930(spu_context* ctx, const u128* in, u128 r1_i
 #define G6_PERM 0x8680u
 #define G6_GRAD 0x8580u
 
+#if defined(__AVX2__) && defined(__FMA__)
 static inline __m256i g6_be(__m256i v)   /* palavras big-endian da LS -> do host */
 {
     const __m256i k = _mm256_setr_epi8(3, 2, 1, 0, 7, 6, 5, 4, 11, 10, 9, 8, 15, 14, 13, 12,
@@ -173,4 +174,10 @@ static int g6_vc4930(spu_context* ctx, const u128* in, u128 r1_in, u128* res, u1
     }
     return gowa_vc_gowajm_00727200_00004930(ctx, in, r1_in, res, fim);
 }
+#else   /* 11/11: build compatível (sem AVX2/FMA): o núcleo gerado, como com GOWA_EDGE_NATIVO=0 */
+static int g6_vc4930(spu_context* ctx, const u128* in, u128 r1_in, u128* res, u128* fim)
+{
+    return gowa_vc_gowajm_00727200_00004930(ctx, in, r1_in, res, fim);
+}
+#endif
 #endif

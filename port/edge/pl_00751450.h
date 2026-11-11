@@ -18,6 +18,7 @@
 
 /* os P pares: posições (campos de bits + viés, vezes 2^(s - 32), w = wbits) e os dois vetores de cada par (contas e
  * seleção do 0x752710, tabela em tab); antes, os vetores "do par -1" (zeros) depois do fim do fluxo de vetores */
+#if PL752_VETOR   /* 11/11: sem AVX2 (build compatível) não há o caminho vetorial nem as contas dele */
 static void pl751_escreve(spu_context* ctx, uint32_t inp, uint32_t po, uint32_t vo, uint32_t P, uint32_t tab,
                           const uint32_t* w, const uint32_t* s, const uint32_t* off, const int32_t* vies, uint32_t wbits)
 {
@@ -57,6 +58,7 @@ static void pl751_escreve(spu_context* ctx, uint32_t inp, uint32_t po, uint32_t 
         }
     }
 }
+#endif
 
 static int pl_00751450_corpo(spu_context* ctx)
 {

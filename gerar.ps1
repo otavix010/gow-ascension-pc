@@ -573,6 +573,7 @@ if (-not $VS) {
 # Bridge, só AVX) gerou o jogo inteiro, e ele fechou ao abrir com 0xC000001D (instrução ilegal). Sem essas instruções,
 # o gerador para aqui, antes de minutos de geração, e diz por quê. O clang diz o que o processador tem, como na escolha
 # da build (-march=native); GOWA_TESTE_MARCH troca o native nos testes. Sem resposta do clang, segue.
+$script:SemAvx2 = $false
 function Conferir-Processador {
     $march = if ($env:GOWA_TESTE_MARCH) { $env:GOWA_TESTE_MARCH } else { 'native' }
     $def = (cmd /c "echo.| `"$(Join-Path $VS 'VC\Tools\Llvm\x64\bin\clang.exe')`" -march=$march -dM -E -x c - 2>nul") -join "`n"
@@ -580,11 +581,18 @@ function Conferir-Processador {
     # report 739 (i7-3770): o Windows devolveu o processador sem nome, e o .Trim() num nulo parava o gerador antes da mensagem
     $nome = "$((Get-CimInstance Win32_Processor -ErrorAction SilentlyContinue | Select-Object -First 1).Name)".Trim()
     if (-not $nome) { $nome = 'sem nome no Windows' }
-    throw ("o seu processador ($nome) não tem AVX2, e o port precisa dele: Intel Core de 4ª geração (Haswell, 2013) " +
-           'em diante, ou AMD Ryzen, ou AMD com núcleos Excavator (2015). Os APUs AMD A4/A6/A8/A10 de mesa das séries ' +
-           '6000, 7000 e 8000 (Kaveri e Godavari, como o A8-8650B) têm núcleos Steamroller e não têm AVX2 (report 1038). ' +
-           'O jogo também pede um processador forte: ' +
-           'mesmo com AVX2, os de 4 núcleos ficam abaixo de 15 fps.')
+    # 11/11 (pedido do usuário; reports 1086/1087/1095/1097, i5-2500 e i5-2500S): sem AVX2, mas com SSE4.2 e POPCNT
+    # (Intel Core i de 1ª geração em diante, como Sandy e Ivy Bridge; AMD FX), a build compatível (x86-64-v2): o mesmo
+    # jogo sem AVX2/FMA, sem os atalhos do EDGE em AVX2 -- roda, mas bem mais devagar (no PC de testes, metade dos fps)
+    if ($def -match '__SSE4_2__' -and $def -match '__POPCNT__') {
+        $script:SemAvx2 = $true
+        Msg ("AVISO: o seu processador ($nome) não tem AVX2: o jogo vai ser gerado na versão compatível, que roda em " +
+             'processadores mais antigos, mas bem mais devagar (no mesmo PC, cerca de metade dos fps da versão normal; ' +
+             'num processador de 4 núcleos dessa época, espere poucos fps)')
+        return
+    }
+    throw ("o seu processador ($nome) não tem nem SSE4.2, o mínimo do port mesmo na versão compatível: Intel Core i " +
+           'de 1ª geração (2008) em diante, ou AMD FX / Ryzen. Os Phenom II e Athlon II não têm SSE4.2.')
 }
 Conferir-Processador
 
@@ -1547,7 +1555,7 @@ Etapa '5_spu' {
 $llvm = Join-Path $VS 'VC\Tools\Llvm\x64\bin'
 $escolha = if ($PSBoundParameters.ContainsKey('Build')) { $Build } elseif ($env:GOWA_BUILD) { $env:GOWA_BUILD.Trim().ToLower() } else { 'auto' }
 if ($escolha -eq 'avx512') { $escolha = 'nativa' }
-if ($escolha -notin @('auto', 'portatil', 'nativa')) { Msg "GOWA_BUILD='$escolha' não existe (auto, portatil, nativa): usando auto"; $escolha = 'auto' }
+if ($escolha -notin @('auto', 'portatil', 'nativa', 'compativel')) { Msg "GOWA_BUILD='$escolha' não existe (auto, portatil, nativa, compativel): usando auto"; $escolha = 'auto' }
 $motivo = ''
 if ($escolha -eq 'auto') {
     # 02/11 (pedido do usuário): o automático é sempre a portátil (AVX2), a build que quase todos os jogadores usam e a
@@ -1563,10 +1571,13 @@ if ($escolha -eq 'auto') {
         $alvo = 'portatil'; $motivo = 'automático: processador sem nome comercial (amostra de engenharia)'
     }
 } else { $alvo = $escolha; $motivo = 'escolhida pelo jogador' }
+# 11/11: sem AVX2, só a compatível roda (a portátil e a nativa fechariam com instrução ilegal)
+if ($script:SemAvx2) { $alvo = 'compativel'; $motivo = 'processador sem AVX2: versão compatível (mais lenta)' }
 # sem AVX-512: x86-64-v3 (AVX2), a build testada nos PCs de teste, e não -march=native: tira uma variável dos
 # defeitos gráficos vistos num Ryzen 5 5600X (cores de vértice e texturas erradas) enquanto a causa é investigada
-function Pasta-Build([string]$a) { if ($a -eq 'nativa') { 'build_native' } else { 'build_v3rz' } }
-function Args-Build([string]$a) { if ($a -eq 'nativa') { 'native' } else { 'x86-64-v3 rz' } }
+function Pasta-Build([string]$a) { if ($a -eq 'nativa') { 'build_native' } elseif ($a -eq 'compativel') { 'build_x86-64-v2rz' } else { 'build_v3rz' } }
+function Args-Build([string]$a) { if ($a -eq 'nativa') { 'native' } elseif ($a -eq 'compativel') { 'x86-64-v2 rz' } else { 'x86-64-v3 rz' } }
+function Nome-Build([string]$pasta) { if ($pasta -eq 'build_native') { 'nativa' } elseif ($pasta -eq 'build_x86-64-v2rz') { 'compativel' } else { 'portatil' } }
 $bdir = Pasta-Build $alvo
 # a geração anterior: com a mesma escolha e o exe dela no lugar, fica a build usada (inclusive a portátil que
 # substituiu uma nativa que não compilou); escolha diferente ou exe sumido, compila de novo
@@ -1576,10 +1587,10 @@ if (Test-Path $infoBuild) { foreach ($l in (Get-Content -LiteralPath $infoBuild 
 # (só a nativa aceita outra pasta: a portátil que a substituiu; um Automático que antes dava a nativa passa à portátil)
 if ($antes['escolhida'] -eq $escolha -and $antes['pasta'] -and ($antes['pasta'] -eq $bdir -or $alvo -eq 'nativa') -and
     (Test-Path (Join-Path $R "port\$($antes['pasta'])\gowa.exe"))) {
-    $bdir = $antes['pasta']; $alvo = if ($bdir -eq 'build_native') { 'nativa' } else { 'portatil' }
+    $bdir = $antes['pasta']; $alvo = Nome-Build $bdir
     if ($antes['motivo']) { $motivo = $antes['motivo'] }
 } elseif (-not (Test-Path (Join-Path $R "port\$bdir\gowa.exe")) -or ($antes['pasta'] -and $antes['pasta'] -ne $bdir)) {
-    if (Test-Path (Join-Path $OUT '6_compilar.ok')) { Msg "versão da build: $(if ($alvo -eq 'nativa') { 'nativa' } else { 'portátil' }) (outra que a anterior): compilando de novo" }
+    if (Test-Path (Join-Path $OUT '6_compilar.ok')) { Msg "versão da build: $alvo (outra que a anterior): compilando de novo" }
     Remove-Item -LiteralPath (Join-Path $OUT '6_compilar.ok'), (Join-Path $OUT '7_jogar.ok') -Force -ErrorAction SilentlyContinue
 }
 # report 508: arquivos com data no futuro (zip extraído num fuso a oeste de quem o fez, relógio acertado no meio da
@@ -1676,7 +1687,7 @@ function Tem-SdkWindows {
 function Compilar-Build([string]$a) {
     $bd = Pasta-Build $a; $ba = Args-Build $a
     if ($a -eq 'nativa' -and $env:GOWA_TESTE_NATIVA_FALHA -eq '1') { Msg 'teste: a nativa "falhou" (GOWA_TESTE_NATIVA_FALHA)'; return $false }
-    Msg "build: $a (código SPU com $(if ($a -eq 'portatil') { '-march=x86-64-v3, contas de float em para-zero' } else { '-march=native' }))"
+    Msg "build: $a (código SPU com $(if ($a -eq 'portatil') { '-march=x86-64-v3, contas de float em para-zero' } elseif ($a -eq 'compativel') { '-march=x86-64-v2 (sem AVX2), contas de float em para-zero' } else { '-march=native' }))"
     $env:GOWA_JOBS = "$Jobs"
     $exe = Join-Path $R "port\$bd\gowa.exe"
     $nf = Corrigir-Datas
@@ -1787,14 +1798,14 @@ Etapa '6_compilar' {
 }
 # o launcher abre o primeiro exe que existir (build_native antes da build_v3rz): o exe da outra versão (de uma
 # geração anterior, reports 461/462) fica renomeado, e o build.txt diz qual abrir
-foreach ($o in @('build_native', 'build_v3rz')) {
+foreach ($o in @('build_native', 'build_v3rz', 'build_x86-64-v2rz')) {
     $velho = Join-Path $R "port\$o\gowa.exe"
     if ($o -ne $bdir -and (Test-Path $velho)) {
         Move-Item -LiteralPath $velho -Destination "$velho.antigo" -Force -ErrorAction SilentlyContinue
         Msg "a $o de antes ficou como gowa.exe.antigo (o jogo abre a $bdir)"
     }
 }
-$usada = if ($bdir -eq 'build_native') { 'nativa' } else { 'portatil' }
+$usada = Nome-Build $bdir
 [IO.File]::WriteAllLines($infoBuild, [string[]]@("escolhida=$escolha", "usada=$usada", "pasta=$bdir", "exe=port/$bdir/gowa.exe", "motivo=$motivo"), (New-Object Text.UTF8Encoding $false))   # UTF-8 sem BOM
 Msg "versão da build: escolhida $escolha, usada $usada ($motivo)"
 
