@@ -4,6 +4,17 @@ O Otavix Launcher mostra este arquivo na página "Novidades" do jogo. Cada atual
 "## <data> · <versão>" e o texto em português (### pt), inglês (### en) e, quando houver, espanhol (### es).
 As mais novas ficam em cima.
 
+## 10/11/2026 · gerador
+### pt
+- **Correção:** o gerador acha o jogo em mais situações: o arquivo do jogo (.iso, .7z, .zip ou .rar) dentro de subpastas da pasta escolhida, a .iso quando ela está ao lado do .zip, a pasta de cima quando a escolhida só tem o README, e o disco quando a pasta escolhida é a PS3_UPDATE dele. Um .rar dividido em partes passa a pedir a extração pelo 7-Zip ou WinRAR.
+- **Correção:** gerar de novo com o jogo aberto não para mais em "avcodec-63.dll em uso por outro processo"; quando um arquivo continua preso, a mensagem diz se é o jogo aberto ou outro programa, como o antivírus.
+### en
+- **Fix:** the generator finds the game in more cases: the game file (.iso, .7z, .zip or .rar) inside subfolders of the chosen folder, the .iso when it sits next to the .zip, the parent folder when the chosen one only has the README, and the disc when the chosen folder is its PS3_UPDATE. A .rar split into parts now asks for extraction with 7-Zip or WinRAR.
+- **Fix:** generating again with the game open no longer stops at "avcodec-63.dll in use by another process"; when a file stays locked, the message says whether it is the open game or another program, such as the antivirus.
+### es
+- **Corrección:** el generador encuentra el juego en más casos: el archivo del juego (.iso, .7z, .zip o .rar) dentro de subcarpetas de la carpeta elegida, la .iso cuando está junto al .zip, la carpeta de arriba cuando la elegida solo tiene el README, y el disco cuando la carpeta elegida es su PS3_UPDATE. Un .rar dividido en partes ahora pide extraerlo con 7-Zip o WinRAR.
+- **Corrección:** generar de nuevo con el juego abierto ya no se detiene en "avcodec-63.dll en uso por otro proceso"; cuando un archivo sigue bloqueado, el mensaje dice si es el juego abierto u otro programa, como el antivirus.
+
 ## 10/11/2026 · launcher 1.0.90
 ### pt
 - **Opções:** o gowa.exe aberto direto da pasta passa a usar as opções salvas no launcher (resolução, fps e as demais); abrindo pelo launcher, nada muda.
