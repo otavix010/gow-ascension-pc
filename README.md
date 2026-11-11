@@ -91,6 +91,10 @@ O jogo grava um resumo de desempenho em `desempenho.json`, ao lado do exe (ou em
 
 Detalhes de cada etapa, e como fazer à mão: [docs/COMO_GERAR.md](docs/COMO_GERAR.md).
 
+### Linux / SteamOS (beta)
+
+O port também roda no Linux e no SteamOS (Steam Deck, Legion Go S), pelo Proton: o launcher gera e abre o jogo (versão 1.0.92 ou mais nova do Otavix Launcher). Precisa de um Proton instalado na Steam, de `curl`, `python3`, `tar` e `xz`, de um processador com AVX2 e de uns 15 GB livres. À mão: `bash scripts/linux/gerar.sh --disco <pasta ou arquivo do disco>` (o update e o firmware são opcionais: `--update`, `--firmware`) e depois `bash jogar.sh`. O log fica em `out/jogo.log`. Sempre chame os dois scripts pelo `bash`.
+
 ## Como funciona
 
 O PS3 tem um processador central (PPU, PowerPC), seis co-processadores vetoriais (SPUs) e uma GPU (RSX):
