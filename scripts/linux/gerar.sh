@@ -161,6 +161,7 @@ engine_ffmpeg() {
     rm -rf "$R/engine.novo"; mkdir -p "$R/engine.novo"
     extrair_zip "$zip" "$R/engine.novo" || falha 'o zip da engine não abriu'
     rm -rf "$R/engine"; mv "$R/engine.novo" "$R/engine"
+    echo "$ENGINE_SHA" > "$R/engine/pacote.sha256"
     local ff=$R/dl/ffmpeg9/$FFMPEG_NOME
     if [ ! -d "$ff/include/libavcodec" ]; then
         msg 'baixando o FFmpeg 9 (LGPL)'
@@ -170,6 +171,13 @@ engine_ffmpeg() {
         extrair_zip "$R/dl/ffmpeg.zip" "$R/dl/ffmpeg9" && rm -f "$R/dl/ffmpeg.zip"
     fi
 }
+# 12/11: uma engine nova (outra versão no gerar.ps1) é instalada de novo e a libsre, o PPU, as SPUs e o jogo são
+# refeitos, como no gerar.ps1 (pacote.sha256). Antes, a marca 1_engine.ok de uma geração antiga ficava e a engine
+# nunca era trocada numa instalação que já tinha gerado uma vez.
+if [ -f "$OUT/1_engine.ok" ] && [ "$(cat "$R/engine/pacote.sha256" 2>/dev/null)" != "$ENGINE_SHA" ]; then
+    msg "engine $ENGINE_VERSAO nova: a libsre, o PPU e as SPUs serão traduzidos de novo e o jogo recompilado"
+    rm -f "$OUT/1_engine.ok" "$OUT"/3_*.ok "$OUT"/4_*.ok "$OUT"/5_*.ok "$OUT"/6_*.ok "$OUT"/7_*.ok
+fi
 etapa 1_engine engine_ffmpeg
 
 # ---------------------------------------------------------------------------- disco, update e o executável do jogo
