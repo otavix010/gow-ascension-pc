@@ -6,13 +6,13 @@ As mais novas ficam em cima.
 
 ## 12/11/2026 · desempenho · engine 0.12.0
 ### pt
-- **Desempenho:** a engine passa a ser compilada guiada pelo comportamento real do jogo (otimização guiada por perfil), e a renderização faz menos trabalho repetido a cada objeto desenhado. Nos combates pesados: cerca de 4% a mais de fps num portátil a 15 W e cerca de 10% a mais num notebook com Core i5 de 10ª geração.
+- **Desempenho:** a engine passa a ser compilada guiada pelo comportamento real do jogo (otimização guiada por perfil), e a renderização faz menos trabalho repetido a cada objeto desenhado. Nos combates pesados: cerca de 4% a mais de fps num portátil a 15 W e cerca de 7% a mais num notebook com Core i5 de 10ª geração.
 - **Correção (Linux):** ao atualizar, a engine nova agora é instalada e o jogo é refeito com ela; antes, quem já tinha gerado o jogo continuava com a engine anterior.
 ### en
-- **Performance:** the engine is now compiled guided by the game's real behaviour (profile-guided optimization), and rendering does less repeated work for each object drawn. In heavy fights: about 4% more fps on a handheld at 15 W and about 10% more on a laptop with a 10th-gen Core i5.
+- **Performance:** the engine is now compiled guided by the game's real behaviour (profile-guided optimization), and rendering does less repeated work for each object drawn. In heavy fights: about 4% more fps on a handheld at 15 W and about 7% more on a laptop with a 10th-gen Core i5.
 - **Fix (Linux):** when updating, the new engine is now installed and the game is rebuilt with it; before, anyone who had already generated the game kept the previous engine.
 ### es
-- **Rendimiento:** el motor ahora se compila guiado por el comportamiento real del juego (optimización guiada por perfil), y el renderizado hace menos trabajo repetido por cada objeto dibujado. En los combates pesados: cerca de 4% más de fps en un portátil a 15 W y cerca de 10% más en un notebook con Core i5 de 10.ª generación.
+- **Rendimiento:** el motor ahora se compila guiado por el comportamiento real del juego (optimización guiada por perfil), y el renderizado hace menos trabajo repetido por cada objeto dibujado. En los combates pesados: cerca de 4% más de fps en un portátil a 15 W y cerca de 7% más en un notebook con Core i5 de 10.ª generación.
 - **Corrección (Linux):** al actualizar, el motor nuevo ahora se instala y el juego se rehace con él; antes, quien ya había generado el juego seguía con el motor anterior.
 
 ## 12/11/2026 · gerador mais claro
