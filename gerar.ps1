@@ -114,13 +114,22 @@ foreach ($c in @(@('2_jogo', 'jogo\GOWA.elf'), @('3_firmware', 'fw\lle\libsre_im
 # traduzindo de novo. A marca guarda o MD5 do tradutor (o manifesto do pacote da engine, com o SHA-256 de cada
 # arquivo dele; antes, os .py de scripts\otx\ppu) e do preâmbulo (port\ppu_recomp_preambulo.h) que geraram o código;
 # sem marca, também refaz. Uma marca de uma geração com o tradutor em .py nunca bate: a primeira com o pacote refaz.
+# 12/11: a identidade do TRADUTOR de uma pasta de engine -- o tradutor_sha256 do manifesto (as fontes e dados do
+# tradutor, que não mudam quando só o runtime muda); sem ele (engines até a 0.12.1), o MD5 do manifesto inteiro, como
+# antes. Vazio sem engine.
+function Id-Tradutor([string]$pasta) {
+    $f = Join-Path $pasta 'manifesto.json'
+    if (-not (Test-Path -LiteralPath $f -PathType Leaf)) { return '' }
+    try { $t = (Get-Content -LiteralPath $f -Raw -Encoding UTF8 | ConvertFrom-Json).tradutor_sha256 } catch { $t = $null }
+    if ($t) { return "tradutor $t" }
+    return "manifesto $((Get-FileHash -LiteralPath $f -Algorithm MD5).Hash)"
+}
 $marcaLifter = Join-Path $R 'port\recompiled\lifter_md5.txt'
 function Md5-Lifter {
-    $arqs = @(Get-Item -LiteralPath (Join-Path $ENG 'manifesto.json') -ErrorAction SilentlyContinue) +
-            @(Get-Item -LiteralPath (Join-Path $R 'port\ppu_recomp_preambulo.h')) +
+    $arqs = @(Get-Item -LiteralPath (Join-Path $R 'port\ppu_recomp_preambulo.h')) +
             @(Get-Item -LiteralPath (Join-Path $R 'scripts\remendos_ppu.py'))   # 11/11: remendo novo (Ouroboros) só chega traduzindo de novo
-    $linhas = $arqs | Sort-Object FullName | ForEach-Object {
-        "$($_.FullName.Substring($R.Length)) $((Get-FileHash -LiteralPath $_.FullName -Algorithm MD5).Hash)" }
+    $linhas = @($arqs | Sort-Object FullName | ForEach-Object {
+        "$($_.FullName.Substring($R.Length)) $((Get-FileHash -LiteralPath $_.FullName -Algorithm MD5).Hash)" }) + @(Id-Tradutor $ENG)
     $md5 = [Security.Cryptography.MD5]::Create()
     try { [BitConverter]::ToString($md5.ComputeHash([Text.Encoding]::UTF8.GetBytes($linhas -join "`n"))).Replace('-', '') } finally { $md5.Dispose() }
 }
@@ -137,10 +146,9 @@ $marcaSpu = Join-Path $R 'port\spu\spu_md5.txt'
 function Md5-Spu {
     $arqs = @(Get-ChildItem -LiteralPath (Join-Path $R 'scripts') -Filter *.py -File -ErrorAction SilentlyContinue) +
             @(Get-ChildItem -LiteralPath (Join-Path $R 'scripts_edge') -Filter *.py -File -ErrorAction SilentlyContinue) +
-            @(Get-ChildItem -LiteralPath (Join-Path $R 'dados') -Filter *.txt -File -ErrorAction SilentlyContinue) +
-            @(Get-Item -LiteralPath (Join-Path $ENG 'manifesto.json') -ErrorAction SilentlyContinue)
-    $linhas = $arqs | Sort-Object FullName | ForEach-Object {
-        "$($_.FullName.Substring($R.Length)) $((Get-FileHash -LiteralPath $_.FullName -Algorithm MD5).Hash)" }
+            @(Get-ChildItem -LiteralPath (Join-Path $R 'dados') -Filter *.txt -File -ErrorAction SilentlyContinue)
+    $linhas = @($arqs | Sort-Object FullName | ForEach-Object {
+        "$($_.FullName.Substring($R.Length)) $((Get-FileHash -LiteralPath $_.FullName -Algorithm MD5).Hash)" }) + @(Id-Tradutor $ENG)
     $txt = ($linhas -join "`n") + $(if ($SemOtimizar) { "`nsem_otimizar" } else { '' })
     $md5 = [Security.Cryptography.MD5]::Create()
     try { [BitConverter]::ToString($md5.ComputeHash([Text.Encoding]::UTF8.GetBytes($txt))).Replace('-', '') } finally { $md5.Dispose() }
@@ -704,6 +712,7 @@ Etapa '1_engine' {
                (($ruins | Select-Object -First 5) -join '; ') + '. Se o antivírus removeu ou bloqueou algum .exe da ' +
                "pasta $novo, libere a pasta do jogo no antivírus e gere de novo.")
     }
+    $idAntes = Id-Tradutor $ENG
     if (Test-Path -LiteralPath $ENG) {
         SemExcecao { cmd /c "rmdir /s /q `"$ENG`" 2>&1" } | Out-Null
         if (Test-Path -LiteralPath $ENG) { throw "não deu para trocar a pasta $ENG (algum arquivo dela está aberto?). Feche o jogo e gere de novo." }
@@ -713,11 +722,16 @@ Etapa '1_engine' {
     $ver = (Get-Content -LiteralPath (Join-Path $ENG 'manifesto.json') -Raw -Encoding UTF8 | ConvertFrom-Json).versao
     Anotar $LOG "engine $ver instalada em $ENG (sha256 $ENGINE_SHA)"
     if ($antes -ne $ENGINE_SHA) {
-        # pacote novo: a tradução e a compilação são do tradutor e do runtime dele
+        # pacote novo: a tradução e a compilação são do tradutor e do runtime dele. 12/11: com o MESMO tradutor
+        # (tradutor_sha256 igual nas duas engines) a tradução continua valendo e só o jogo é recompilado com o runtime novo
+        $idDepois = Id-Tradutor $ENG
+        $soCompilar = $idAntes -like 'tradutor *' -and $idAntes -eq $idDepois
+        $de = if ($soCompilar) { 6 } else { 3 }
         $refazer = @(Get-ChildItem -LiteralPath $OUT -Filter '*.ok' -ErrorAction SilentlyContinue |
-                     Where-Object { $_.Name -match '^(\d+)_' -and [int]$matches[1] -ge 3 })
+                     Where-Object { $_.Name -match '^(\d+)_' -and [int]$matches[1] -ge $de })
         if ($refazer) {
-            Msg "engine $ver nova: a libsre, o PPU e as SPUs serão traduzidos de novo e o jogo recompilado"
+            if ($soCompilar) { Msg "engine $ver nova com o mesmo tradutor: só o jogo será recompilado (a tradução continua valendo)" }
+            else { Msg "engine $ver nova: a libsre, o PPU e as SPUs serão traduzidos de novo e o jogo recompilado" }
             $refazer | Remove-Item -Force
         }
     }
@@ -1811,6 +1825,10 @@ function Compilar-Build([string]$a) {
     return $false
 }
 Etapa '6_compilar' {
+    # 12/11: a tabela de NIDs do HLE é do runtime da engine (não da tradução): refeita aqui, uma engine que só muda o
+    # runtime recompila sem traduzir o PPU de novo
+    Push-Location $ENG
+    try { Exec $LOG "$ENGINE_BIN\ppu_nids.exe --all --out `"$R\port\recompiled\ppu_hle_nids.cpp`"" } finally { Pop-Location }
     $env:GOWA_VS = $VS
     $env:FFMPEG_DIR = Join-Path $R "dl\ffmpeg9\$FFMPEG_NOME"
     # reports 398/402 (30/10): o build_portatil.cmd roda o vcvars64 com o PATH só do Windows; o Python volta por aqui
