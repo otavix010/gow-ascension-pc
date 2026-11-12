@@ -295,7 +295,8 @@ function Exec([string]$log, [string]$linha) {
         Write-Host $cauda -ForegroundColor DarkGray
         # reports 1047, 1049 e 1062 (10/11): o Windows bloqueou um programa do gerador ("bloqueado pela política do
         # Device Guard", o Controle Inteligente de Aplicativos ou o Controle de Aplicativos do Windows Defender)
-        if ($cauda -match 'Device Guard|Application Control|Controle de Aplicativos|Controle Inteligente|Smart App Control') {
+        # (12/11, report 1115: o Python diz "[WinError 4551] Uma política de Controle de Aplicativo bloqueou", no singular)
+        if ($cauda -match 'Device Guard|Application Control|Controle de Aplicativo|Controle Inteligente|Smart App Control|WinError 4551') {
             throw ("o Windows bloqueou um programa do gerador (o Controle Inteligente de Aplicativos, também chamado " +
                    "Device Guard): $linha. Em Segurança do Windows > Controle de aplicativos e navegador > Controle " +
                    "Inteligente de Aplicativos, deixe Desativado e gere de novo. Atenção: depois de desligado, o Windows " +
@@ -595,6 +596,45 @@ function Conferir-Processador {
            'de 1ª geração (2008) em diante, ou AMD FX / Ryzen. Os Phenom II e Athlon II não têm SSE4.2.')
 }
 Conferir-Processador
+
+# Reports 1090/1091/1113/1115/1116/1118 (11-12/11): o Controle Inteligente de Aplicativos do Windows 11 (Smart App
+# Control) só deixa rodar programas com assinatura digital ou já conhecidos pela Microsoft. Os programas da engine não
+# têm assinatura, e o gowa.exe é compilado no PC de cada um a partir do próprio jogo (um programa novo em cada PC, que
+# o Windows nunca conhece) -- não há como gerar nem jogar com ele LIGADO (estado 1 no registro). O gerador para aqui,
+# antes de baixar e gerar, e diz o que fazer; em avaliação (estado 2) o Windows ainda não bloqueia: só avisa.
+# GOWA_IGNORAR_CI=1 pula a conferência.
+function Conferir-ControleInteligente {
+    if ($env:GOWA_IGNORAR_CI -eq '1') { return }
+    $estado = $null
+    try {
+        $estado = (Get-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Control\CI\Policy' -Name VerifiedAndReputablePolicyState `
+                   -ErrorAction Stop).VerifiedAndReputablePolicyState
+    } catch { return }
+    if ($estado -eq 1) {
+        throw ('o Controle Inteligente de Aplicativos do Windows está ligado, e ele bloqueia o gerador e o próprio jogo: ' +
+               'só deixa rodar programas com assinatura digital ou já conhecidos pela Microsoft, e o jogo é compilado ' +
+               'aqui no seu PC, a partir do seu jogo (um programa novo, que o Windows nunca viu). Com ele ligado não há ' +
+               'como gerar nem jogar. Em Segurança do Windows > Controle de aplicativos e navegador > Controle ' +
+               'Inteligente de Aplicativos, deixe Desativado e gere de novo. Atenção: depois de desligado, o Windows só ' +
+               'deixa ligar de novo reinstalando o sistema.')
+    }
+    if ($estado -eq 2) {
+        Msg ('AVISO: o Controle Inteligente de Aplicativos do Windows está em avaliação. Se o Windows passar a ligá-lo, ' +
+             'ele vai bloquear o gerador e o jogo (programas sem assinatura digital); aí, só desativando em Segurança ' +
+             'do Windows > Controle de aplicativos e navegador.')
+    }
+}
+Conferir-ControleInteligente
+
+# Report 1114 (12/11): a pasta do port numa unidade de rede (\\servidor\pasta): o cmd do Windows não usa caminho de rede
+# como pasta atual, e o teste do compilador do CMake falha ("FAILED: cmTC_....exe") no fim de minutos de geração. O
+# gerador para aqui e pede um disco do PC (uma letra de unidade mapeada para a rede funciona com o cmd, mas fica lenta).
+function Conferir-PastaLocal {
+    if (-not "$R".StartsWith('\\')) { return }
+    throw ("a pasta do port está numa pasta de rede ($R), e o compilador do Windows não gera o jogo ali. Copie a " +
+           'pasta gow-ascension inteira para um disco do próprio PC (por exemplo C:\Jogos\gow-ascension) e gere de novo.')
+}
+Conferir-PastaLocal
 
 # ---------------------------------------------------------------------------- a engine (pacote compilado)
 # O pacote vai para engine\ (lib, include, bin com o tradutor, cmake) e o SHA-256 do .zip instalado fica em

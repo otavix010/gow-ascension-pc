@@ -4,6 +4,17 @@ O Otavix Launcher mostra este arquivo na página "Novidades" do jogo. Cada atual
 "## <data> · <versão>" e o texto em português (### pt), inglês (### en) e, quando houver, espanhol (### es).
 As mais novas ficam em cima.
 
+## 12/11/2026 · gerador mais claro
+### pt
+- **Correção:** com o Controle Inteligente de Aplicativos do Windows 11 ligado, o gerador agora avisa logo no início, antes de baixar e gerar, em vez de parar no meio. Ele bloqueia programas sem assinatura digital, como os do gerador e o próprio jogo, que é compilado no seu PC; para jogar, é preciso desativá-lo em Segurança do Windows.
+- **Correção:** com a pasta do port numa pasta de rede (\\servidor\...), o gerador agora pede logo no início para copiá-la para um disco do próprio PC, em vez de falhar no fim da compilação.
+### en
+- **Fix:** with Windows 11 Smart App Control turned on, the generator now warns right at the start, before downloading and generating, instead of stopping halfway. It blocks programs without a digital signature, such as the generator's and the game itself, which is compiled on your PC; to play, it has to be turned off in Windows Security.
+- **Fix:** with the port folder on a network share (\\server\...), the generator now asks right at the start to copy it to a drive on the PC itself, instead of failing at the end of compilation.
+### es
+- **Corrección:** con el Control inteligente de aplicaciones de Windows 11 activado, el generador ahora avisa al principio, antes de descargar y generar, en lugar de detenerse a la mitad. Bloquea programas sin firma digital, como los del generador y el propio juego, que se compila en tu PC; para jugar hay que desactivarlo en Seguridad de Windows.
+- **Corrección:** con la carpeta del port en una carpeta de red (\\servidor\...), el generador ahora pide al principio copiarla a un disco del propio PC, en lugar de fallar al final de la compilación.
+
 ## 11/11/2026 · correções da tarde · engine 0.11.9
 ### pt
 - **Correção:** o jogo não é mais encerrado pelo Windows como "não está respondendo" quando o quadro demora alguns segundos (mais comum em gráficos integrados): a janela agora responde numa linha de execução própria.
