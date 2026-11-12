@@ -4,6 +4,14 @@ O Otavix Launcher mostra este arquivo na página "Novidades" do jogo. Cada atual
 "## <data> · <versão>" e o texto em português (### pt), inglês (### en) e, quando houver, espanhol (### es).
 As mais novas ficam em cima.
 
+## 12/11/2026 · desempenho · engine 0.12.0
+### pt
+- **Desempenho:** a engine passa a ser compilada guiada pelo comportamento real do jogo (otimização guiada por perfil), e a renderização faz menos trabalho repetido a cada objeto desenhado. Nos combates pesados: cerca de 4% a mais de fps num portátil a 15 W e cerca de 10% a mais num notebook com Core i5 de 10ª geração.
+### en
+- **Performance:** the engine is now compiled guided by the game's real behaviour (profile-guided optimization), and rendering does less repeated work for each object drawn. In heavy fights: about 4% more fps on a handheld at 15 W and about 10% more on a laptop with a 10th-gen Core i5.
+### es
+- **Rendimiento:** el motor ahora se compila guiado por el comportamiento real del juego (optimización guiada por perfil), y el renderizado hace menos trabajo repetido por cada objeto dibujado. En los combates pesados: cerca de 4% más de fps en un portátil a 15 W y cerca de 10% más en un notebook con Core i5 de 10.ª generación.
+
 ## 12/11/2026 · gerador mais claro
 ### pt
 - **Correção:** com o Controle Inteligente de Aplicativos do Windows 11 ligado, o gerador agora avisa logo no início, antes de baixar e gerar, em vez de parar no meio. Ele bloqueia programas sem assinatura digital, como os do gerador e o próprio jogo, que é compilado no seu PC; para jogar, é preciso desativá-lo em Segurança do Windows.
