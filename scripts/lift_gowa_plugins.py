@@ -57,7 +57,10 @@ ENTRADAS_EXTRA = {0x754B80: [0x14], 0x755540: [0x14], 0x74C580: [0x20], 0x74EF90
                   0x75AF20: [0x10],
                   # 02/11 noite: GOWA_INTERP_ENTRY_LOG no cap. 16 (gowa_g63) -- (o 0x75A380 em +0xC, w19-21, NÃO: muda a saída de 4 jobs da confere_cut);
                   # no w11 a mesma rotina de biblioteca no 0x6E8130 (+0x2E50) e no 0x7493B0 (+0x20A8, plugin novo na lista)
-                  0x6E8130: [0x2E50], 0x7493B0: [0x20A8]}
+                  0x6E8130: [0x2E50], 0x7493B0: [0x20A8],
+                  # 12/11 (report 1127, Delfos/gás do cap. 13 a 14 fps num portátil a 15 W): plugins que só esse trecho
+                  # carrega (GOWA_GETLOG_CODE) e as entradas no meio deles (GOWA_INTERP_ENTRY_LOG com o system service nativo)
+                  0x74E6F0: [0x90], 0x74F7F0: [0x58], 0x757000: [0x14]}
 PROIBIDO = (r'spu_rdch|spu_wrch|spu_rchcnt|spu_indirect_branch|spu_drain_call|spu_halt|spu_stop|'
             r'spu_iret|spu_check_stack_reset|longjmp|SPU_STOP|spu_sync')
 

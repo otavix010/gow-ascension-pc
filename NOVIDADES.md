@@ -4,6 +4,17 @@ O Otavix Launcher mostra este arquivo na página "Novidades" do jogo. Cada atual
 "## <data> · <versão>" e o texto em português (### pt), inglês (### en) e, quando houver, espanhol (### es).
 As mais novas ficam em cima.
 
+## 12/11/2026 · correções · engine 0.12.1
+### pt
+- **Correção:** no Templo de Delfos, o fps caía pela metade em alguns trechos: alguns efeitos de geometria que só aparecem ali rodavam num modo lento de compatibilidade. Agora rodam em código nativo, como o resto do jogo (num portátil a 15 W, de 14 para 24 fps no trecho mais pesado).
+- **Correção:** o som das cutscenes (e do jogo todo) saía cerca de 0,1 s depois da imagem. O buffer de áudio escolhido no launcher agora é só o limite: o som fica guardado o mínimo necessário e só aumenta a folga quando há risco de cortes.
+### en
+- **Fix:** in the Temple of Delphi, fps dropped by half in some parts: some geometry effects that only appear there ran in a slow compatibility mode. They now run as native code, like the rest of the game (on a handheld at 15 W, from 14 to 24 fps in the heaviest part).
+- **Fix:** sound in cutscenes (and in the whole game) came about 0.1 s after the picture. The audio buffer chosen in the launcher is now only the limit: sound is held for the minimum needed, and the margin only grows when there is a risk of crackling.
+### es
+- **Corrección:** en el Templo de Delfos, los fps bajaban a la mitad en algunos tramos: algunos efectos de geometría que solo aparecen ahí se ejecutaban en un modo lento de compatibilidad. Ahora se ejecutan en código nativo, como el resto del juego (en un portátil a 15 W, de 14 a 24 fps en el tramo más pesado).
+- **Corrección:** el sonido de las cinemáticas (y de todo el juego) salía cerca de 0,1 s después de la imagen. El búfer de audio elegido en el launcher ahora es solo el límite: el sonido se guarda lo mínimo necesario y el margen solo crece cuando hay riesgo de cortes.
+
 ## 12/11/2026 · desempenho · engine 0.12.0
 ### pt
 - **Desempenho:** a engine passa a ser compilada guiada pelo comportamento real do jogo (otimização guiada por perfil), e a renderização faz menos trabalho repetido a cada objeto desenhado. Nos combates pesados: cerca de 4% a mais de fps num portátil a 15 W e cerca de 7% a mais num notebook com Core i5 de 10ª geração.
