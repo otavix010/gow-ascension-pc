@@ -151,16 +151,6 @@ EOF
 }
 
 # ---------------------------------------------------------------------------- engine e FFmpeg
-# 12/11: a identidade do TRADUTOR de uma pasta de engine (como o Id-Tradutor do gerar.ps1): o tradutor_sha256 do
-# manifesto (fontes e dados do tradutor; não muda quando só o runtime muda) ou, nas engines até a 0.12.1, o MD5 do
-# manifesto inteiro. Vazio sem engine.
-tradutor_id() {
-    local m=$1/manifesto.json
-    [ -f "$m" ] || return 0
-    local t; t=$(grep -o '"tradutor_sha256": *"[0-9a-f]*"' "$m" | grep -o '[0-9a-f]\{64\}')
-    if [ -n "$t" ]; then echo "tradutor $t"; else echo "manifesto $(md5sum < "$m" | cut -d' ' -f1)"; fi
-}
-ENGINE_TROCA=0
 engine_ffmpeg() {
     local zip=$R/dl/$ENGINE_NOME.zip
     if ! confere "$ENGINE_SHA" "$zip"; then
@@ -170,19 +160,8 @@ engine_ffmpeg() {
     fi
     rm -rf "$R/engine.novo"; mkdir -p "$R/engine.novo"
     extrair_zip "$zip" "$R/engine.novo" || falha 'o zip da engine não abriu'
-    local id_antes id_depois; id_antes=$(tradutor_id "$R/engine"); id_depois=$(tradutor_id "$R/engine.novo")
     rm -rf "$R/engine"; mv "$R/engine.novo" "$R/engine"
     echo "$ENGINE_SHA" > "$R/engine/pacote.sha256"
-    if [ "$ENGINE_TROCA" = 1 ]; then
-        # com o MESMO tradutor (tradutor_sha256 igual) a tradução continua valendo: só o jogo é recompilado
-        if [ "${id_antes%% *}" = tradutor ] && [ "$id_antes" = "$id_depois" ]; then
-            msg "engine $ENGINE_VERSAO nova com o mesmo tradutor: só o jogo será recompilado (a tradução continua valendo)"
-            rm -f "$OUT"/6_*.ok "$OUT"/7_*.ok
-        else
-            msg "engine $ENGINE_VERSAO nova: a libsre, o PPU e as SPUs serão traduzidos de novo e o jogo recompilado"
-            rm -f "$OUT"/3_*.ok "$OUT"/4_*.ok "$OUT"/5_*.ok "$OUT"/6_*.ok "$OUT"/7_*.ok
-        fi
-    fi
     local ff=$R/dl/ffmpeg9/$FFMPEG_NOME
     if [ ! -d "$ff/include/libavcodec" ]; then
         msg 'baixando o FFmpeg 9 (LGPL)'
@@ -196,7 +175,8 @@ engine_ffmpeg() {
 # refeitos, como no gerar.ps1 (pacote.sha256). Antes, a marca 1_engine.ok de uma geração antiga ficava e a engine
 # nunca era trocada numa instalação que já tinha gerado uma vez.
 if [ -f "$OUT/1_engine.ok" ] && [ "$(cat "$R/engine/pacote.sha256" 2>/dev/null)" != "$ENGINE_SHA" ]; then
-    rm -f "$OUT/1_engine.ok"; ENGINE_TROCA=1   # o que mais refazer, o engine_ffmpeg decide pelo tradutor
+    msg "engine $ENGINE_VERSAO nova: a libsre, o PPU e as SPUs serão traduzidos de novo e o jogo recompilado"
+    rm -f "$OUT/1_engine.ok" "$OUT"/3_*.ok "$OUT"/4_*.ok "$OUT"/5_*.ok "$OUT"/6_*.ok "$OUT"/7_*.ok
 fi
 etapa 1_engine engine_ffmpeg
 
@@ -341,7 +321,7 @@ ppu() {
 }
 # a tradução do PPU é refeita quando muda o que a gera (o tradutor no pacote da engine, o preâmbulo ou os remendos;
 # 11/11: o remendo do Ouroboros só chega a quem já gerou traduzindo de novo), como no gerar.ps1; sem marca, também refaz
-md5_ppu() { { tradutor_id "$R/engine"; cat "$R/port/ppu_recomp_preambulo.h" "$R/scripts/remendos_ppu.py" 2>/dev/null; } | md5sum | cut -d' ' -f1; }
+md5_ppu() { cat "$R/engine/manifesto.json" "$R/port/ppu_recomp_preambulo.h" "$R/scripts/remendos_ppu.py" 2>/dev/null | md5sum | cut -d' ' -f1; }
 if [ -f "$OUT/4_ppu.ok" ] && [ "$(cat "$R/port/recompiled/lifter_md5.txt" 2>/dev/null)" != "$(md5_ppu)" ]; then
     msg "4_ppu: o tradutor do PPU ou os remendos mudaram nesta atualização; traduzindo de novo"
     rm -f "$OUT/4_ppu.ok" "$OUT/6_compilar.ok" "$OUT/7_jogar.ok"
@@ -369,25 +349,11 @@ spu() {
     ex "$PY" $s/spu_num_remap.py aplicar     # obrigatório (GOWA_SPU_NUM_REMAP=3 no boot)
     ex "$PY" $s/guarda_avx512.py aplicar
     ex "$PY" $s/otimizar.py
-    md5_spu > "$R/port/spu/spu_md5.txt"
 }
-# 12/11: a tradução das SPUs é refeita quando mudam os scripts dela, os dados (listas de plugins) ou o tradutor, como
-# o Md5-Spu do gerar.ps1; sem marca, também refaz
-md5_spu() {
-    { tradutor_id "$R/engine"
-      for f in $(ls "$R"/scripts/*.py "$R"/scripts_edge/*.py "$R"/dados/*.txt 2>/dev/null | sort); do
-          echo "${f#$R} $(md5sum < "$f" | cut -d' ' -f1)"; done; } | md5sum | cut -d' ' -f1
-}
-if [ -f "$OUT/5_spu.ok" ] && [ "$(cat "$R/port/spu/spu_md5.txt" 2>/dev/null)" != "$(md5_spu)" ]; then
-    msg "5_spu: a tradução das SPUs mudou nesta atualização; traduzindo de novo"
-    rm -f "$OUT/5_spu.ok" "$OUT/6_compilar.ok" "$OUT/7_jogar.ok"
-fi
 etapa 5_spu spu
 
 # ---------------------------------------------------------------------------- compilar (portátil: AVX2, para-zero)
 compilar() {
-    # 12/11: a tabela de NIDs do HLE é do runtime (não da tradução): refeita aqui, como no gerar.ps1
-    eng ppu_nids.exe --all --out "$R/port/recompiled/ppu_hle_nids.cpp"
     export FFMPEG_DIR=$R/dl/ffmpeg9/$FFMPEG_NOME GOWA_PY_EXE=$PY GOWA_JOBS=$JOBS
     ex bash "$R/scripts/linux/build_linux.sh" x86-64-v3 rz   # pelo bash: o zip do port pode chegar sem a permissão de execução
     [ -f "$R/port/build_v3rz/gowa.exe" ] || falha 'o gowa.exe não foi gerado (veja o log)'

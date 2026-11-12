@@ -4,6 +4,14 @@ O Otavix Launcher mostra este arquivo na página "Novidades" do jogo. Cada atual
 "## <data> · <versão>" e o texto em português (### pt), inglês (### en) e, quando houver, espanhol (### es).
 As mais novas ficam em cima.
 
+## 12/11/2026 · atualizações mais rápidas · engine 0.12.2
+### pt
+- **Melhoria (Windows):** quando uma atualização da engine não muda a tradução do jogo, o gerador agora só recompila o jogo, sem traduzir tudo de novo: no nosso PC, de cerca de 2,5 min para segundos. Esta atualização ainda refaz tudo uma última vez. No Linux, a mesma melhoria chega numa próxima atualização.
+### en
+- **Improvement (Windows):** when an engine update does not change the game's translation, the generator now only recompiles the game, without translating everything again: on our PC, from about 2.5 min to seconds. This update still rebuilds everything one last time. On Linux, the same improvement comes in a future update.
+### es
+- **Mejora (Windows):** cuando una actualización del motor no cambia la traducción del juego, el generador ahora solo recompila el juego, sin traducir todo de nuevo: en nuestro PC, de cerca de 2,5 min a segundos. Esta actualización todavía rehace todo una última vez. En Linux, la misma mejora llega en una próxima actualización.
+
 ## 12/11/2026 · correções · engine 0.12.1
 ### pt
 - **Correção:** no Templo de Delfos, o fps caía pela metade em alguns trechos: alguns efeitos de geometria que só aparecem ali rodavam num modo lento de compatibilidade. Agora rodam em código nativo, como o resto do jogo (num portátil a 15 W, de 14 para 24 fps no trecho mais pesado).
