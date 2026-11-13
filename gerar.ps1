@@ -960,7 +960,22 @@ function Achar-Disco([string]$d) {
                        Where-Object { $_.Name -match '\.(part0*1\.rar|r00|001)$' } | Select-Object -First 1)
         # a PS3_GAME there that is a link leading nowhere (moved, or a circle back to the port's vfs): said as it is
         $como = ''
-        if (Test-Path -LiteralPath (Join-Path $d 'PS3_GAME')) { $como = " (o PS3_GAME de lá é um atalho que não leva ao jogo: $(Descrever-Atalhos (Join-Path $d 'PS3_GAME')))" }
+        if (Test-Path -LiteralPath (Join-Path $d 'PS3_GAME')) {
+            # reports 1183/1184 (13/11): o atalho leva a uma pasta PS3_GAME que existe mas está sem o USRDIR (os
+            # arquivos do jogo): a extração ou a cópia ficou pela metade (falta de espaço, antivírus, pasta apagada).
+            # Dizer isso, e, se a pasta é a extração que o próprio gerador fez (pasta disco do port), como refazê-la.
+            $alvoPg = Destino-Real (Join-Path $d 'PS3_GAME')
+            if ($alvoPg -and -not (Test-Path -LiteralPath (Join-Path $alvoPg 'USRDIR'))) {
+                $dxPort = [IO.Path]::GetFullPath((Join-Path $R 'disco')).TrimEnd('\')
+                $como = " (o PS3_GAME de lá leva a $alvoPg, que existe mas está SEM a pasta USRDIR, onde ficam os arquivos do jogo: a extração ou a cópia do jogo ficou incompleta"
+                if ([IO.Path]::GetFullPath($alvoPg).StartsWith($dxPort + '\', [StringComparison]::OrdinalIgnoreCase)) {
+                    $como += ". Essa é a extração que o gerador fez: apague a pasta $dxPort (veja antes se há uns 36 GB livres no drive) e"
+                } else { $como += '. Confira essa pasta e' }
+                $como += ' escolha de novo o arquivo do jogo, sem apagá-lo antes de a geração terminar)'
+            } else {
+                $como = " (o PS3_GAME de lá é um atalho que não leva ao jogo: $(Descrever-Atalhos (Join-Path $d 'PS3_GAME')))"
+            }
+        }
         # report 33: a pasta escolhida era a dos ports do launcher (a que tem gow-ascension\ dentro), não a do jogo
         $cheio = [IO.Path]::GetFullPath($d).TrimEnd('\')
         $raizPort = [IO.Path]::GetFullPath($R).TrimEnd('\')
