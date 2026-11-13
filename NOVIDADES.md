@@ -4,6 +4,32 @@ O Otavix Launcher mostra este arquivo na página "Novidades" do jogo. Cada atual
 "## <data> · <versão>" e o texto em português (### pt), inglês (### en) e, quando houver, espanhol (### es).
 As mais novas ficam em cima.
 
+## 13/11/2026 · desempenho e correções do gerador · engine 0.12.3
+### pt
+- **Desempenho:** mais 10 efeitos gráficos do jogo (geometria e iluminação) passam a rodar em código nativo em vez do modo lento de compatibilidade. Nos combates mais pesados: no nosso PC, de 46–50 para 60 fps; num portátil a 15 W, cerca de 15% a mais de fps.
+- **Desempenho:** trechos com muitas luzes ao mesmo tempo (combates grandes) agora são iluminados inteiramente pela placa de vídeo: cerca de 4% a mais de fps num portátil a 15 W.
+- **Melhoria (Linux):** quando uma atualização da engine não muda a tradução do jogo, o gerador agora só recompila o jogo, como já acontecia no Windows.
+- **Correção:** alguns processadores AMD Ryzen eram barrados com a mensagem "não tem nem SSE4.2". O gerador agora também consulta o Windows sobre as instruções do processador.
+- **Correção:** a compilação podia parar com "manifest 'build.ninja' still dirty after 100 tries" (arquivos com data no futuro ou relógio do Windows errado). O gerador agora contorna isso sozinho.
+- **Correção:** um FFmpeg extraído pela metade (sem a pasta lib) agora é baixado de novo, em vez de parar a geração.
+- Esta atualização traduz de novo a parte das SPUs (cerca de 1 minuto a mais, uma vez).
+### en
+- **Performance:** 10 more of the game's graphics effects (geometry and lighting) now run as native code instead of the slow compatibility mode. In the heaviest fights: on our PC, from 46–50 to 60 fps; on a handheld at 15 W, about 15% more fps.
+- **Performance:** parts with many lights at once (big fights) are now lit entirely by the graphics card: about 4% more fps on a handheld at 15 W.
+- **Improvement (Linux):** when an engine update does not change the game's translation, the generator now only recompiles the game, as already happened on Windows.
+- **Fix:** some AMD Ryzen processors were blocked with the message "does not even have SSE4.2". The generator now also asks Windows about the processor's instructions.
+- **Fix:** compiling could stop with "manifest 'build.ninja' still dirty after 100 tries" (files dated in the future or a wrong Windows clock). The generator now works around it on its own.
+- **Fix:** an FFmpeg extracted only halfway (without the lib folder) is now downloaded again, instead of stopping the generation.
+- This update translates the SPU part again (about 1 extra minute, once).
+### es
+- **Rendimiento:** 10 efectos gráficos más del juego (geometría e iluminación) pasan a ejecutarse en código nativo en lugar del modo lento de compatibilidad. En los combates más pesados: en nuestro PC, de 46–50 a 60 fps; en un portátil a 15 W, cerca de un 15% más de fps.
+- **Rendimiento:** los tramos con muchas luces al mismo tiempo (combates grandes) ahora se iluminan enteramente en la tarjeta gráfica: cerca de un 4% más de fps en un portátil a 15 W.
+- **Mejora (Linux):** cuando una actualización del motor no cambia la traducción del juego, el generador ahora solo recompila el juego, como ya pasaba en Windows.
+- **Corrección:** algunos procesadores AMD Ryzen eran bloqueados con el mensaje "no tiene ni SSE4.2". El generador ahora también consulta a Windows sobre las instrucciones del procesador.
+- **Corrección:** la compilación podía detenerse con "manifest 'build.ninja' still dirty after 100 tries" (archivos con fecha en el futuro o reloj de Windows incorrecto). El generador ahora lo resuelve solo.
+- **Corrección:** un FFmpeg extraído a medias (sin la carpeta lib) ahora se descarga de nuevo, en lugar de detener la generación.
+- Esta actualización traduce de nuevo la parte de las SPUs (cerca de 1 minuto más, una vez).
+
 ## 12/11/2026 · atualizações mais rápidas · engine 0.12.2
 ### pt
 - **Melhoria (Windows):** quando uma atualização da engine não muda a tradução do jogo, o gerador agora só recompila o jogo, sem traduzir tudo de novo: no nosso PC, de cerca de 2,5 min para segundos. Esta atualização ainda refaz tudo uma última vez. No Linux, a mesma melhoria chega numa próxima atualização.
