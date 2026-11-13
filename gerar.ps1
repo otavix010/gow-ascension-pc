@@ -1972,8 +1972,15 @@ Etapa '7_jogar' {
         'if not defined PS3_SAVE_ROOT set "PS3_SAVE_ROOT=%RAIZ%saves"',
         'if not exist "%PS3_SAVE_ROOT%" mkdir "%PS3_SAVE_ROOT%"',
         'if not exist "%RAIZ%out" mkdir "%RAIZ%out"',
+        "if not exist `"%RAIZ%port\$bdir\avcodec-*.dll`" copy /y `"%RAIZ%dl\ffmpeg9\$FFMPEG_NOME\bin\*.dll`" `"%RAIZ%port\$bdir\`" >nul 2>&1",
         "cd /d `"%RAIZ%port\$bdir`"",
         'gowa.exe "%RAIZ%jogo\GOWA.elf" > "%RAIZ%out\jogo.log" 2>&1')
+}
+# report 1172 (13/11): tela preta nos vídeos (abertura e fundo do menu) porque as DLLs do FFmpeg tinham sumido da
+# pasta do jogo ("avcodec-63.dll not found": antivírus, limpeza ou cópia de outra pasta), e a etapa 7_jogar, já
+# marcada como feita, não as copiava de novo. Toda geração confere (as iguais ficam; só copia o que falta ou mudou).
+if (Test-Path (Join-Path $R "dl\ffmpeg9\$FFMPEG_NOME\bin\*.dll")) {
+    Copiar-Dlls (Join-Path $R "dl\ffmpeg9\$FFMPEG_NOME\bin") (Join-Path $R "port\$bdir")
 }
 # ---------------------------------------------------------------------------- shaders pré-compilados
 # Os shaders do jogo traduzidos e compilados (o DXBC, que serve a qualquer placa), juntados dos PCs de teste por
