@@ -759,6 +759,36 @@ Etapa '1_engine' {
 
 # ---------------------------------------------------------------------------- jogo
 # a pasta do jogo: a que contém PS3_GAME\USRDIR, ou uma até dois níveis abaixo da escolhida
+# Report 1177 (13/11): uma .iso que o tar do Windows não abre ("Can't initialize filter; unable to run program lzma":
+# o começo do setor 0 de alguns discos de PS3 parece o cabeçalho de um .lzma, e o tar tenta descompactar em vez de
+# ler a ISO). Plano B: o Windows monta a .iso (sem administrador, como o "Montar" do Explorer), confere a região no
+# PARAM.SFO antes de copiar 35 GB e copia a raiz com o robocopy. Deixa $LASTEXITCODE = 0 quando deu certo.
+function Extrair-IsoMontando([string]$iso, [string]$destino) {
+    $iso = (Resolve-Path -LiteralPath $iso).ProviderPath
+    Msg "o tar do Windows não abriu a .iso (tar $LASTEXITCODE); montando a imagem pelo Windows e copiando"
+    $img = $null
+    try { $img = Mount-DiskImage -ImagePath $iso -StorageType ISO -PassThru -ErrorAction Stop }
+    catch { Msg "o Windows também não montou a .iso: $($_.Exception.Message)"; return }
+    try {
+        $letra = $null
+        for ($k = 0; $k -lt 20 -and -not $letra; $k++) {
+            $letra = ($img | Get-DiskImage | Get-Volume -ErrorAction SilentlyContinue).DriveLetter
+            if (-not $letra) { Start-Sleep -Milliseconds 500 }
+        }
+        if (-not $letra) { Msg 'o Windows montou a .iso mas não deu uma letra de unidade a ela'; return }
+        $raiz = "${letra}:\"
+        if (-not (Test-Path -LiteralPath (Join-Path $raiz 'PS3_GAME\USRDIR'))) {
+            Msg "a .iso montada não tem PS3_GAME\USRDIR na raiz (uma .iso criptografada, como as da Redump, não serve)"; return
+        }
+        Conferir-Regiao (Join-Path $raiz 'PS3_GAME')   # outra região para aqui, antes da cópia
+        Get-ChildItem -LiteralPath $destino -Force -ErrorAction SilentlyContinue | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
+        & robocopy $raiz $destino /E /NFL /NDL /NJH /NJS /NP /R:1 /W:1 | Out-Null
+        if ($LASTEXITCODE -ge 8) { Msg "a cópia da .iso montada falhou (robocopy $LASTEXITCODE)"; return }
+        $global:LASTEXITCODE = 0
+        Msg 'cópia da .iso montada: ok'
+    } finally { SemExcecao { Dismount-DiskImage -ImagePath $iso -ErrorAction SilentlyContinue | Out-Null } }
+}
+
 function Achar-PS3Game([string]$raiz) {
     # report 818: uma pasta num drive que não existe mais (HD externo desligado): o Join-Path parava o gerador
     # com "Cannot find drive"; aqui ela é só "não achei", e o Achar-Disco explica ao jogador
@@ -838,6 +868,7 @@ function Achar-Disco([string]$d) {
             Msg "extraindo $d para $dx (uns 35 GB; leva alguns minutos)"
             New-Item -ItemType Directory -Force $dx | Out-Null
             SemExcecao { & "$env:SystemRoot\System32\tar.exe" -xf $d -C $dx }
+            if ($LASTEXITCODE -ne 0 -and $d -match '\.iso$') { Extrair-IsoMontando $d $dx }
             if ($LASTEXITCODE -ne 0) {
                 # o tar do Windows não junta as partes de um .rar dividido (.part1.rar, .r00)
                 $partes = if ($d -match '\.(part0*1\.rar|r00)$') { ' Ele é a 1a parte de um arquivo dividido: o tar do Windows não junta as partes.' } else { '' }
@@ -850,6 +881,7 @@ function Achar-Disco([string]$d) {
                 if ($iso) {
                     Msg "extraindo $($iso.Name)"
                     SemExcecao { & "$env:SystemRoot\System32\tar.exe" -xf $iso.FullName -C $dx }
+                    if ($LASTEXITCODE -ne 0) { Extrair-IsoMontando $iso.FullName $dx }
                     if ($LASTEXITCODE -ne 0) { throw "falhou a extração de $($iso.FullName) (tar $LASTEXITCODE)" }
                     Remove-Item -LiteralPath $iso.FullName -Force
                     $achou = Achar-PS3Game $dx
