@@ -412,7 +412,9 @@ if ($py) {
 $marca1 = Join-Path $OUT '1_ferramentas.ok'
 if ((Test-Path -LiteralPath $marca1) -and
     (-not $py -or -not (Test-Path (Join-Path $R "dl\ffmpeg9\$FFMPEG_NOME\include\libavcodec")) -or
-     -not (Test-Path (Join-Path $R "dl\ffmpeg9\$FFMPEG_NOME\bin\*.dll")))) {
+     -not (Test-Path (Join-Path $R "dl\ffmpeg9\$FFMPEG_NOME\bin\*.dll")) -or
+     # report 1133 (13/11): extraído pela metade, sem a pasta lib (a compilação parava em "Cannot find path ...\lib\")
+     -not (Test-Path (Join-Path $R "dl\ffmpeg9\$FFMPEG_NOME\lib\avcodec.lib")))) {
     Msg "1_ferramentas: $(if (-not $py) { 'nenhum Python 3.10+ achado' } else { 'o FFmpeg sumiu da pasta dl' }); conferindo de novo"
     Remove-Item -LiteralPath $marca1 -Force
 }
@@ -486,7 +488,7 @@ Etapa '1_ferramentas' {
     # report 1022 (09/11): o include estava lá e o bin não (DLLs levadas, provavelmente pelo antivírus); a conferência
     # do começo derrubava a marca, mas aqui só se olhava o include, a etapa passava sem baixar e a cópia das DLLs
     # quebrava na etapa 7. Faltando qualquer um dos dois, a pasta parcial sai e o FFmpeg vem inteiro de novo.
-    if (-not (Test-Path "$ff\include\libavcodec") -or -not (Test-Path "$ff\bin\*.dll")) {
+    if (-not (Test-Path "$ff\include\libavcodec") -or -not (Test-Path "$ff\bin\*.dll") -or -not (Test-Path "$ff\lib\avcodec.lib")) {
         if (Test-Path -LiteralPath $ff) { Remove-Item -LiteralPath $ff -Recurse -Force -ErrorAction SilentlyContinue }
         Msg "baixando o FFmpeg 9 (LGPL)"
         New-Item -ItemType Directory -Force (Join-Path $R 'dl\ffmpeg9') | Out-Null
@@ -532,7 +534,7 @@ Etapa '1_ferramentas' {
         # report 714 (02/11): apagar o zip deu acesso negado (antivírus com o arquivo preso) e a geração parou; o
         # FFmpeg já está extraído, então o zip que sobrar não atrapalha
         Remove-Item $zip -ErrorAction SilentlyContinue
-        if (-not (Test-Path "$ff\bin\*.dll")) {
+        if (-not (Test-Path "$ff\bin\*.dll") -or -not (Test-Path "$ff\lib\avcodec.lib")) {
             throw ("o FFmpeg foi extraído, mas as DLLs dele (pasta $ff\bin) sumiram logo em seguida. Quase sempre é o " +
                    "antivírus: libere a pasta do jogo nele e gere de novo.")
         }
@@ -590,10 +592,28 @@ function Conferir-Processador {
     # report 739 (i7-3770): o Windows devolveu o processador sem nome, e o .Trim() num nulo parava o gerador antes da mensagem
     $nome = "$((Get-CimInstance Win32_Processor -ErrorAction SilentlyContinue | Select-Object -First 1).Name)".Trim()
     if (-not $nome) { $nome = 'sem nome no Windows' }
+    # Reports 1138/1139/1141 (13/11): um Ryzen 7 3750H (tem SSE4.2 e AVX2) parou aqui com "não tem nem SSE4.2" -- o
+    # clang respondeu, mas sem as instruções do processador. O Windows também diz o que o processador tem e o sistema
+    # liga (IsProcessorFeaturePresent: 38 = SSE4.2, 40 = AVX2; Windows antigo responde não para o que não conhece, e
+    # aí vale só o clang). Quando o Windows diz que tem, vale o Windows: a build portátil é x86-64-v3 fixo, não native.
+    $so42 = $false; $soAvx2 = $false
+    if (-not ('CpuOtavix' -as [type])) { try { Add-Type -ErrorAction Stop @"
+using System.Runtime.InteropServices;
+public static class CpuOtavix {
+  [DllImport("kernel32.dll")] public static extern bool IsProcessorFeaturePresent(uint recurso);
+}
+"@ } catch { } }
+    if ('CpuOtavix' -as [type]) {
+        try { $so42 = [CpuOtavix]::IsProcessorFeaturePresent(38); $soAvx2 = [CpuOtavix]::IsProcessorFeaturePresent(40) } catch { }
+    }
+    if ($soAvx2) {
+        Msg "processador: o clang não viu o AVX2 deste processador ($nome), mas o Windows diz que ele tem; segue a build normal"
+        return
+    }
     # 11/11 (pedido do usuário; reports 1086/1087/1095/1097, i5-2500 e i5-2500S): sem AVX2, mas com SSE4.2 e POPCNT
     # (Intel Core i de 1ª geração em diante, como Sandy e Ivy Bridge; AMD FX), a build compatível (x86-64-v2): o mesmo
     # jogo sem AVX2/FMA, sem os atalhos do EDGE em AVX2 -- roda, mas bem mais devagar (no PC de testes, um terço dos fps)
-    if ($def -match '__SSE4_2__' -and $def -match '__POPCNT__') {
+    if (($def -match '__SSE4_2__' -and $def -match '__POPCNT__') -or $so42) {
         $script:SemAvx2 = $true
         Msg ("AVISO: o seu processador ($nome) não tem AVX2: o jogo vai ser gerado na versão compatível, que roda em " +
              'processadores mais antigos, mas bem mais devagar (no mesmo PC, cerca de um terço dos fps da versão normal; ' +
@@ -1653,7 +1673,8 @@ if ($antes['escolhida'] -eq $escolha -and $antes['pasta'] -and ($antes['pasta'] 
 function Corrigir-Datas {
     $agora = Get-Date; $n = 0
     foreach ($p in 'port', 'engine', 'scripts') {
-        Get-ChildItem -LiteralPath (Join-Path $R $p) -Recurse -File -Force -ErrorAction SilentlyContinue |
+        # report 1147: as pastas também (o CMake confere as pastas dos GLOB com CONFIGURE_DEPENDS)
+        Get-ChildItem -LiteralPath (Join-Path $R $p) -Recurse -Force -ErrorAction SilentlyContinue |
             Where-Object { $_.LastWriteTime -gt $agora.AddMinutes(1) } |
             ForEach-Object { try { $_.LastWriteTime = $agora; $n++ } catch { } }
     }
@@ -1785,7 +1806,18 @@ function Compilar-Build([string]$a) {
         Msg 'o ninja não parou de reconfigurar (datas dos arquivos): apagando a pasta da build e compilando de novo'
         $null = Corrigir-Datas
         Remove-Item -LiteralPath (Join-Path $R "port\$bd") -Recurse -Force -ErrorAction SilentlyContinue
+        $l1 = (Get-Item -LiteralPath $LOG).Length
         Exec $LOG "`"$R\scripts\build_portatil.cmd`" $ba"
+        # report 1147 (13/11): nem assim -- a data no futuro estava fora das pastas do jogo (os arquivos do CMake do
+        # Visual Studio, instalado com o relógio errado) ou o relógio do Windows está muito atrás. Sem a regra que refaz
+        # o build.ninja, o ninja não tem o que comparar: o build_portatil.cmd configura de novo a cada compilação.
+        if (-not (Test-Path $exe) -and (Novo-No-Log $l1 'still dirty after')) {
+            Msg ('o ninja continuou preso (algum arquivo com data no futuro fora da pasta do jogo, ou o relógio do ' +
+                 'Windows atrasado): compilando sem a reconfiguração automática do ninja')
+            Remove-Item -LiteralPath (Join-Path $R "port\$bd") -Recurse -Force -ErrorAction SilentlyContinue
+            $env:GOWA_CMAKE_EXTRA = '-DCMAKE_SUPPRESS_REGENERATION=ON'
+            try { Exec $LOG "`"$R\scripts\build_portatil.cmd`" $ba" } finally { Remove-Item Env:GOWA_CMAKE_EXTRA -ErrorAction SilentlyContinue }
+        }
     }
     # report 814: o link parou em "undefined symbol" com o ninja só refazendo o link -- .obj de outra geração que
     # ficaram na pasta da build (as datas não denunciaram). Uma compilação do zero resolve; vale uma vez.

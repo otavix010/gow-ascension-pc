@@ -73,6 +73,10 @@ set "CLANGCL=%GOWA_VS%\VC\Tools\Llvm\x64\bin\clang-cl.exe"
 if not exist "%CLANGCL%" set "CLANGCL=clang-cl"
 set "CLANGCL_F=%CLANGCL:\=/%"
 if not exist "%DIR%\build.ninja" goto configura
+rem Report 1147 (13/11): uma build configurada sem a regra que refaz o build.ninja (o gerar.ps1 faz isso quando o ninja
+rem fica preso em "still dirty after 100 tries") nao ve sozinha os arquivos novos de uma atualizacao: configura de novo
+rem a cada compilacao (os .obj ficam; so o que mudou e recompilado).
+findstr /b /c:"CMAKE_SUPPRESS_REGENERATION" "%DIR%\CMakeCache.txt" >nul 2>&1 && goto configura
 if "%CLANGCL%"=="clang-cl" goto confere_ninja
 findstr /i /l /c:"CMAKE_CXX_COMPILER:STRING=%CLANGCL_F%" "%DIR%\CMakeCache.txt" >nul 2>&1 && goto confere_ninja
 echo -- o cache do CMake aponta para outro compilador: configurando de novo com "%CLANGCL%"
@@ -97,7 +101,7 @@ rd /s /q "%DIR%\CMakeFiles" 2>nul
   "%PGO_MODO%" "%PGO_PERFIL%" "%PY_ARG%" ^
   %OPC_CPU% "-DGOWA_SPU_MARCH=%MARCH%" ^
   -DGOWA_SPU_DAZ=ON "-DGOWA_SPU_RZ=%RZ%" ^
-  "-DENGINE_PACOTE_DIR=%RAIZ_F%/engine"
+  "-DENGINE_PACOTE_DIR=%RAIZ_F%/engine" %GOWA_CMAKE_EXTRA%
 if errorlevel 1 goto fim
 :compila
 cd /d "%DIR%"
