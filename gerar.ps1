@@ -848,6 +848,25 @@ function Achar-Disco([string]$d) {
                'unidade (ou monte de novo o drive virtual) e gere de novo, ou escolha o disco em outro lugar em ' +
                '"Escolher o disco de novo".')
     }
+    # reports 1183/1184 (13/11): o disco salvo era o vfs do próprio port. O vfs\PS3_GAME é a ligação que o gerador
+    # faz para o disco, nunca a origem: segue a ligação até a pasta real e, se ela não tiver mais o jogo, tenta a
+    # extração do gerador (pasta disco do port); sem jogo em nenhuma das duas, o Achar-PS3Game abaixo falha e a
+    # mensagem diz o que está faltando
+    try {
+        $vfsPort = [IO.Path]::GetFullPath((Join-Path $R 'vfs')).TrimEnd('\')
+        $dCheio = [IO.Path]::GetFullPath($d).TrimEnd('\')
+        if ($dCheio -ieq $vfsPort -or $dCheio.StartsWith($vfsPort + '\', [StringComparison]::OrdinalIgnoreCase)) {
+            Msg "o disco salvo é a pasta vfs do próprio port ($d), que só liga ao disco; procurando o jogo de verdade"
+            $realPg = Destino-Real (Join-Path $vfsPort 'PS3_GAME')
+            if ($realPg -and (Test-Path -LiteralPath (Join-Path $realPg 'USRDIR') -PathType Container) -and
+                [IO.Path]::GetFullPath($realPg).TrimEnd('\') -ine (Join-Path $vfsPort 'PS3_GAME')) {
+                Msg "usando o disco ligado: $(Split-Path $realPg)"
+                return (Split-Path $realPg)
+            }
+            $ext = Achar-PS3Game (Join-Path $R 'disco')
+            if ($ext) { Msg "usando a extração do gerador: $ext"; return $ext }
+        }
+    } catch { }
     if (Test-Path -LiteralPath $d -PathType Leaf) {
         if ($d -notmatch '\.(7z|zip|rar|iso)$') { throw "o disco tem que ser a pasta com PS3_GAME ou um arquivo .7z, .zip, .rar ou .iso ($d)" }
         $dx = Join-Path $R 'disco'
