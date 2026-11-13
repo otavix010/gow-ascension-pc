@@ -8,14 +8,17 @@ As mais novas ficam em cima.
 ### pt
 - **Correção:** em PCs com pouca folga de processador, o som podia cortar várias vezes por minuto nos combates. A reserva de áudio agora guarda a folga depois do primeiro corte, em vez de voltar a encolher: nos nossos testes, de 83–98 para 32–34 cortes em 6 minutos com o processador limitado, e de 17–21 para 3 no nosso PC, sem mudar o fps.
 - **Correção:** algumas imagens .iso paravam a geração com "tar.exe: Error opening archive: Can't initialize filter". O gerador agora monta a .iso pelo próprio Windows quando isso acontece, e confere a região do disco antes de copiar.
+- **Correção:** se os arquivos de vídeo do jogo (as DLLs do FFmpeg) sumissem da pasta do jogo, a abertura e o fundo do menu ficavam pretos. O gerador agora confere esses arquivos a cada atualização e os repõe ao abrir o jogo.
 - Esta atualização só recompila o jogo (sem traduzir de novo).
 ### en
 - **Fix:** on PCs with little spare processor power, the sound could cut out several times a minute during fights. The audio reserve now keeps its headroom after the first cut instead of shrinking again: in our tests, from 83–98 to 32–34 cuts in 6 minutes with a limited processor, and from 17–21 to 3 on our PC, with no change in fps.
 - **Fix:** some .iso images stopped the generation with "tar.exe: Error opening archive: Can't initialize filter". The generator now mounts the .iso through Windows itself when that happens, and checks the disc's region before copying.
+- **Fix:** if the game's video files (the FFmpeg DLLs) went missing from the game folder, the intro and the menu background stayed black. The generator now checks these files on every update and restores them when the game starts.
 - This update only recompiles the game (no new translation).
 ### es
 - **Corrección:** en PCs con poco margen de procesador, el sonido podía cortarse varias veces por minuto en los combates. La reserva de audio ahora conserva el margen después del primer corte, en lugar de volver a reducirse: en nuestras pruebas, de 83–98 a 32–34 cortes en 6 minutos con el procesador limitado, y de 17–21 a 3 en nuestro PC, sin cambiar los fps.
 - **Corrección:** algunas imágenes .iso detenían la generación con "tar.exe: Error opening archive: Can't initialize filter". El generador ahora monta la .iso con el propio Windows cuando eso ocurre, y comprueba la región del disco antes de copiar.
+- **Corrección:** si los archivos de video del juego (las DLL de FFmpeg) desaparecían de la carpeta del juego, la introducción y el fondo del menú quedaban en negro. El generador ahora revisa esos archivos en cada actualización y los repone al abrir el juego.
 - Esta actualización solo recompila el juego (sin traducir de nuevo).
 
 ## 13/11/2026 · desempenho e correções do gerador · engine 0.12.3
