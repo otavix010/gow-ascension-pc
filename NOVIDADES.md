@@ -4,6 +4,20 @@ O Otavix Launcher mostra este arquivo na página "Novidades" do jogo. Cada atual
 "## <data> · <versão>" e o texto em português (### pt), inglês (### en) e, quando houver, espanhol (### es).
 As mais novas ficam em cima.
 
+## 13/11/2026 · som sem cortes e correção do gerador · engine 0.12.4
+### pt
+- **Correção:** em PCs com pouca folga de processador, o som podia cortar várias vezes por minuto nos combates. A reserva de áudio agora guarda a folga depois do primeiro corte, em vez de voltar a encolher: nos nossos testes, de 83–98 para 32–34 cortes em 6 minutos com o processador limitado, e de 17–21 para 3 no nosso PC, sem mudar o fps.
+- **Correção:** algumas imagens .iso paravam a geração com "tar.exe: Error opening archive: Can't initialize filter". O gerador agora monta a .iso pelo próprio Windows quando isso acontece, e confere a região do disco antes de copiar.
+- Esta atualização só recompila o jogo (sem traduzir de novo).
+### en
+- **Fix:** on PCs with little spare processor power, the sound could cut out several times a minute during fights. The audio reserve now keeps its headroom after the first cut instead of shrinking again: in our tests, from 83–98 to 32–34 cuts in 6 minutes with a limited processor, and from 17–21 to 3 on our PC, with no change in fps.
+- **Fix:** some .iso images stopped the generation with "tar.exe: Error opening archive: Can't initialize filter". The generator now mounts the .iso through Windows itself when that happens, and checks the disc's region before copying.
+- This update only recompiles the game (no new translation).
+### es
+- **Corrección:** en PCs con poco margen de procesador, el sonido podía cortarse varias veces por minuto en los combates. La reserva de audio ahora conserva el margen después del primer corte, en lugar de volver a reducirse: en nuestras pruebas, de 83–98 a 32–34 cortes en 6 minutos con el procesador limitado, y de 17–21 a 3 en nuestro PC, sin cambiar los fps.
+- **Corrección:** algunas imágenes .iso detenían la generación con "tar.exe: Error opening archive: Can't initialize filter". El generador ahora monta la .iso con el propio Windows cuando eso ocurre, y comprueba la región del disco antes de copiar.
+- Esta actualización solo recompila el juego (sin traducir de nuevo).
+
 ## 13/11/2026 · desempenho e correções do gerador · engine 0.12.3
 ### pt
 - **Desempenho:** mais 10 efeitos gráficos do jogo (geometria e iluminação) passam a rodar em código nativo em vez do modo lento de compatibilidade. Nos combates mais pesados: no nosso PC, de 46–50 para 60 fps; num portátil a 15 W, cerca de 15% a mais de fps.
