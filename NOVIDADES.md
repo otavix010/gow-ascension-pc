@@ -4,6 +4,17 @@ O Otavix Launcher mostra este arquivo na página "Novidades" do jogo. Cada atual
 "## <data> · <versão>" e o texto em português (### pt), inglês (### en) e, quando houver, espanhol (### es).
 As mais novas ficam em cima.
 
+## 13/11/2026 · correção do gerador · engine 0.12.4
+### pt
+- **Correção:** quando o disco salvo era a pasta vfs do próprio jogo, a geração parava com "não achei o jogo". O gerador agora segue essa pasta até o disco de verdade, ou usa a extração que ele mesmo fez; se a extração estiver incompleta (sem a pasta USRDIR), a mensagem diz isso e o que fazer.
+- Esta atualização não recompila o jogo.
+### en
+- **Fix:** when the saved disc was the game's own vfs folder, the generation stopped with "game not found". The generator now follows that folder to the real disc, or uses the extraction it made itself; if that extraction is incomplete (no USRDIR folder), the message says so and what to do.
+- This update does not recompile the game.
+### es
+- **Corrección:** cuando el disco guardado era la carpeta vfs del propio juego, la generación se detenía con "no encontré el juego". El generador ahora sigue esa carpeta hasta el disco real, o usa la extracción que él mismo hizo; si esa extracción está incompleta (sin la carpeta USRDIR), el mensaje lo dice y explica qué hacer.
+- Esta actualización no recompila el juego.
+
 ## 13/11/2026 · som sem cortes e correção do gerador · engine 0.12.4
 ### pt
 - **Correção:** em PCs com pouca folga de processador, o som podia cortar várias vezes por minuto nos combates. A reserva de áudio agora guarda a folga depois do primeiro corte, em vez de voltar a encolher: nos nossos testes, de 83–98 para 32–34 cortes em 6 minutos com o processador limitado, e de 17–21 para 3 no nosso PC, sem mudar o fps.
