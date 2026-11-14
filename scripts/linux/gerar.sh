@@ -108,15 +108,28 @@ ferramentas() {
     mkdir -p libextra
     if ! LD_LIBRARY_PATH=libextra ldd llvm/bin/lld >/dev/null 2>&1 || LD_LIBRARY_PATH=libextra ldd llvm/bin/lld | grep -q 'not found'; then
         local rt
+        # 14/11 (report 1202): também a Steam pelo Flatpak e o ~/.steam/root (outra pasta da Steam)
         rt=$(ls -d "$HOME"/.local/share/Steam/steamrt64/steam-runtime-steamrt/steamrt3c_platform_*/files/lib/x86_64-linux-gnu \
                    "$HOME"/.local/share/umu/steamrt3/sniper_platform_*/files/lib/x86_64-linux-gnu \
-                   "$HOME"/.local/share/Steam/steamapps/common/SteamLinuxRuntime_sniper/sniper_platform_*/files/lib/x86_64-linux-gnu 2>/dev/null | head -1)
+                   "$HOME"/.local/share/Steam/steamapps/common/SteamLinuxRuntime_sniper/sniper_platform_*/files/lib/x86_64-linux-gnu \
+                   "$HOME"/.steam/root/steamrt64/steam-runtime-steamrt/steamrt3c_platform_*/files/lib/x86_64-linux-gnu \
+                   "$HOME"/.steam/root/steamapps/common/SteamLinuxRuntime_sniper/sniper_platform_*/files/lib/x86_64-linux-gnu \
+                   "$HOME"/.var/app/com.valvesoftware.Steam/.local/share/Steam/steamrt64/steam-runtime-steamrt/steamrt3c_platform_*/files/lib/x86_64-linux-gnu \
+                   "$HOME"/.var/app/com.valvesoftware.Steam/.local/share/Steam/steamapps/common/SteamLinuxRuntime_sniper/sniper_platform_*/files/lib/x86_64-linux-gnu \
+                   2>/dev/null | head -1)
         for l in libxml2.so.2 libicuuc.so.67 libicudata.so.67; do
             [ -e libextra/$l ] && continue
             local s; s=$(ls "$rt"/$l* /usr/lib/$l* /usr/lib64/$l* /usr/lib/x86_64-linux-gnu/$l* 2>/dev/null | head -1)
             [ -n "$s" ] && cp -L "$s" libextra/$l
         done
-        LD_LIBRARY_PATH=libextra ldd llvm/bin/lld | grep -q 'not found' && falha "o lld-link precisa de: $(LD_LIBRARY_PATH=libextra ldd llvm/bin/lld | grep 'not found' | awk '{print $1}' | tr '\n' ' ')(instale o libxml2 2.9 da sua distro)"
+        if LD_LIBRARY_PATH=libextra ldd llvm/bin/lld | grep -q 'not found'; then
+            local faltam; faltam=$(LD_LIBRARY_PATH=libextra ldd llvm/bin/lld | grep 'not found' | awk '{print $1}' | tr '\n' ' ')
+            # distros novas trazem só o libxml2 2.14+ (libxml2.so.16), que o LLVM oficial não usa
+            if ls /usr/lib/libxml2.so.16* /usr/lib64/libxml2.so.16* /usr/lib/x86_64-linux-gnu/libxml2.so.16* >/dev/null 2>&1; then
+                falha "o lld-link precisa de: ${faltam}e esta distro só tem o libxml2 novo (libxml2.so.16). Instale o pacote de compatibilidade do libxml2 antigo (Arch, CachyOS, Manjaro: libxml2-legacy; outras: o libxml2 2.9 a 2.13) ou abra a Steam uma vez (o runtime dela traz a cópia) e gere de novo"
+            fi
+            falha "o lld-link precisa de: ${faltam}(instale o libxml2 2.9 a 2.13 da sua distro, ou abra a Steam uma vez e gere de novo)"
+        fi
     fi
     [ -x venv/bin/python ] || python3 -m venv venv || falha 'python3 -m venv falhou (instale o python3 com venv)'
     venv/bin/python -c 'import Crypto' 2>/dev/null || venv/bin/pip install -q pycryptodome >> "$LOG" 2>&1 || falha 'o pycryptodome não instalou'
