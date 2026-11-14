@@ -393,6 +393,7 @@ extern "C" int  rsx_null_backend_pump_messages(void);
 #  define rsx_backend_pump    rsx_null_backend_pump_messages
 #endif
 extern "C" void cellGcm_rsx_process_fifo(void);   /* cellGcmSys.c: drain get->put */
+extern "C" void gowa_opcoes_boot(void);              /* gowa_opcoes.cpp: opções do jogo (13/11) */
 extern "C" int rsx_live_draw_framegen_wait_us(void);   /* rsx_live_draw.c: GOWA_FRAMEGEN */
 extern "C" void* cellGcm_fifo_kick_event(void);          /* cellGcmSys.c */
 extern "C" void rsx_live_draw_framegen_tick(void);
@@ -3365,7 +3366,7 @@ int main(int argc, char** argv)
     g_gowa_main_tid = GetCurrentThreadId();
     if (getenv("GOWA_PRIO_AB")) CreateThread(NULL, 0, gowa_prio_ab_thread, NULL, 0, NULL);
 #endif
-    { extern "C" void gowa_opcoes_boot(void); gowa_opcoes_boot(); }   /* 13/11: opções do jogo (gowa_opcoes.cpp) */
+    gowa_opcoes_boot();   /* 13/11: opções do jogo (gowa_opcoes.cpp) */
     int rc = ppu_run(entry, stack_top);
     printf("\n[boot] ppu_run returned %d (entry function unwound)\n", rc);
     /* A guest that called sys_process_exit never reaches this line: that path
