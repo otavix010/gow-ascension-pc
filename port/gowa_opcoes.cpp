@@ -10,7 +10,7 @@
  * endereços do nosso executável e conferidos instrução por instrução. A ideia é deles; o código é nosso.
  *
  * Variáveis (o launcher grava; 0/ausente = desligado):
- *   GOWA_SEM_MLAA=1      o jogo não pede o MLAA às SPUs (a palavra 0x83CE74 = 0 e as duas chamadas em 0x390724 e
+ *   GOWA_SEM_MLAA=1      (padrão quando GOWA_MLAA_BYPASS=1, desde 14/11) o jogo não pede o MLAA às SPUs (a palavra 0x83CE74 = 0 e as duas chamadas em 0x390724 e
  *                        0x390754 puladas): libera as SPUs, além do desvio do MLAA na GPU (GOWA_MLAA_BYPASS).
  *   GOWA_SEM_DOF=1       sem profundidade de campo  (fxDoFProcess, 0x4342BC: o "ligado" lido como 0)
  *   GOWA_SEM_MBLUR=1     sem motion blur            (fxMotionBlurProcess, 0x437810)
@@ -65,12 +65,31 @@ float escala(const char* n, float padrao, float lo, float hi)
     return v < lo ? lo : v > hi ? hi : v;
 }
 
+/* GOWA_MLAA_BYPASS: o boot_main_gowa.cpp põe o padrão "1" com SetEnvironmentVariableA, que o getenv da CRT do
+ * Windows não enxerga (só o do Wine) -- então lê pelo sistema */
+#ifdef _WIN32
+extern "C" __declspec(dllimport) unsigned long __stdcall GetEnvironmentVariableA(const char*, char*, unsigned long);
+#endif
+int mlaa_bypass()
+{
+#ifdef _WIN32
+    char b[8] = {0};
+    return GetEnvironmentVariableA("GOWA_MLAA_BYPASS", b, sizeof b) && b[0] == '1';
+#else
+    const char* e = getenv("GOWA_MLAA_BYPASS");
+    return e && e[0] == '1';
+#endif
+}
+
 const Opcoes& opcoes()
 {
     static Opcoes o;
     static int lido = 0;
     if (!lido) {
-        o.sem_mlaa = liga("GOWA_SEM_MLAA");
+        /* 14/11: com o bypass (padrão), a imagem já sai sem o MLAA e ninguém lê o que as SPUs calculam; então o
+         * pedido do MLAA às SPUs sai junto, sozinho (Legion 15 W: +6%, imagem igual). GOWA_SEM_MLAA=0/1 explícito
+         * manda; GOWA_MLAA_BYPASS=0 (MLAA de volta) deixa as SPUs fazerem o MLAA. */
+        o.sem_mlaa = getenv("GOWA_SEM_MLAA") ? liga("GOWA_SEM_MLAA") : mlaa_bypass();
         o.sem_dof = liga("GOWA_SEM_DOF");
         o.sem_mblur = liga("GOWA_SEM_MBLUR");
         o.sem_sombras = liga("GOWA_SEM_SOMBRAS");
