@@ -3365,6 +3365,7 @@ int main(int argc, char** argv)
     g_gowa_main_tid = GetCurrentThreadId();
     if (getenv("GOWA_PRIO_AB")) CreateThread(NULL, 0, gowa_prio_ab_thread, NULL, 0, NULL);
 #endif
+    { extern "C" void gowa_opcoes_boot(void); gowa_opcoes_boot(); }   /* 13/11: opções do jogo (gowa_opcoes.cpp) */
     int rc = ppu_run(entry, stack_top);
     printf("\n[boot] ppu_run returned %d (entry function unwound)\n", rc);
     /* A guest that called sys_process_exit never reaches this line: that path

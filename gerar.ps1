@@ -127,7 +127,8 @@ function Id-Tradutor([string]$pasta) {
 $marcaLifter = Join-Path $R 'port\recompiled\lifter_md5.txt'
 function Md5-Lifter {
     $arqs = @(Get-Item -LiteralPath (Join-Path $R 'port\ppu_recomp_preambulo.h')) +
-            @(Get-Item -LiteralPath (Join-Path $R 'scripts\remendos_ppu.py'))   # 11/11: remendo novo (Ouroboros) só chega traduzindo de novo
+            @(Get-Item -LiteralPath (Join-Path $R 'scripts\remendos_ppu.py')) +   # 11/11: remendo novo (Ouroboros) só chega traduzindo de novo
+            @(Get-Item -LiteralPath (Join-Path $R 'dados\ganchos_ppu.json'))     # 13/11: ganchos das opções e trapaças
     $linhas = @($arqs | Sort-Object FullName | ForEach-Object {
         "$($_.FullName.Substring($R.Length)) $((Get-FileHash -LiteralPath $_.FullName -Algorithm MD5).Hash)" }) + @(Id-Tradutor $ENG)
     $md5 = [Security.Cryptography.MD5]::Create()
@@ -1618,7 +1619,7 @@ Etapa '4_ppu' {
     Push-Location $ENG
     try {
         Exec $LOG "$ENGINE_BIN\ppu_carrega.exe `"$R\jogo\GOWA.elf`" -o `"$o`""
-        Exec $LOG "$ENGINE_BIN\ppu_traduz.exe `"$R\jogo\GOWA.elf`" --functions `"$o\GOWA.functions.json`" --hle-stubs `"$o\GOWA.imports.json`" --code-end 0x661C14 --chunks 48 --output `"$R\port\recompiled`" -j $Jobs"
+        Exec $LOG "$ENGINE_BIN\ppu_traduz.exe `"$R\jogo\GOWA.elf`" --functions `"$o\GOWA.functions.json`" --hle-stubs `"$o\GOWA.imports.json`" --code-end 0x661C14 --chunks 48 --insn-hooks `"$R\dados\ganchos_ppu.json`" --output `"$R\port\recompiled`" -j $Jobs"
         Exec $LOG "$ENGINE_BIN\ppu_nids.exe --all --out `"$R\port\recompiled\ppu_hle_nids.cpp`""
     } finally { Pop-Location }
     Exec $LOG "python `"$R\scripts\ppu_preambulo.py`""

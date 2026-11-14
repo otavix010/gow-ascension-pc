@@ -1,0 +1,17 @@
+[
+  {"addr": "0x004342BC", "word": "0x80BF0020", "o_que": "sem profundidade de campo (fxDoFProcess)"},
+  {"addr": "0x00437810", "word": "0x80BF0020", "o_que": "sem motion blur (fxMotionBlurProcess)"},
+  {"addr": "0x0036F864", "word": "0x809F0020", "o_que": "sem sombras dinâmicas (fxNewShadows)"},
+  {"addr": "0x00390724", "word": "0x4BFFFCB5", "o_que": "MLAA: chamada que o pede às SPUs"},
+  {"addr": "0x00390754", "word": "0x4BFFFC85", "o_que": "MLAA: chamada que o pede às SPUs"},
+  {"addr": "0x000873A0", "word": "0xF821FF51", "o_que": "dano recebido (entrada da função de dano)"},
+  {"addr": "0x001553AC", "word": "0x4BF31FF5", "o_que": "dano causado (golpe com atacante)"},
+  {"addr": "0x00152FB8", "word": "0x4BF343E9", "o_que": "dano causado (golpe com atacante)"},
+  {"addr": "0x002437EC", "word": "0xFC40F850", "o_que": "orbes no máximo (tPowerUpMeter)"},
+  {"addr": "0x00244F04", "word": "0xFC40F850", "o_que": "magia infinita (tMagicMeterPlayer)"},
+  {"addr": "0x0024417C", "word": "0xFC40F850", "o_que": "itens infinitos (tItemMeter)"},
+  {"addr": "0x00243A2C", "word": "0xFC40F850", "o_que": "fúria infinita (tRageMeter)"},
+  {"addr": "0x000B623C", "word": "0x5484077A", "o_que": "pulos infinitos"},
+  {"addr": "0x0026C6AC", "word": "0x5463077A", "o_que": "pulos infinitos"},
+  {"addr": "0x0026DDE4", "word": "0x5463077A", "o_que": "pulos infinitos"}
+]
