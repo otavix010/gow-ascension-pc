@@ -25,6 +25,8 @@
  */
 #include "ppu_recomp.h"
 #include "vm.h"
+#include <atomic>
+#include <chrono>
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
@@ -95,6 +97,44 @@ const Opcoes& opcoes()
     return o;
 }
 
+/* 14/11: quantas vezes cada opção agiu de fato, no log a cada 30 s (só com alguma opção ligada e algo contado):
+ * mostra no log do jogador que a trapaça está funcionando, e serve de prova nos testes */
+enum { K_DOF, K_MBLUR, K_SOMBRAS, K_MLAA, K_DANO_RECEBIDO, K_DANO_CAUSADO, K_ORBES, K_MAGIA, K_ITENS, K_FURIA, K_PULO, K_N };
+const char* const K_NOMES[K_N] = { "dof", "mblur", "sombras", "mlaa", "dano recebido", "dano causado", "orbes",
+                                   "magia", "itens", "furia", "pulo" };
+std::atomic<uint32_t> g_conta[K_N];
+std::atomic<uint32_t> g_chamadas;
+std::atomic<uint64_t> g_ultimo_log;
+
+void conta(int k)
+{
+    g_conta[k].fetch_add(1u, std::memory_order_relaxed);
+}
+
+/* a cada 1024 ganchos olha o relógio; passados 30 s, uma linha com o que agiu (e zera) */
+void talvez_registra()
+{
+    if ((g_chamadas.fetch_add(1u, std::memory_order_relaxed) & 1023u) != 0u) return;
+    const uint64_t agora = (uint64_t)std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::steady_clock::now().time_since_epoch()).count();
+    uint64_t antes = g_ultimo_log.load(std::memory_order_relaxed);
+    if (!antes) {
+        g_ultimo_log.compare_exchange_strong(antes, agora);
+        return;
+    }
+    if (agora - antes < 30000u || !g_ultimo_log.compare_exchange_strong(antes, agora)) return;
+    char linha[384];
+    int n = snprintf(linha, sizeof linha, "[opcoes] 30 s:");
+    int algo = 0;
+    for (int k = 0; k < K_N && n > 0 && n < (int)sizeof linha; k++) {
+        const uint32_t v = g_conta[k].exchange(0u, std::memory_order_relaxed);
+        if (!v) continue;
+        algo = 1;
+        n += snprintf(linha + n, sizeof linha - (size_t)n, " %s %u", K_NOMES[k], v);
+    }
+    if (algo) fprintf(stderr, "%s\n", linha);
+}
+
 /* um objeto do jogo que dá para ler: alinhado e dentro da memória do guest */
 bool ea_ok(uint32_t ea, uint32_t tam)
 {
@@ -130,6 +170,7 @@ void dano_causado(ppu_context* ctx, const Opcoes& o)
     const uint32_t vitima = (uint32_t)ctx->gpr[3];
     const uint32_t vt = vt_controle(vitima);
     if (!vt || vt == VT_JOGADOR || vt == VT_PASSIVO || vt == VT_NEOIO) return;
+    conta(K_DANO_CAUSADO);
     if (o.mata) {
         const float vida = le_f32(vitima + C_VIDA), max = le_f32(vitima + C_VIDA_MAX);
         if (std::isfinite(vida) && std::isfinite(max) && (float)ctx->fpr[1] > 0.0f)
@@ -142,7 +183,10 @@ void dano_causado(ppu_context* ctx, const Opcoes& o)
 /* pulo: o bit "já usado" sai do registrador antes do teste, só para o Kratos (a memória fica como está) */
 void pulo(ppu_context* ctx, int reg, int criatura)
 {
-    if (vt_controle((uint32_t)ctx->gpr[criatura]) == VT_JOGADOR) ctx->gpr[reg] &= ~(uint64_t)BIT_PULO_USADO;
+    if (vt_controle((uint32_t)ctx->gpr[criatura]) == VT_JOGADOR) {
+        conta(K_PULO);
+        ctx->gpr[reg] &= ~(uint64_t)BIT_PULO_USADO;
+    }
 }
 
 }  // namespace
@@ -161,17 +205,23 @@ extern "C" void gowa_opcoes_boot(void)
 int ppu_insn_gancho(ppu_context* ctx, uint32_t addr)
 {
     const Opcoes& o = opcoes();
+    talvez_registra();
     switch (addr) {
     /* efeitos: o "ligado" do processo lido como 0 (lwz rN,0x20(r31) -> li rN,0) */
-    case 0x004342BCu: if (o.sem_dof) { ctx->gpr[5] = 0; return 1; } return 0;
-    case 0x00437810u: if (o.sem_mblur) { ctx->gpr[5] = 0; return 1; } return 0;
-    case 0x0036F864u: if (o.sem_sombras) { ctx->gpr[4] = 0; return 1; } return 0;
+    case 0x004342BCu: if (o.sem_dof) { conta(K_DOF); ctx->gpr[5] = 0; return 1; } return 0;
+    case 0x00437810u: if (o.sem_mblur) { conta(K_MBLUR); ctx->gpr[5] = 0; return 1; } return 0;
+    case 0x0036F864u: if (o.sem_sombras) { conta(K_SOMBRAS); ctx->gpr[4] = 0; return 1; } return 0;
     /* MLAA: as duas chamadas que o pedem (bl 0x3903D8) */
     case 0x00390724u:
-    case 0x00390754u: return o.sem_mlaa;
+    case 0x00390754u:
+        if (o.sem_mlaa) conta(K_MLAA);
+        return o.sem_mlaa;
     /* dano: entrada da função de dano (r3 criatura, f1 dano) -- o que o Kratos recebe */
     case 0x000873A0u:
-        if (o.dano_recebido != 1.0f && vt_controle((uint32_t)ctx->gpr[3]) == VT_JOGADOR) escala_dano(ctx, o.dano_recebido);
+        if (o.dano_recebido != 1.0f && vt_controle((uint32_t)ctx->gpr[3]) == VT_JOGADOR) {
+            conta(K_DANO_RECEBIDO);
+            escala_dano(ctx, o.dano_recebido);
+        }
         return 0;
     /* dano: as duas chamadas com atacante (r31) -- o que o Kratos causa */
     case 0x001553ACu:
@@ -179,10 +229,10 @@ int ppu_insn_gancho(ppu_context* ctx, uint32_t addr)
         if (o.mata || o.dano_causado != 1.0f) dano_causado(ctx, o);
         return 0;
     /* medidores: depois da chamada virtual que devolve o máximo em f1, o valor novo (f31) vira o máximo */
-    case 0x002437ECu: if (o.orbes) ctx->fpr[31] = ctx->fpr[1]; return 0;   /* tPowerUpMeter */
-    case 0x00244F04u: if (o.magia) ctx->fpr[31] = ctx->fpr[1]; return 0;   /* tMagicMeterPlayer */
-    case 0x0024417Cu: if (o.itens) ctx->fpr[31] = ctx->fpr[1]; return 0;   /* tItemMeter */
-    case 0x00243A2Cu: if (o.furia) ctx->fpr[31] = ctx->fpr[1]; return 0;   /* tRageMeter */
+    case 0x002437ECu: if (o.orbes) { conta(K_ORBES); ctx->fpr[31] = ctx->fpr[1]; } return 0;   /* tPowerUpMeter */
+    case 0x00244F04u: if (o.magia) { conta(K_MAGIA); ctx->fpr[31] = ctx->fpr[1]; } return 0;   /* tMagicMeterPlayer */
+    case 0x0024417Cu: if (o.itens) { conta(K_ITENS); ctx->fpr[31] = ctx->fpr[1]; } return 0;   /* tItemMeter */
+    case 0x00243A2Cu: if (o.furia) { conta(K_FURIA); ctx->fpr[31] = ctx->fpr[1]; } return 0;   /* tRageMeter */
     /* pulos: antes do teste do bit "já usado" de +0x1628 */
     case 0x000B623Cu: if (o.pulo) pulo(ctx, 4, 31); return 0;
     case 0x0026C6ACu: if (o.pulo) pulo(ctx, 3, 23); return 0;
