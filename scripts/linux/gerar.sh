@@ -342,7 +342,7 @@ etapa 3_firmware firmware
 ppu() {
     local o=$R/out
     eng ppu_carrega.exe "$R/jogo/GOWA.elf" -o "$o"
-    eng ppu_traduz.exe "$R/jogo/GOWA.elf" --functions "$o/GOWA.functions.json" --hle-stubs "$o/GOWA.imports.json" --code-end 0x661C14 --chunks 48 --output "$R/port/recompiled" -j "$JOBS"
+    eng ppu_traduz.exe "$R/jogo/GOWA.elf" --functions "$o/GOWA.functions.json" --hle-stubs "$o/GOWA.imports.json" --code-end 0x661C14 --chunks 48 --insn-hooks "$R/dados/ganchos_ppu.json" --output "$R/port/recompiled" -j "$JOBS"
     eng ppu_nids.exe --all --out "$R/port/recompiled/ppu_hle_nids.cpp"
     cd "$R"
     ex "$PY" scripts/ppu_preambulo.py
@@ -354,7 +354,8 @@ ppu() {
 }
 # a tradução do PPU é refeita quando muda o que a gera (o tradutor no pacote da engine, o preâmbulo ou os remendos;
 # 11/11: o remendo do Ouroboros só chega a quem já gerou traduzindo de novo), como no gerar.ps1; sem marca, também refaz
-md5_ppu() { { tradutor_id "$R/engine"; cat "$R/port/ppu_recomp_preambulo.h" "$R/scripts/remendos_ppu.py" 2>/dev/null; } | md5sum | cut -d' ' -f1; }
+# 14/11: os ganchos das opções e trapaças (dados/ganchos_ppu.json) também, como no gerar.ps1
+md5_ppu() { { tradutor_id "$R/engine"; cat "$R/port/ppu_recomp_preambulo.h" "$R/scripts/remendos_ppu.py" "$R/dados/ganchos_ppu.json" 2>/dev/null; } | md5sum | cut -d' ' -f1; }
 if [ -f "$OUT/4_ppu.ok" ] && [ "$(cat "$R/port/recompiled/lifter_md5.txt" 2>/dev/null)" != "$(md5_ppu)" ]; then
     msg "4_ppu: o tradutor do PPU ou os remendos mudaram nesta atualização; traduzindo de novo"
     rm -f "$OUT/4_ppu.ok" "$OUT/6_compilar.ok" "$OUT/7_jogar.ok"
