@@ -4,6 +4,26 @@ O Otavix Launcher mostra este arquivo na página "Novidades" do jogo. Cada atual
 "## <data> · <versão>" e o texto em português (### pt), inglês (### en) e, quando houver, espanhol (### es).
 As mais novas ficam em cima.
 
+## 14/11/2026 · opções gráficas, Simplificado e trapaças · engine 0.12.5
+### pt
+- **Novo:** opções do jogo no launcher, para desligar efeitos e ganhar fps: profundidade de campo, motion blur e sombras dinâmicas, cada uma separada, ou as três juntas na predefinição "Simplificado". As sombras são as que mais pesam: sem elas, cerca de 18% a mais de fps num portátil a 15 W e de 35% a 46% num notebook com placa de entrada; sem o motion blur, de 5% a 13%; sem a profundidade de campo, até 5%. O Simplificado inteiro deu 20% a mais no portátil a 15 W e até 45% no notebook.
+- **Novo:** uma seção de trapaças, separada e recolhida: invencibilidade (o Kratos não perde vida) e fúria sempre cheia. Use quando quiser: elas mudam a experiência do jogo como ele foi feito.
+- **Melhoria:** o log do jogo diz a cada 30 segundos quais opções e trapaças estão agindo, o que ajuda quando você manda um report.
+- **Correção (Linux):** em distros novas que só trazem o libxml2 novo, a geração parava com "o lld-link precisa de libxml2.so.2". O gerador agora procura essa biblioteca também na Steam instalada pelo Flatpak e, se não achar, diz qual pacote instalar.
+- Esta atualização traduz o jogo de novo, uma vez (cerca de 10 minutos).
+### en
+- **New:** game options in the launcher, to turn effects off and gain fps: depth of field, motion blur and dynamic shadows, each one separately, or all three together in the "Simplified" preset. Shadows are the heaviest: without them, about 18% more fps on a handheld at 15 W and 35% to 46% on a notebook with an entry-level graphics card; without motion blur, 5% to 13%; without depth of field, up to 5%. The whole Simplified preset gave 20% more on the handheld at 15 W and up to 45% on the notebook.
+- **New:** a cheats section, separate and collapsed: invincibility (Kratos does not lose health) and rage always full. Use them whenever you like: they change the game experience as it was made.
+- **Improvement:** the game log says every 30 seconds which options and cheats are acting, which helps when you send a report.
+- **Fix (Linux):** on newer distros that only ship the new libxml2, the generation stopped with "lld-link needs libxml2.so.2". The generator now also looks for this library in Steam installed through Flatpak and, if it is not found, says which package to install.
+- This update translates the game again, once (about 10 minutes).
+### es
+- **Nuevo:** opciones del juego en el launcher, para desactivar efectos y ganar fps: profundidad de campo, desenfoque de movimiento y sombras dinámicas, cada una por separado, o las tres juntas en el ajuste "Simplificado". Las sombras son las que más pesan: sin ellas, cerca de un 18% más de fps en una portátil a 15 W y entre un 35% y un 46% en un notebook con tarjeta de entrada; sin el desenfoque de movimiento, entre un 5% y un 13%; sin la profundidad de campo, hasta un 5%. El Simplificado completo dio un 20% más en la portátil a 15 W y hasta un 45% en el notebook.
+- **Nuevo:** una sección de trucos, separada y plegada: invencibilidad (Kratos no pierde vida) y furia siempre llena. Úsalos cuando quieras: cambian la experiencia del juego tal como fue hecho.
+- **Mejora:** el log del juego dice cada 30 segundos qué opciones y trucos están actuando, lo que ayuda cuando envías un report.
+- **Corrección (Linux):** en distros nuevas que solo traen el libxml2 nuevo, la generación se detenía con "lld-link necesita libxml2.so.2". El generador ahora busca esa biblioteca también en Steam instalado por Flatpak y, si no la encuentra, dice qué paquete instalar.
+- Esta actualización traduce el juego de nuevo, una vez (unos 10 minutos).
+
 ## 13/11/2026 · correção do gerador · engine 0.12.4
 ### pt
 - **Correção:** quando o disco salvo era a pasta vfs do próprio jogo, a geração parava com "não achei o jogo". O gerador agora segue essa pasta até o disco de verdade, ou usa a extração que ele mesmo fez; se a extração estiver incompleta (sem a pasta USRDIR), a mensagem diz isso e o que fazer.
