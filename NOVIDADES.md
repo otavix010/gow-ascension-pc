@@ -6,13 +6,13 @@ As mais novas ficam em cima.
 
 ## 15/11/2026 · correções · engine 0.12.6
 ### pt
-- **Correção:** em PCs com 4 núcleos e placa de vídeo com pouca memória, o jogo podia congelar com a música continuando (report 1216). O leitor de comandos da placa se perdia depois de uma espera longa e deixava o jogo esperando para sempre; agora ele se recupera sozinho.
+- **Correção:** em PCs com 4 núcleos e placa de vídeo com pouca memória, o jogo podia congelar com a música continuando (report 1216). O leitor de comandos da placa às vezes chegava a um trecho que o jogo ainda estava escrevendo e se perdia; agora ele espera o trecho ficar pronto.
 - **Correção:** com o fps baixo, apertos rápidos e repetidos (como os QTEs de apertar círculo) se juntavam num aperto só e o jogo deixava de contar boa parte deles (report 1222). Agora cada aperto conta. Segurar um botão e toques isolados continuam iguais.
 ### en
-- **Fix:** on PCs with 4 cores and a graphics card with little memory, the game could freeze while the music kept playing (report 1216). The graphics command reader got lost after a long wait and left the game waiting forever; it now recovers on its own.
+- **Fix:** on PCs with 4 cores and a graphics card with little memory, the game could freeze while the music kept playing (report 1216). The graphics command reader sometimes reached a block the game was still writing and got lost; it now waits for the block to be ready.
 - **Fix:** at low fps, fast repeated presses (like the press-circle QTEs) merged into a single press and the game missed many of them (report 1222). Every press now counts. Holding a button and single taps work as before.
 ### es
-- **Corrección:** en PCs con 4 núcleos y tarjeta de video con poca memoria, el juego podía congelarse mientras la música seguía (report 1216). El lector de comandos de la tarjeta se perdía tras una espera larga y dejaba el juego esperando para siempre; ahora se recupera solo.
+- **Corrección:** en PCs con 4 núcleos y tarjeta de video con poca memoria, el juego podía congelarse mientras la música seguía (report 1216). El lector de comandos de la tarjeta a veces llegaba a un tramo que el juego aún estaba escribiendo y se perdía; ahora espera a que el tramo esté listo.
 - **Corrección:** con fps bajos, las pulsaciones rápidas y repetidas (como los QTE de pulsar círculo) se juntaban en una sola y el juego dejaba de contar muchas (report 1222). Ahora cada pulsación cuenta. Mantener un botón y los toques sueltos siguen igual.
 
 ## 14/11/2026 · opções gráficas, Simplificado e trapaças · engine 0.12.5
