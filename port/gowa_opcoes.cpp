@@ -180,7 +180,7 @@ void dano_causado(ppu_context* ctx, const Opcoes& o)
     }
 }
 
-/* pulo: o bit "já usado" sai do registrador antes do teste, só para o Kratos (a memória fica como está) */
+/* pulo: o bit "já usado" sai do registrador antes da gravação, só para o Kratos */
 void pulo(ppu_context* ctx, int reg, int criatura)
 {
     if (vt_controle((uint32_t)ctx->gpr[criatura]) == VT_JOGADOR) {
@@ -233,10 +233,10 @@ int ppu_insn_gancho(ppu_context* ctx, uint32_t addr)
     case 0x00244F04u: if (o.magia) { conta(K_MAGIA); ctx->fpr[31] = ctx->fpr[1]; } return 0;   /* tMagicMeterPlayer */
     case 0x0024417Cu: if (o.itens) { conta(K_ITENS); ctx->fpr[31] = ctx->fpr[1]; } return 0;   /* tItemMeter */
     case 0x00243A2Cu: if (o.furia) { conta(K_FURIA); ctx->fpr[31] = ctx->fpr[1]; } return 0;   /* tRageMeter */
-    /* pulos: antes do teste do bit "já usado" de +0x1628 */
-    case 0x000B623Cu: if (o.pulo) pulo(ctx, 4, 31); return 0;
-    case 0x0026C6ACu: if (o.pulo) pulo(ctx, 3, 23); return 0;
-    case 0x0026DDE4u: if (o.pulo) pulo(ctx, 3, 31); return 0;
+    /* pulos: a gravação que marca o pulo duplo como usado (stw r5,0x1628(r23), r23 = a criatura) grava sem o bit.
+     * 15/11, medido com fotos de +0x1628 em trincas de apertos: 1º aperto (chão) 0xE497C desliga 0x10000000 "no
+     * chão"; 2º (no ar) SÓ esta gravação liga 0x4; 3º (no ar) o jogo recusa; no pouso 0xB4580 desliga 0x4. */
+    case 0x0026CB68u: if (o.pulo) pulo(ctx, 5, 23); return 0;
     default: return 0;
     }
 }

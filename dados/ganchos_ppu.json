@@ -11,7 +11,5 @@
   {"addr": "0x00244F04", "word": "0xFC40F850", "o_que": "magia infinita (tMagicMeterPlayer)"},
   {"addr": "0x0024417C", "word": "0xFC40F850", "o_que": "itens infinitos (tItemMeter)"},
   {"addr": "0x00243A2C", "word": "0xFC40F850", "o_que": "fúria infinita (tRageMeter)"},
-  {"addr": "0x000B623C", "word": "0x5484077A", "o_que": "pulos infinitos"},
-  {"addr": "0x0026C6AC", "word": "0x5463077A", "o_que": "pulos infinitos"},
-  {"addr": "0x0026DDE4", "word": "0x5463077A", "o_que": "pulos infinitos"}
+  {"addr": "0x0026CB68", "word": "0x90B71628", "o_que": "pulos infinitos (grava o pulo duplo como usado)"}
 ]
