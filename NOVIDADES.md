@@ -4,6 +4,17 @@ O Otavix Launcher mostra este arquivo na página "Novidades" do jogo. Cada atual
 "## <data> · <versão>" e o texto em português (### pt), inglês (### en) e, quando houver, espanhol (### es).
 As mais novas ficam em cima.
 
+## 15/11/2026 · correções · engine 0.12.6
+### pt
+- **Correção:** em PCs com 4 núcleos e placa de vídeo com pouca memória, o jogo podia congelar com a música continuando (report 1216). O leitor de comandos da placa se perdia depois de uma espera longa e deixava o jogo esperando para sempre; agora ele se recupera sozinho.
+- **Correção:** com o fps baixo, apertos rápidos e repetidos (como os QTEs de apertar círculo) se juntavam num aperto só e o jogo deixava de contar boa parte deles (report 1222). Agora cada aperto conta. Segurar um botão e toques isolados continuam iguais.
+### en
+- **Fix:** on PCs with 4 cores and a graphics card with little memory, the game could freeze while the music kept playing (report 1216). The graphics command reader got lost after a long wait and left the game waiting forever; it now recovers on its own.
+- **Fix:** at low fps, fast repeated presses (like the press-circle QTEs) merged into a single press and the game missed many of them (report 1222). Every press now counts. Holding a button and single taps work as before.
+### es
+- **Corrección:** en PCs con 4 núcleos y tarjeta de video con poca memoria, el juego podía congelarse mientras la música seguía (report 1216). El lector de comandos de la tarjeta se perdía tras una espera larga y dejaba el juego esperando para siempre; ahora se recupera solo.
+- **Corrección:** con fps bajos, las pulsaciones rápidas y repetidas (como los QTE de pulsar círculo) se juntaban en una sola y el juego dejaba de contar muchas (report 1222). Ahora cada pulsación cuenta. Mantener un botón y los toques sueltos siguen igual.
+
 ## 14/11/2026 · opções gráficas, Simplificado e trapaças · engine 0.12.5
 ### pt
 - **Novo:** opções do jogo no launcher, para desligar efeitos e ganhar fps: profundidade de campo, motion blur e sombras dinâmicas, cada uma separada, ou as três juntas na predefinição "Simplificado". As sombras são as que mais pesam: sem elas, cerca de 18% a mais de fps num portátil a 15 W e de 35% a 46% num notebook com placa de entrada; sem o motion blur, de 5% a 13%; sem a profundidade de campo, até 5%. O Simplificado inteiro deu 20% a mais no portátil a 15 W e até 45% no notebook.
