@@ -23,6 +23,8 @@ PY=${GOWA_PY_EXE:-$(command -v python3)}
 for x in "$F/llvm/bin/clang-cl" "$F/llvm/bin/lld-link" "$F/cmake/bin/cmake" "$F/ninja" "$F/winsdk/crt/include"; do
     [ -e "$x" ] || { echo "GOWA_ERRO_FERR: falta $x"; echo "exit=3"; exit 3; }
 done
+# report 1293 (16/11): build.ninja sem a regra do gowa.exe (configuração interrompida) = "unknown target": configura de novo
+if [ -f "$DIR/build.ninja" ] && ! grep -q '^build gowa\.exe:' "$DIR/build.ninja"; then rm -f "$DIR/build.ninja" "$DIR/CMakeCache.txt"; rm -rf "$DIR/CMakeFiles"; fi
 if [ ! -f "$DIR/build.ninja" ]; then
     "$F/cmake/bin/cmake" -S "$RAIZ/port" -B "$DIR" -G Ninja \
       "-DCMAKE_MAKE_PROGRAM=$F/ninja" \
