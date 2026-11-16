@@ -86,7 +86,7 @@ $SHA_LIBSRE = '9e7ee6edc99b1d372686cf927b883b18f19ed4d32d1faf35e214cca4ae0737b6'
 $ENGINE_VERSAO = '0.12.7'
 $ENGINE_NOME = "otavix-engine-ps3-$ENGINE_VERSAO"
 $ENGINE_URLS = @("https://otavix-launcher.otavix-launcher-servidor.workers.dev/v1/arquivos/engine/ps3/$ENGINE_NOME.zip")
-$ENGINE_SHA = '7f4dbafef08e44d4cb4c2487c726b5fb674bcf8c807cc93162e3c6fba72941ce'
+$ENGINE_SHA = '77338a6b8be884417f00173d88ce39ea725c2adbfe38a0f44d9258ef7d7e2383'
 $ENG = Join-Path $R 'engine'
 $ENGINE_BIN = Join-Path $ENG 'bin'
 # o tradutor das SPUs para os scripts de tradução do port (scripts\otx_ponte.py)
