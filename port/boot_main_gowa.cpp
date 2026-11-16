@@ -2702,8 +2702,11 @@ int main(int argc, char** argv)
      *  e jogo parado em ~1 de cada 3 rodadas no notebook. Medido: 0 estouros
      *  (notebook e aqui), mais de 4 mil esperas cumpridas por execução até aqui,
      *  FPS igual. GCM_SEMA_ACQUIRE_US=-1 volta ao antigo. */
+    /*  16/11 (report 1216, caminho do semáforo): 2 s era curto. Em 4c/4t a SPU às vezes para alguns segundos (a
+     *  espera da MAIN em 0x415914 que o resgate desfaz em ~5 s); a MeshProc não libera o 0x510 a tempo, o ACQUIRE
+     *  estourava, o leitor entrava no trecho ainda não escrito e o jogo travava (lotes 55 e 61 na Legion). 30 s. */
     if (!GetEnvironmentVariableA("GCM_SEMA_ACQUIRE_US", NULL, 0))
-        SetEnvironmentVariableA("GCM_SEMA_ACQUIRE_US", "2000000");
+        SetEnvironmentVariableA("GCM_SEMA_ACQUIRE_US", "30000000");
     /*  GOWA_MAILBOX_GATE=A17930:5:5000 -- cada GET_REPORT libera um job WWS
      *  (wid 22) que grava a caixa de correio única das 5 tarefas MeshProc
      *  (0x00A17930) e as sinaliza. Sem a latência real da GPU a rodada seguinte
