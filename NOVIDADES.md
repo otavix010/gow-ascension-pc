@@ -4,13 +4,16 @@ O Otavix Launcher mostra este arquivo na página "Novidades" do jogo. Cada atual
 "## <data> · <versão>" e o texto em português (### pt), inglês (### en) e, quando houver, espanhol (### es).
 As mais novas ficam em cima.
 
-## 16/11/2026 · correção · engine 0.12.7
+## 16/11/2026 · correções · engine 0.12.7
 ### pt
 - **Correção:** as causas que ainda sobravam do congelamento com a música continuando (report 1216), mais raras e mais comuns no Linux, em PCs com 4 núcleos e placa de vídeo com pouca memória. O leitor de comandos da placa às vezes seguia uma instrução antiga, de antes de o jogo terminar de escrever aquele trecho, ou pulava um trecho enquanto esperava a imagem anterior ser mostrada, e o jogo ficava esperando para sempre. Agora ele espera o jogo terminar de escrever e não pula mais nada durante essa espera. Nos nossos testes, a cena que congelava em 2 de cada 3 tentativas no Linux rodou dezenas de sessões de 20 minutos sem travar, no Linux e no Windows.
+- **Correção:** depois de uma atualização, a compilação podia parar com "ninja: error: unknown target 'gowa.exe'" (report 1293). O gerador agora percebe a configuração incompleta e a refaz sozinho.
 ### en
 - **Fix:** the remaining causes of the freeze with the music still playing (report 1216), rarer and more common on Linux, on PCs with 4 cores and a graphics card with little memory. The graphics command reader sometimes followed an old instruction, from before the game finished writing that part, or skipped a part while waiting for the previous image to be shown, and the game then waited forever. It now waits for the game to finish writing and no longer skips anything during that wait. In our tests, the scene that froze in 2 out of 3 tries on Linux ran dozens of 20-minute sessions without freezing, on Linux and on Windows.
+- **Fix:** after an update, the build could stop with "ninja: error: unknown target 'gowa.exe'" (report 1293). The generator now notices the incomplete configuration and redoes it on its own.
 ### es
 - **Corrección:** las causas que aún quedaban del congelamiento con la música sonando (report 1216), más raras y más comunes en Linux, en PCs con 4 núcleos y tarjeta de video con poca memoria. El lector de comandos de la tarjeta a veces seguía una instrucción antigua, de antes de que el juego terminara de escribir ese tramo, o saltaba un tramo mientras esperaba que se mostrara la imagen anterior, y el juego quedaba esperando para siempre. Ahora espera a que el juego termine de escribir y ya no salta nada durante esa espera. En nuestras pruebas, la escena que se congelaba en 2 de cada 3 intentos en Linux corrió decenas de sesiones de 20 minutos sin congelarse, en Linux y en Windows.
+- **Corrección:** tras una actualización, la compilación podía detenerse con "ninja: error: unknown target 'gowa.exe'" (report 1293). El generador ahora detecta la configuración incompleta y la rehace solo.
 
 ## 15/11/2026 · correções · engine 0.12.6
 ### pt
