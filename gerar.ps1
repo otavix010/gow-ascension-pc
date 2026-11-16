@@ -1923,6 +1923,28 @@ function Compilar-Build([string]$a) {
     if (Test-Path $ant) { Move-Item -LiteralPath $ant -Destination $exe -Force }
     return $false
 }
+# 16/11: uma atualização que só muda os fontes do port (port\*.cpp/.c/.h, port\edge, CMakeLists), com a mesma engine,
+# não refazia a compilação: a etapa estava marcada como feita e o jogo seguia com o exe antigo. Os fontes são comparados
+# com os anotados na última compilação (fontes_md5.txt da pasta da build); mudou algum, compila de novo (só o que mudou).
+if ((Test-Path (Join-Path $OUT '6_compilar.ok')) -and -not $Refazer) {
+    $arqFontes = Join-Path $R "port\$bdir\fontes_md5.txt"
+    if (Test-Path $arqFontes) {
+        $anotF = @{}
+        foreach ($l in [IO.File]::ReadAllLines($arqFontes)) { if ($l -match '^([0-9A-F]{32}) (.+)$') { $anotF[$matches[2]] = $matches[1] } }
+        $md5F = [Security.Cryptography.MD5]::Create(); $mudF = 0
+        try {
+            foreach ($f in (Fontes-Repo)) {
+                $rel = $f.FullName.Substring($R.Length).TrimStart('\')
+                if ($rel -notmatch '^port\\' -or $rel -notmatch '(\.(cpp|c|h)|CMakeLists\.txt)$') { continue }
+                try { if ($anotF[$rel] -ne [BitConverter]::ToString($md5F.ComputeHash([IO.File]::ReadAllBytes($f.FullName))).Replace('-', '')) { $mudF++ } } catch { }
+            }
+        } finally { $md5F.Dispose() }
+        if ($mudF -gt 0) {
+            Msg "$mudF arquivo(s) do port mudaram desde a última compilação: compilando de novo"
+            Remove-Item -LiteralPath (Join-Path $OUT '6_compilar.ok'), (Join-Path $OUT '7_jogar.ok') -Force -ErrorAction SilentlyContinue
+        }
+    }
+}
 Etapa '6_compilar' {
     # 12/11: a tabela de NIDs do HLE é do runtime da engine (não da tradução): refeita aqui, uma engine que só muda o
     # runtime recompila sem traduzir o PPU de novo

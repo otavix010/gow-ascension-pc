@@ -406,7 +406,21 @@ compilar() {
     ex bash "$R/scripts/linux/build_linux.sh" x86-64-v3 rz   # pelo bash: o zip do port pode chegar sem a permissão de execução
     [ -f "$R/port/build_v3rz/gowa.exe" ] || falha 'o gowa.exe não foi gerado (veja o log)'
 }
+# 16/11: uma atualização que só muda os fontes do port (mesma engine) não refazia a compilação (a etapa estava marcada):
+# o MD5 dos fontes do port fica anotado; mudou, compila de novo (o ninja só refaz o que mudou). Sem anotação (primeira
+# vez com este gerador), só anota.
+fontes_port_md5() {
+    ( cd "$R" && find port -maxdepth 1 -type f \( -name '*.cpp' -o -name '*.c' -o -name '*.h' -o -name CMakeLists.txt \) -print0;
+      [ -d "$R/port/edge" ] && cd "$R" && find port/edge -type f \( -name '*.cpp' -o -name '*.c' -o -name '*.h' \) -print0 ) |
+        sort -z | ( cd "$R" && xargs -0 md5sum 2>/dev/null ) | md5sum | cut -c1-32
+}
+MARCA_FONTES="$OUT/port_fontes.md5"
+if [ -f "$OUT/6_compilar.ok" ] && [ -f "$MARCA_FONTES" ] && [ "$(cat "$MARCA_FONTES")" != "$(fontes_port_md5)" ]; then
+    msg 'os fontes do port mudaram desde a última compilação: compilando de novo'
+    rm -f "$OUT/6_compilar.ok" "$OUT/7_jogar.ok"
+fi
 etapa 6_compilar compilar
+fontes_port_md5 > "$MARCA_FONTES"
 # o mesmo port/build.txt do gerar.ps1 (o launcher manda nos reports qual build o jogador usa): no Linux é sempre a
 # portátil (AVX2), a que roda pelo Proton
 printf 'escolhida=portatil\nusada=portatil\npasta=build_v3rz\nexe=port/build_v3rz/gowa.exe\nmotivo=Linux (%s, Proton %s): build portátil (AVX2)\n' \
