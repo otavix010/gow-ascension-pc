@@ -4,6 +4,14 @@ O Otavix Launcher mostra este arquivo na página "Novidades" do jogo. Cada atual
 "## <data> · <versão>" e o texto em português (### pt), inglês (### en) e, quando houver, espanhol (### es).
 As mais novas ficam em cima.
 
+## 16/11/2026 · correção · engine 0.12.7
+### pt
+- **Correção:** a segunda causa do congelamento com a música continuando (report 1216), mais rara e mais comum no Linux, em PCs com 4 núcleos e placa de vídeo com pouca memória. O leitor de comandos da placa às vezes encontrava um desvio antigo para o começo da memória de comandos, de antes de o jogo escrever aquele trecho, e se perdia; agora ele espera o jogo terminar de escrever. Nos nossos testes, a cena que congelava em 2 de cada 3 tentativas no Linux rodou 8 vezes de 20 minutos sem travar, e o mesmo no Windows.
+### en
+- **Fix:** the second cause of the freeze with the music still playing (report 1216), rarer and more common on Linux, on PCs with 4 cores and a graphics card with little memory. The graphics command reader sometimes found an old jump back to the start of the command memory, from before the game wrote that part, and got lost; it now waits for the game to finish writing. In our tests, the scene that froze in 2 out of 3 tries on Linux ran 8 times for 20 minutes without freezing, and the same on Windows.
+### es
+- **Corrección:** la segunda causa del congelamiento con la música sonando (report 1216), más rara y más común en Linux, en PCs con 4 núcleos y tarjeta de video con poca memoria. El lector de comandos de la tarjeta a veces encontraba un salto antiguo al comienzo de la memoria de comandos, de antes de que el juego escribiera ese tramo, y se perdía; ahora espera a que el juego termine de escribir. En nuestras pruebas, la escena que se congelaba en 2 de cada 3 intentos en Linux corrió 8 veces de 20 minutos sin congelarse, y lo mismo en Windows.
+
 ## 15/11/2026 · correções · engine 0.12.6
 ### pt
 - **Correção:** em PCs com 4 núcleos e placa de vídeo com pouca memória, o jogo podia congelar com a música continuando (report 1216). Corrigimos a causa principal: o leitor de comandos da placa às vezes chegava a um trecho que o jogo ainda estava escrevendo e se perdia; agora ele espera o trecho ficar pronto. Ainda investigamos uma segunda causa, mais rara, que pode congelar o jogo do mesmo jeito.
