@@ -8,12 +8,15 @@ As mais novas ficam em cima.
 ### pt
 - **Correção:** o jogo podia congelar de vez, com a música continuando, e só voltava ao ser fechado e aberto de novo (reports 1238, 1239 e 1323). A causa: de vez em quando o leitor de comandos da placa de vídeo passava por um trecho antigo da fila, e uma instrução velha desse trecho mudava o destino dos avisos que a placa manda para destravar o trabalho do processador. Esse valor inválido agora é recusado e o jogo segue normalmente.
 - **Novo (Windows):** o jogo passa a ter ícone próprio no arquivo do jogo, em atalhos, na barra de tarefas e no Alt+Tab. O ícone é criado no seu PC durante a geração, a partir da sua cópia do jogo.
+- **Melhoria (gerador):** se o download automático do update 1.04 falha (erro 403 em algumas redes), o gerador tenta por outro caminho; a instalação da engine não para mais num resto de uma tentativa anterior ("Access denied"); e o aviso de "já existe uma geração rodando" agora diz qual processo fechar (reports 1307, 1314, 1315 e 1326).
 ### en
 - **Fix:** the game could freeze for good while the music kept playing, and only came back after being closed and opened again (reports 1238, 1239 and 1323). The cause: once in a while the graphics command reader went through an old stretch of the queue, and a stale instruction in it changed the destination of the notices the graphics card sends to release the processor's work. That invalid value is now refused and the game carries on normally.
 - **New (Windows):** the game now has its own icon on the game file, in shortcuts, on the taskbar and in Alt+Tab. The icon is created on your PC during generation, from your copy of the game.
+- **Improvement (generator):** if the automatic download of update 1.04 fails (error 403 on some networks), the generator tries another route; installing the engine no longer stops on leftovers from a previous attempt ("Access denied"); and the "a generation is already running" notice now says which process to close (reports 1307, 1314, 1315 and 1326).
 ### es
 - **Corrección:** el juego podía congelarse del todo, con la música sonando, y solo volvía al cerrarlo y abrirlo de nuevo (reports 1238, 1239 y 1323). La causa: de vez en cuando el lector de comandos de la tarjeta de video pasaba por un tramo antiguo de la cola, y una instrucción vieja de ese tramo cambiaba el destino de los avisos que la tarjeta envía para liberar el trabajo del procesador. Ese valor inválido ahora se rechaza y el juego sigue con normalidad.
 - **Nuevo (Windows):** el juego ahora tiene su propio icono en el archivo del juego, en accesos directos, en la barra de tareas y en Alt+Tab. El icono se crea en tu PC durante la generación, a partir de tu copia del juego.
+- **Mejora (generador):** si la descarga automática del update 1.04 falla (error 403 en algunas redes), el generador prueba por otro camino; la instalación del engine ya no se detiene por restos de un intento anterior ("Access denied"); y el aviso de "ya hay una generación en curso" ahora dice qué proceso cerrar (reports 1307, 1314, 1315 y 1326).
 
 ## 16/11/2026 · correções · engine 0.12.7
 ### pt

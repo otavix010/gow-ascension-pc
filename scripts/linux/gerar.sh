@@ -295,7 +295,10 @@ jogo() {
         pkg=$R/dl/BCUS98232_update_1.04.pkg
         if [ "$(sha1sum "$pkg" 2>/dev/null | cut -d' ' -f1)" != "$UPDATE_SHA1" ]; then
             msg 'baixando o update 1.04 oficial do servidor da PlayStation (235 MB)'
-            baixar "$UPDATE_URL" "$pkg" || falha "o update 1.04 não baixou; baixe pelo navegador ($UPDATE_URL) e passe --update <arquivo>"
+            # reports 1314/1315: se o http falha (403 em algumas redes), o mesmo arquivo por https; o certificado desse
+            # servidor não é conferido (-k), quem garante o arquivo é o SHA-1 logo abaixo
+            baixar "$UPDATE_URL" "$pkg" || { msg 'o endereço http do update falhou; tentando por https'; rm -f "$pkg"; curl -k -L --fail --retry 3 -o "$pkg" "${UPDATE_URL/http:/https:}" >> "$LOG" 2>&1; } ||
+                falha "o update 1.04 não baixou; baixe pelo navegador ($UPDATE_URL) e passe --update <arquivo>"
             [ "$(sha1sum "$pkg" | cut -d' ' -f1)" = "$UPDATE_SHA1" ] || { rm -f "$pkg"; falha 'o update baixado não confere (SHA-1)'; }
         fi
     fi

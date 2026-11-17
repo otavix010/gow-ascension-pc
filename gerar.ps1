@@ -176,7 +176,20 @@ $global:GerarTrava = New-Object Threading.Mutex($false, $nomeTrava)
 $temTrava = $false
 try { $temTrava = $global:GerarTrava.WaitOne(0) } catch [Threading.AbandonedMutexException] { $temTrava = $true }
 if (-not $temTrava) {
-    throw "já existe uma geração deste jogo rodando nesta pasta ($R). Espere ela terminar (ou feche a outra janela da geração) e tente de novo."
+    # report 1326 (17/11): a trava é do Windows e some junto com o processo; "já existe" quer dizer que há mesmo
+    # outra geração viva nesta pasta, em geral uma janela esquecida ou uma geração que ficou parada. A mensagem
+    # diz qual processo é e como encerrá-lo.
+    $outros = @()
+    try {
+        $padrao = '*' + [Management.Automation.WildcardPattern]::Escape($R) + '*'
+        $outros = @(Get-CimInstance Win32_Process -Filter "Name='powershell.exe' OR Name='pwsh.exe'" -ErrorAction Stop |
+            Where-Object { $_.ProcessId -ne $PID -and $_.CommandLine -and $_.CommandLine -like '*gerar.ps1*' -and $_.CommandLine -like $padrao } |
+            ForEach-Object { "processo $($_.ProcessId), aberto há $([int]((Get-Date) - $_.CreationDate).TotalMinutes) min" })
+    } catch { }
+    $quem = if ($outros) { ' (' + ($outros -join '; ') + ')' } else { '' }
+    throw ("já existe uma geração deste jogo rodando nesta pasta ($R)$quem. Espere ela terminar ou feche a outra janela da " +
+           'geração. Se não houver janela nenhuma, a geração anterior ficou parada: feche o Otavix Launcher (ou encerre o ' +
+           '"Windows PowerShell" no Gerenciador de Tarefas) e gere de novo.')
 }
 # roda um programa externo sem que o stderr dele vire exceção: no Windows PowerShell 5.1,
 # com ErrorActionPreference = Stop, qualquer linha no stderr de um comando nativo lança
@@ -722,11 +735,31 @@ Etapa '1_engine' {
         }
     }
     # extrai ao lado, confere cada arquivo pelo manifesto e só então troca a pasta engine
-    $novo = Join-Path $R 'engine.novo'
-    if (Test-Path -LiteralPath $novo) { SemExcecao { cmd /c "rmdir /s /q `"$novo`" 2>&1" } | Out-Null }
+    # report 1307 (17/11): "Access denied" em engine.novo\bin\d3dcompiler_47.dll -- sobra de uma tentativa anterior
+    # que o rmdir não conseguiu apagar (arquivo preso pelo antivírus ou por um programa da engine ainda aberto), e a
+    # extração por cima dela parava. Agora a extração vai para uma pasta que não existe (engine.novo, engine.novo.2,
+    # ...) e é tentada de novo depois de alguns segundos.
     Add-Type -AssemblyName System.IO.Compression.FileSystem
-    try { [IO.Compression.ZipFile]::ExtractToDirectory($zip, $novo) }
-    catch { throw "o pacote da engine não abriu ($zip): $($_.Exception.Message). Gere de novo para baixá-lo outra vez." }
+    $novo = $null; $erroExt = $null
+    foreach ($t in 1..3) {
+        foreach ($nome in @('engine.novo', 'engine.novo.2', 'engine.novo.3')) {
+            $c = Join-Path $R $nome
+            if (Test-Path -LiteralPath $c) { SemExcecao { cmd /c "rmdir /s /q `"$c`" 2>&1" } | Out-Null }
+            if (-not (Test-Path -LiteralPath $c)) { $novo = $c; break }
+        }
+        if (-not $novo) { $erroExt = 'as pastas engine.novo de tentativas anteriores não puderam ser apagadas'; Start-Sleep -Seconds 3; continue }
+        try { [IO.Compression.ZipFile]::ExtractToDirectory($zip, $novo); $erroExt = $null; break }
+        catch {
+            $erroExt = $_.Exception.Message
+            Msg "a extração da engine falhou ($erroExt); tentando de novo em 3 s ($t de 3)"
+            $novo = $null
+            Start-Sleep -Seconds 3
+        }
+    }
+    if ($erroExt) {
+        throw ("o pacote da engine não abriu ($zip): $erroExt. Feche o jogo e outros programas que estejam usando a pasta " +
+               "$R, libere essa pasta no antivírus e gere de novo.")
+    }
     $ruins = @(Conferir-Engine $novo)
     if ($ruins) {
         throw ("o pacote da engine foi extraído, mas $($ruins.Count) arquivo(s) não conferem com o manifesto: " +
@@ -1527,9 +1560,26 @@ Etapa '2_jogo' {
             # tentativas; o jogador baixa pelo navegador e escolhe o arquivo no launcher (o gerador aceita o .pkg)
             try { Baixar $UPDATE_URL $Update }
             catch {
-                throw ("não deu para baixar o update 1.04 do servidor da PlayStation ($($_.Exception.Message)). Baixe-o " +
+                # reports 1314 e 1315 (17/11): o endereço http respondeu 403 (em algumas redes o provedor ou o antivírus
+                # barra um .pkg por http). O mesmo arquivo por https: o certificado desse servidor da Sony não é dos que
+                # o Windows conhece, então a conferência dele fica desligada -- quem garante o arquivo é o SHA-1 abaixo.
+                $erroHttp = $_.Exception.Message
+                $veio = $false
+                $curl = Get-Command curl.exe -ErrorAction SilentlyContinue
+                if ($curl) {
+                    Msg "o endereço http do update falhou ($erroHttp); tentando por https"
+                    $part = "$Update.part"
+                    Remove-Item -LiteralPath $part -ErrorAction SilentlyContinue
+                    try {
+                        $cod = Curl-Com-Progresso $curl.Source ($UPDATE_URL -replace '^http:', 'https:') $part '-k'
+                        if ($cod -eq 0) { Move-Item -LiteralPath $part -Destination $Update -Force; $veio = $true }
+                    } catch { }
+                }
+                if (-not $veio) {
+                throw ("não deu para baixar o update 1.04 do servidor da PlayStation ($erroHttp). Baixe-o " +
                        "pelo navegador neste endereço: $UPDATE_URL -- e, no launcher, escolha esse arquivo .pkg como update " +
                        '(ou ponha o .pkg na pasta do disco do jogo) e gere de novo.')
+                }
             }
         }
         if ((Get-FileHash -LiteralPath $Update -Algorithm SHA1).Hash.ToLower() -ne $UPDATE_SHA1) {
