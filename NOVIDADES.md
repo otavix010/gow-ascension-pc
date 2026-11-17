@@ -4,6 +4,17 @@ O Otavix Launcher mostra este arquivo na página "Novidades" do jogo. Cada atual
 "## <data> · <versão>" e o texto em português (### pt), inglês (### en) e, quando houver, espanhol (### es).
 As mais novas ficam em cima.
 
+## 17/11/2026 · correções · engine 0.12.8
+### pt
+- **Correção:** o jogo podia congelar de vez, com a música continuando, e só voltava ao ser fechado e aberto de novo (reports 1238, 1239 e 1323). A causa: de vez em quando o leitor de comandos da placa de vídeo passava por um trecho antigo da fila, e uma instrução velha desse trecho mudava o destino dos avisos que a placa manda para destravar o trabalho do processador. Esse valor inválido agora é recusado e o jogo segue normalmente.
+- **Novo (Windows):** o jogo passa a ter ícone próprio no arquivo do jogo, em atalhos, na barra de tarefas e no Alt+Tab. O ícone é criado no seu PC durante a geração, a partir da sua cópia do jogo.
+### en
+- **Fix:** the game could freeze for good while the music kept playing, and only came back after being closed and opened again (reports 1238, 1239 and 1323). The cause: once in a while the graphics command reader went through an old stretch of the queue, and a stale instruction in it changed the destination of the notices the graphics card sends to release the processor's work. That invalid value is now refused and the game carries on normally.
+- **New (Windows):** the game now has its own icon on the game file, in shortcuts, on the taskbar and in Alt+Tab. The icon is created on your PC during generation, from your copy of the game.
+### es
+- **Corrección:** el juego podía congelarse del todo, con la música sonando, y solo volvía al cerrarlo y abrirlo de nuevo (reports 1238, 1239 y 1323). La causa: de vez en cuando el lector de comandos de la tarjeta de video pasaba por un tramo antiguo de la cola, y una instrucción vieja de ese tramo cambiaba el destino de los avisos que la tarjeta envía para liberar el trabajo del procesador. Ese valor inválido ahora se rechaza y el juego sigue con normalidad.
+- **Nuevo (Windows):** el juego ahora tiene su propio icono en el archivo del juego, en accesos directos, en la barra de tareas y en Alt+Tab. El icono se crea en tu PC durante la generación, a partir de tu copia del juego.
+
 ## 16/11/2026 · correções · engine 0.12.7
 ### pt
 - **Correção:** as causas que ainda sobravam do congelamento com a música continuando (report 1216), mais raras e mais comuns no Linux, em PCs com 4 núcleos e placa de vídeo com pouca memória. O leitor de comandos da placa às vezes seguia uma instrução antiga, de antes de o jogo terminar de escrever aquele trecho, ou pulava um trecho enquanto esperava a imagem anterior ser mostrada, e o jogo ficava esperando para sempre. Agora ele espera o jogo terminar de escrever e não pula mais nada durante essa espera. Nos nossos testes, a cena que congelava em 2 de cada 3 tentativas no Linux rodou dezenas de sessões de 20 minutos sem travar, no Linux e no Windows.

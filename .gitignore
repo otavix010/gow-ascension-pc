@@ -64,3 +64,5 @@ scripts_edge/banc/*.bin
 scripts_edge/banc/*.obj
 scripts_edge/banc/*.lib
 scripts_edge/banc/*.exp
+port/app.rc
+port/app.ico

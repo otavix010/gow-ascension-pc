@@ -627,6 +627,16 @@ static HICON gowa_icone_png(const wchar_t* caminho, int lado)
 static void gowa_icone_janela(HWND hw)
 {
     if (!hw) return;
+    /* 17/11: o gerador grava o ICON0.PNG do disco do jogador no próprio exe (port\app.rc, recurso 1); com ele a
+     * janela usa o mesmo ícone do Explorer e do atalho, sem depender do PS3_VFS_ROOT */
+    {
+        const HINSTANCE eu = GetModuleHandleW(NULL);
+        HICON grande = (HICON)LoadImageW(eu, MAKEINTRESOURCEW(1), IMAGE_ICON, GetSystemMetrics(SM_CXICON), GetSystemMetrics(SM_CYICON), LR_DEFAULTCOLOR);
+        HICON pequeno = (HICON)LoadImageW(eu, MAKEINTRESOURCEW(1), IMAGE_ICON, GetSystemMetrics(SM_CXSMICON), GetSystemMetrics(SM_CYSMICON), LR_DEFAULTCOLOR);
+        if (grande) SendMessageW(hw, WM_SETICON, ICON_BIG, (LPARAM)grande);
+        if (pequeno) SendMessageW(hw, WM_SETICON, ICON_SMALL, (LPARAM)pequeno);
+        if (grande || pequeno) { fprintf(stderr, "[janela] ícone do jogo: recurso do exe\n"); return; }
+    }
     wchar_t raiz[MAX_PATH]; const DWORD n = GetEnvironmentVariableW(L"PS3_VFS_ROOT", raiz, MAX_PATH);
     if (!n || n >= MAX_PATH - 32) return;
     wchar_t cam[MAX_PATH]; swprintf(cam, MAX_PATH, L"%s\\PS3_GAME\\ICON0.PNG", raiz);
@@ -639,6 +649,16 @@ static void gowa_icone_janela(HWND hw)
     fprintf(stderr, "[janela] ícone do jogo: %s\n", grande || pequeno ? "ICON0.PNG" : "não carregou");
     if (SUCCEEDED(co)) CoUninitialize();
 }
+/* 17/11: fora do renderizador ao vivo a janela é do back-end D3D12 da engine, que não devolve o HWND: o ícone vai
+ * para as janelas de topo deste processo */
+static BOOL CALLBACK gowa_icone_cada_janela(HWND hw, LPARAM)
+{
+    DWORD pid = 0;
+    GetWindowThreadProcessId(hw, &pid);
+    if (pid == GetCurrentProcessId() && !GetWindow(hw, GW_OWNER) && IsWindowVisible(hw)) gowa_icone_janela(hw);
+    return TRUE;
+}
+static void gowa_icone_janelas_do_processo(void) { EnumWindows(gowa_icone_cada_janela, 0); }
 extern "C" { int g_gowa_pin_on = -1; }   /* 25/10: fixação de threads ligada? (desempenho.json) */
 /* ---- GOWA: one heavy thread per physical core (GOWA_PIN=1) -------------
  * The frame needs ~9 busy threads (6-7 SPUs, the main PPU thread, the RSX /
@@ -1800,9 +1820,11 @@ static DWORD WINAPI vblank_ticker(LPVOID)
         } else {
             fprintf(stderr, "[rsx] live-draw init FAILED -- falling back to the D3D12 backend\n");
             rsx_ok = (rsx_backend_init(rsx_w, rsx_h, _title) == 0);
+            if (rsx_ok) gowa_icone_janelas_do_processo();
         }
     } else {
         rsx_ok = (rsx_backend_init(rsx_w, rsx_h, _title) == 0);
+        if (rsx_ok) gowa_icone_janelas_do_processo();
     }
     fprintf(stderr, "[rsx] backend init %s\n", rsx_ok ? "OK -- window open" : "FAILED");
     unsigned last_flip = 0;
@@ -2670,9 +2692,15 @@ static void gowa_opcoes_do_launcher(void)
 }
 #endif
 
+#ifdef _WIN32
+#pragma comment(lib, "shell32")
+extern "C" HRESULT WINAPI SetCurrentProcessExplicitAppUserModelID(PCWSTR AppID);
+#endif
 int main(int argc, char** argv)
 {
 #ifdef _WIN32
+    /* 17/11: identidade própria na barra de tarefas (o ícone e o agrupamento são os do jogo, não os de um exe genérico) */
+    SetCurrentProcessExplicitAppUserModelID(L"Otavix.GodOfWarAscension");
     gowa_opcoes_do_launcher();      /* report 1064: o exe aberto direto usa as opções do launcher */
     /* GOWA: padrões do port, antes de qualquer getenv (o cache de getenv acima
      * guarda o primeiro valor lido). Uma variável já definida no ambiente vence.

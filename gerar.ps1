@@ -83,10 +83,10 @@ $SHA_LIBSRE = '9e7ee6edc99b1d372686cf927b883b18f19ed4d32d1faf35e214cca4ae0737b6'
 # A Otavix Engine PS3 (06/11): a engine vem compilada num pacote (o runtime, os cabeçalhos que o código gerado inclui
 # e o tradutor do PPU e das SPUs em .exe), que vai para engine\. O código do jogo continua sendo traduzido e compilado
 # aqui, a partir do disco do jogador, pelo tradutor do pacote. -Engine <zip> usa um pacote local no lugar do baixado.
-$ENGINE_VERSAO = '0.12.7'
+$ENGINE_VERSAO = '0.12.8'
 $ENGINE_NOME = "otavix-engine-ps3-$ENGINE_VERSAO"
 $ENGINE_URLS = @("https://otavix-launcher.otavix-launcher-servidor.workers.dev/v1/arquivos/engine/ps3/$ENGINE_NOME.zip")
-$ENGINE_SHA = '77338a6b8be884417f00173d88ce39ea725c2adbfe38a0f44d9258ef7d7e2383'
+$ENGINE_SHA = 'e8f796e4493e732f026f300f03ca90121bacae1d64ac5bad0d55ee5654ca88c8'
 $ENG = Join-Path $R 'engine'
 $ENGINE_BIN = Join-Path $ENG 'bin'
 # o tradutor das SPUs para os scripts de tradução do port (scripts\otx_ponte.py)
@@ -1945,7 +1945,108 @@ if ((Test-Path (Join-Path $OUT '6_compilar.ok')) -and -not $Refazer) {
         }
     }
 }
+# ---------------------------------------------------------------------------- ícone do jogo no exe
+# 17/11: o gowa.exe saía sem ícone (o genérico do Windows no Explorer, no atalho e, fora do renderizador ao vivo, na
+# barra de tarefas). A arte é do jogo: não vai no pacote. O ICON0.PNG da cópia do jogador (320x176) vira aqui o
+# port\app.ico (quadrado, com faixas transparentes; 256 em PNG e 64/48/32/24/16 em 32 bits) e o port\app.rc que o
+# CMakeLists do port já inclui quando existe. Os dois só são regravados quando mudam (a compilação não se refaz à
+# toa). Qualquer falha aqui deixa o exe sem ícone, como antes, e a geração segue.
+function Gerar-Icone {
+    $rc = Join-Path $R 'port\app.rc'; $ico = Join-Path $R 'port\app.ico'
+    $tinha = Test-Path -LiteralPath $rc -PathType Leaf
+    # o CMakeLists só olha se o app.rc existe quando configura: quando ele aparece (ou some), a pasta de build que já
+    # existe é configurada de novo (sem o build.ninja o build_portatil.cmd configura; os .obj ficam)
+    $reconfigura = {
+        foreach ($b in @('build_native', 'build_v3rz', 'build_x86-64-v2rz')) {
+            Remove-Item -LiteralPath (Join-Path $R "port\$b\build.ninja") -Force -ErrorAction SilentlyContinue
+        }
+    }
+    try {
+        $png = $null
+        foreach ($c in @((Join-Path (Pasta-Do-Disco (Join-Path $R 'vfs\PS3_GAME')) 'ICON0.PNG'), (Join-Path $R 'vfs\PS3_GAME\ICON0.PNG'))) {
+            if ($c -and (Test-Path -LiteralPath $c -PathType Leaf)) { $png = $c; break }
+        }
+        if (-not $png) { throw 'o disco não tem PS3_GAME\ICON0.PNG' }
+        Add-Type -AssemblyName System.Drawing -ErrorAction Stop
+        $bytes = [IO.File]::ReadAllBytes($png)
+        $msOrig = New-Object IO.MemoryStream (, $bytes)
+        $orig = [Drawing.Image]::FromStream($msOrig)
+        $partes = New-Object Collections.Generic.List[object]
+        try {
+            foreach ($t in @(256, 64, 48, 32, 24, 16)) {
+                $bmp = New-Object Drawing.Bitmap $t, $t, ([Drawing.Imaging.PixelFormat]::Format32bppArgb)
+                try {
+                    $g = [Drawing.Graphics]::FromImage($bmp)
+                    try {
+                        $g.Clear([Drawing.Color]::Transparent)
+                        $g.InterpolationMode = [Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic
+                        $g.PixelOffsetMode = [Drawing.Drawing2D.PixelOffsetMode]::HighQuality
+                        $esc = [Math]::Min($t / $orig.Width, $t / $orig.Height)
+                        $w = [Math]::Max(1, [int][Math]::Round($orig.Width * $esc)); $h = [Math]::Max(1, [int][Math]::Round($orig.Height * $esc))
+                        $g.DrawImage($orig, [int](($t - $w) / 2), [int](($t - $h) / 2), $w, $h)
+                    } finally { $g.Dispose() }
+                    if ($t -eq 256) {
+                        $ms = New-Object IO.MemoryStream
+                        try { $bmp.Save($ms, [Drawing.Imaging.ImageFormat]::Png); $dados = $ms.ToArray() } finally { $ms.Dispose() }
+                    } else {
+                        $ret = New-Object Drawing.Rectangle 0, 0, $t, $t
+                        $bd = $bmp.LockBits($ret, [Drawing.Imaging.ImageLockMode]::ReadOnly, [Drawing.Imaging.PixelFormat]::Format32bppArgb)
+                        try {
+                            $px = New-Object byte[] ($t * $t * 4)
+                            for ($y = 0; $y -lt $t; $y++) {   # de baixo para cima, como o DIB
+                                [Runtime.InteropServices.Marshal]::Copy([IntPtr]($bd.Scan0.ToInt64() + [int64]$y * $bd.Stride), $px, ($t - 1 - $y) * $t * 4, $t * 4)
+                            }
+                        } finally { $bmp.UnlockBits($bd) }
+                        $mascara = New-Object byte[] ([int]([Math]::Floor(($t + 31) / 32)) * 4 * $t)   # máscara AND zerada: vale o alfa
+                        $ms = New-Object IO.MemoryStream
+                        try {
+                            $bw = New-Object IO.BinaryWriter $ms
+                            $bw.Write([uint32]40); $bw.Write([int32]$t); $bw.Write([int32]($t * 2)); $bw.Write([uint16]1); $bw.Write([uint16]32)
+                            $bw.Write([uint32]0); $bw.Write([uint32]($px.Length + $mascara.Length)); $bw.Write([int32]0); $bw.Write([int32]0)
+                            $bw.Write([uint32]0); $bw.Write([uint32]0)
+                            $bw.Write($px); $bw.Write($mascara); $bw.Flush()
+                            $dados = $ms.ToArray()
+                        } finally { $ms.Dispose() }
+                    }
+                    $partes.Add(@{ t = $t; d = $dados })
+                } finally { $bmp.Dispose() }
+            }
+        } finally { $orig.Dispose(); $msOrig.Dispose() }
+        $ms = New-Object IO.MemoryStream
+        try {
+            $bw = New-Object IO.BinaryWriter $ms
+            $bw.Write([uint16]0); $bw.Write([uint16]1); $bw.Write([uint16]$partes.Count)
+            $pos = 6 + 16 * $partes.Count
+            foreach ($q in $partes) {
+                $lado = if ($q.t -ge 256) { 0 } else { $q.t }
+                $bw.Write([byte]$lado); $bw.Write([byte]$lado); $bw.Write([byte]0); $bw.Write([byte]0)
+                $bw.Write([uint16]1); $bw.Write([uint16]32); $bw.Write([uint32]$q.d.Length); $bw.Write([uint32]$pos)
+                $pos += $q.d.Length
+            }
+            foreach ($q in $partes) { $bw.Write([byte[]]$q.d) }
+            $bw.Flush()
+            $novo = $ms.ToArray()
+        } finally { $ms.Dispose() }
+        $igual = $false
+        if (Test-Path -LiteralPath $ico -PathType Leaf) {
+            $velho = [IO.File]::ReadAllBytes($ico)
+            $igual = ($velho.Length -eq $novo.Length) -and ([Convert]::ToBase64String($velho) -eq [Convert]::ToBase64String($novo))
+        }
+        if (-not $igual) { [IO.File]::WriteAllBytes($ico, $novo) }
+        $texto = "// gerado pelo gerar.ps1 a partir do ICON0.PNG do disco do jogador`r`n1 ICON `"app.ico`"`r`n"
+        if (-not (Test-Path -LiteralPath $rc -PathType Leaf) -or ([IO.File]::ReadAllText($rc) -ne $texto)) {
+            [IO.File]::WriteAllText($rc, $texto, (New-Object Text.ASCIIEncoding))
+        }
+        if (-not $tinha) { & $reconfigura }
+        Msg "ícone do jogo: $png -> port\app.ico ($($novo.Length) bytes$(if ($igual) { ', igual ao de antes' }))"
+    } catch {
+        Msg "AVISO: o exe fica sem o ícone do jogo ($($_.Exception.Message))"
+        Remove-Item -LiteralPath $rc, $ico -Force -ErrorAction SilentlyContinue
+        if ($tinha) { & $reconfigura }
+    }
+}
 Etapa '6_compilar' {
+    Gerar-Icone   # 17/11: o ícone do jogo entra no exe (port\app.rc)
     # 12/11: a tabela de NIDs do HLE é do runtime da engine (não da tradução): refeita aqui, uma engine que só muda o
     # runtime recompila sem traduzir o PPU de novo
     Push-Location $ENG
