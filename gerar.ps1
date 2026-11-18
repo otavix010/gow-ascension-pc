@@ -1514,14 +1514,7 @@ if ($Disco -and (Test-Path (Join-Path $OUT '2_jogo.ok'))) {
     $pgReal = Pasta-Do-Disco $pg   # o modo direto (report 340): o disco fica no outro drive
     $quebrado = -not (Test-Path -LiteralPath (Join-Path $pgReal 'USRDIR') -PathType Container)
     $idLigado = if ($quebrado) { '' } else { Id-Disco $pgReal }
-    if ($idLigado -and $VERSOES.Contains($idLigado)) {
-        Usar-Versao $idLigado
-        # 18/11: o disco ligado é de uma versão e o update instalado é de outra (o jogador trocou de disco): refaz a etapa
-        if (-not (Test-Path -LiteralPath (Join-Path $R "vfs\game\$idLigado\USRDIR\GOWA.SELF"))) {
-            Msg "o update instalado não é o da versão do disco ($idLigado): a etapa do jogo será refeita"
-            Remove-Item -LiteralPath (Join-Path $OUT '2_jogo.ok') -Force -ErrorAction SilentlyContinue
-        }
-    }
+    if ($idLigado -and $VERSOES.Contains($idLigado)) { Usar-Versao $idLigado }
     # reports 379 e 389 (29/10): com o jogo gerado, "Escolher o disco de novo" também religa quando a cópia ligada
     # tem arquivo faltando ou cortado, ou quando a pasta escolhida é outra (só com junção ou modo direto: o espelho
     # de links físicos e a cópia ficam, salvo arquivo ruim). Um arquivo compactado não entra na comparação (seria
@@ -1557,6 +1550,16 @@ if ($Disco -and (Test-Path (Join-Path $OUT '2_jogo.ok'))) {
         Msg "disco ligado de novo: $real"
     }
     Conferir-Arquivos (Pasta-Do-Disco $pg)
+    # 18/11: o disco ligado agora é de uma versão e o update instalado é de outra (o jogador trocou o americano pelo
+    # europeu, ou o contrário, com o jogo já gerado): a etapa do jogo é refeita para instalar o update da versão
+    $idAgora = Id-Disco (Pasta-Do-Disco $pg)
+    if ($idAgora -and $VERSOES.Contains($idAgora)) {
+        Usar-Versao $idAgora
+        if (-not (Test-Path -LiteralPath (Join-Path $R "vfs\game\$idAgora\USRDIR\GOWA.SELF"))) {
+            Msg "o update instalado não é o da versão do disco ($idAgora): a etapa do jogo será refeita"
+            Remove-Item -LiteralPath (Join-Path $OUT '2_jogo.ok') -Force -ErrorAction SilentlyContinue
+        }
+    }
 }
 # reports 621/717/826 (mesmo jogador, carregamento infinito com tela preta): a pasta escolhida como update era uma
 # BCUS98232 do RPCS3 com o jogo inteiro dentro (ARCHIVES + GAME.PSARC, SHELL.PSARC...), e a cópia levou tudo para o
