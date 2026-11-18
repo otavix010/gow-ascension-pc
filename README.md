@@ -112,6 +112,31 @@ Detalhes de cada etapa, e como fazer à mão: [docs/COMO_GERAR.md](docs/COMO_GER
 
 A versão Linux roda no SteamOS (Steam Deck, Legion Go S) e em outros Linux, pelo Proton. Já foi testada de ponta a ponta num **Legion Go S** (veja o desempenho): o launcher gera e abre o jogo (versão 1.0.92 ou mais nova do Otavix Launcher). Precisa de um Proton instalado na Steam, de `curl`, `python3`, `tar` e `xz`, de um processador com AVX2 e de uns 15 GB livres. À mão: `bash scripts/linux/gerar.sh --disco <pasta ou arquivo do disco>` (o update e o firmware são opcionais: `--update`, `--firmware`) e depois `bash jogar.sh`. O log fica em `out/jogo.log`. Sempre chame os dois scripts pelo `bash`. No SteamOS o launcher também cria o atalho do jogo na Steam. A geração é feita no próprio aparelho (traduz e compila o jogo uma vez, leva um bom tempo num portátil).
 
+## Teclado e mouse
+
+O jogo aceita teclado e mouse junto com o controle (ou sem ele), com a janela do jogo em foco. No Otavix Launcher, a página **Controles** do jogo liga e desliga o teclado e o mouse, ajusta a sensibilidade e troca a tecla de cada botão. No jogo, **F1** mostra e esconde a legenda das teclas.
+
+| Botão do PS3 | Tecla padrão |
+|---|---|
+| Analógico esquerdo (andar) | W A S D |
+| Analógico direito (esquiva) | movimento do mouse, I J K L ou Shift + W A S D |
+| ✕ (pular) | Espaço |
+| □ (ataque leve) | botão esquerdo do mouse |
+| △ (ataque forte) | botão direito do mouse |
+| ○ (agarrar) | E, Backspace ou botão do meio |
+| L1 / R1 | Q / F |
+| L2 / R2 | C / R |
+| L3 / R3 | Z / V |
+| Direcional | setas |
+| Start / Select | Esc ou Enter / Tab |
+
+- O movimento do mouse empurra o analógico direito e ele volta sozinho ao centro: um movimento curto é um toque, um movimento contínuo mantém o analógico inclinado.
+- Depois da primeira tecla ou clique dentro do jogo, o cursor fica preso na janela e escondido. **Alt+Tab** solta. Clicar na barra de título (para mover ou fechar a janela) não prende o cursor.
+- Shift + as teclas de andar movem o analógico direito enquanto o Shift não for usado como tecla de outro botão.
+- As teclas valem pela posição no teclado, não pela letra: num teclado AZERTY, "W A S D" são as teclas Z Q S D. A legenda do F1 mostra as letras do seu teclado.
+
+Fora do launcher, as mesmas opções são variáveis de ambiente: `GOWA_TECLADO=0` desliga tudo; `GOWA_MOUSE=0` desliga só o mouse; `GOWA_MOUSE_SENS=<5 a 200>` é a sensibilidade (50 é o padrão); `GOWA_TECLAS="botão=teclas;botão=teclas"` troca as teclas, por exemplo `GOWA_TECLAS="cross=k;square=j;circle=mouse2 x"` (várias teclas para o mesmo botão separadas por espaço). Botões: `cross circle square triangle l1 r1 l2 r2 l3 r3 start select up down left right stick_up stick_down stick_left stick_right rstick_up rstick_down rstick_left rstick_right`. Teclas: `a`–`z`, `0`–`9`, `f1`–`f12`, `space`, `enter`, `escape`, `tab`, `backspace`, `lshift`, `rshift`, `lctrl`, `rctrl`, `lalt`, `ralt`, `up`, `down`, `left`, `right`, `num0`–`num9`, `mouse1`–`mouse5`, entre outras.
+
 ## Como funciona
 
 O PS3 tem um processador central (PPU, PowerPC), seis co-processadores vetoriais (SPUs) e uma GPU (RSX):
