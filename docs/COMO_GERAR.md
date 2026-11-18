@@ -2,7 +2,7 @@
 
 O `gerar.cmd` (ou `gerar.ps1`) faz tudo sozinho; este documento explica cada etapa, para quem quiser entender, depurar ou fazer à mão. Os logs ficam em `out\gerar\<etapa>.log`. Uma etapa concluída deixa `out\gerar\<etapa>.ok` e é pulada na próxima vez. Para refazer, apague o `.ok` ou rode com `-Refazer`.
 
-Só serve para **God of War: Ascension BCUS98232 (EUA) + update 1.04**: os endereços usados pelos scripts são dessa versão, e a etapa 2 confere o SHA-256 do executável.
+Serve para **God of War: Ascension BCUS98232 (EUA), BCES01741 e BCES01742 (Europa) + o update 1.04 de cada uma**: o executável do update 1.04 é o mesmo nas três (os endereços usados pelos scripts são dele), e a etapa 2 confere o SHA-256. O gerador reconhece a versão pelo `TITLE_ID` do `PARAM.SFO` do disco e usa o update, a pasta `vfs\game\<id>` e a lista de arquivos dela.
 
 O update 1.04 e o firmware são gratuitos e oficiais: o [`.pkg` do update 1.04 no servidor da Sony](http://b0.ww.np.dl.playstation.net/tppkg/np/BCUS98232/BCUS98232_T76/5525fbb7b6b5456d/UP9000-BCUS98232_00-GOWABDPATCH00001-A0104-V0100-PE.pkg) (SHA-1 do arquivo `5a94c17aa07cb5181a505d3429c88ea3d9f4e4d0`; o `cf97c10f…` que a Sony publica é o dos dados sem os 32 bytes finais) e o `PS3UPDAT.PUP` na [página do software do sistema do PS3](https://www.playstation.com/pt-br/support/hardware/ps3/system-software/), instalado no RPCS3 (*File > Install Firmware*).
 

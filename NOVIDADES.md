@@ -4,6 +4,17 @@ O Otavix Launcher mostra este arquivo na página "Novidades" do jogo. Cada atual
 "## <data> · <versão>" e o texto em português (### pt), inglês (### en) e, quando houver, espanhol (### es).
 As mais novas ficam em cima.
 
+## 18/11/2026 · versão europeia do disco
+### pt
+- **Novo:** o port agora aceita também o disco europeu do jogo (BCES01741), além do americano (BCUS98232); o outro disco europeu, BCES01742, também é reconhecido, mas ainda não foi testado por nós. O gerador reconhece a versão do disco sozinho e baixa o update 1.04 dela. Escolha o disco europeu no launcher e gere; para trocar de versão depois, use "Escolher o disco de novo".
+- No disco europeu o jogo pergunta o idioma na primeira abertura (inglês, francês, espanhol, alemão, italiano, português, russo, polonês, turco e grego). Os saves da versão europeia e da americana são separados: um não abre na outra.
+### en
+- **New:** the port now also accepts the European disc of the game (BCES01741), besides the US one (BCUS98232); the other European disc, BCES01742, is recognised too, but we have not tested it yet. The generator recognises the disc version by itself and downloads its 1.04 update. Pick the European disc in the launcher and generate; to switch versions later, use "Pick the disc again".
+- On the European disc the game asks for the language on first start (English, French, Spanish, German, Italian, Portuguese, Russian, Polish, Turkish and Greek). European and US saves are separate: one does not load on the other.
+### es
+- **Nuevo:** el port ahora acepta también el disco europeo del juego (BCES01741), además del americano (BCUS98232); el otro disco europeo, BCES01742, también se reconoce, pero aún no lo hemos probado. El generador reconoce la versión del disco por sí solo y descarga su update 1.04. Elige el disco europeo en el launcher y genera; para cambiar de versión después, usa "Elegir el disco de nuevo".
+- En el disco europeo el juego pregunta el idioma en el primer arranque (inglés, francés, español, alemán, italiano, portugués, ruso, polaco, turco y griego). Las partidas de la versión europea y de la americana son independientes: una no carga en la otra.
+
 ## 18/11/2026 · teclado e mouse configuráveis · engine 0.13.0
 ### pt
 - **Novo:** as teclas do teclado e os botões do mouse agora podem ser trocados na página Controles do jogo, no launcher (versão 1.0.100 ou mais nova). Cada botão do controle tem a sua tecla, e a legenda do F1 no jogo mostra o mapa que você escolheu.
