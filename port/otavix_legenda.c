@@ -125,15 +125,39 @@ static void leg_monta(void)
                                    "up", "down", "left", "right", "stick_up", "stick_left", "stick_down", "stick_right",
                                    "rstick_up", "rstick_left", "rstick_down", "rstick_right" };
     for (int k = 0; k < 24; k++) leg_botao(ids[k], mouse, b[k], 72);
+    /* as quatro direções de um grupo numa frase só: "W A S D", ou um travessão se nenhuma tem tecla */
+    static wchar_t andar[160], direito[240], direcional[160];
+    const wchar_t *vazio = L"\x2014";
+    #define LEG_QUATRO(sai, i0) do { \
+        const int tem = wcscmp(b[i0], vazio) || wcscmp(b[i0 + 1], vazio) || wcscmp(b[i0 + 2], vazio) || wcscmp(b[i0 + 3], vazio); \
+        if (tem) _snwprintf(sai, sizeof sai / sizeof sai[0] - 1, L"%ls %ls %ls %ls", b[i0], b[i0 + 1], b[i0 + 2], b[i0 + 3]); \
+        else wcscpy(sai, vazio); } while (0)
+    LEG_QUATRO(andar, 16);
+    LEG_QUATRO(direcional, 12);
+    wchar_t teclas_dir[160];
+    LEG_QUATRO(teclas_dir, 20);
+    #undef LEG_QUATRO
+    /* o Shift fora do mapa: Shift + as teclas de andar movem o analógico direito (cellPad.c) */
+    int shift_livre = 1;
+    for (int k = 0; k < 24; k++) {
+        char nomes[128];
+        leg_nomes(ids[k], nomes, sizeof nomes);
+        for (char *q = strtok(nomes, " \t"); q; q = strtok(NULL, " \t"))
+            if (!_stricmp(q, "lshift") || !_stricmp(q, "rshift")) shift_livre = 0;
+    }
+    direito[0] = 0;
+    if (mouse) wcscat(direito, L"mouse");
+    if (wcscmp(teclas_dir, vazio)) { if (direito[0]) wcscat(direito, L" ou "); wcsncat(direito, teclas_dir, 150); }
+    if (shift_livre && wcscmp(andar, vazio)) { if (direito[0]) wcscat(direito, L" ou "); wcscat(direito, L"Shift + andar"); }
+    if (!direito[0]) wcscpy(direito, vazio);
     _snwprintf(TEXTO, sizeof TEXTO / sizeof TEXTO[0] - 1,
                L"Teclado e mouse  (F1 mostra e esconde)\n"
-               L"Andar: %ls %ls %ls %ls        Analógico direito: %ls%ls %ls %ls %ls\n"
+               L"Andar: %ls        Analógico direito: %ls\n"
                L"Cruz (X): %ls        Quadrado: %ls\n"
                L"Triângulo: %ls        Círculo: %ls\n"
                L"L1: %ls    R1: %ls    L2: %ls    R2: %ls    L3: %ls    R3: %ls\n"
-               L"Direcional: %ls %ls %ls %ls    Start: %ls    Select: %ls",
-               b[16], b[17], b[18], b[19], mouse ? L"mouse ou " : L"", b[20], b[21], b[22], b[23],
-               b[0], b[2], b[3], b[1], b[4], b[5], b[6], b[7], b[8], b[9], b[12], b[14], b[13], b[15], b[10], b[11]);
+               L"Direcional: %ls    Start: %ls    Select: %ls",
+               andar, direito, b[0], b[2], b[3], b[1], b[4], b[5], b[6], b[7], b[8], b[9], direcional, b[10], b[11]);
     TEXTO[sizeof TEXTO / sizeof TEXTO[0] - 1] = 0;
 }
 
