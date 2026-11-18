@@ -4,6 +4,17 @@ O Otavix Launcher mostra este arquivo na página "Novidades" do jogo. Cada atual
 "## <data> · <versão>" e o texto em português (### pt), inglês (### en) e, quando houver, espanhol (### es).
 As mais novas ficam em cima.
 
+## 18/11/2026 · desempenho da versão compatível · engine 0.12.9
+### pt
+- **Desempenho:** a versão compatível do jogo, usada em processadores sem AVX2 (como o Core i5/i7 de 2ª e 3ª geração), ficou mais rápida (reports 1306 e 1308). As contas de ponto flutuante das SPUs passavam por um caminho lento nessa versão; nas nossas medições o ganho foi de 40% a 70% de fps, conforme a cena. Ela continua mais lenta que a versão normal, e a versão normal não muda. Ao atualizar, o jogo é só recompilado, sem traduzir tudo de novo.
+- **Gerador:** quando a pasta da engine antiga não pode ser trocada porque algum programa a segura, o gerador agora tenta de novo, fecha sozinho um programa da própria engine que tenha ficado aberto e, se ainda assim não der, diz quais programas estão abertos na pasta do jogo (report 1336).
+### en
+- **Performance:** the compatible build of the game, used on processors without AVX2 (such as 2nd and 3rd generation Core i5/i7), is faster (reports 1306 and 1308). The SPU floating-point math went through a slow path in that build; in our measurements the gain was 40% to 70% more fps, depending on the scene. It is still slower than the regular build, and the regular build does not change. When you update, the game is only recompiled, without translating everything again.
+- **Generator:** when the old engine folder cannot be replaced because some program is holding it, the generator now retries, closes on its own an engine program left open from a previous run and, if that is still not enough, tells you which programs are open in the game folder (report 1336).
+### es
+- **Rendimiento:** la versión compatible del juego, usada en procesadores sin AVX2 (como los Core i5/i7 de 2ª y 3ª generación), es más rápida (reports 1306 y 1308). Las cuentas de punto flotante de las SPU pasaban por un camino lento en esa versión; en nuestras mediciones la ganancia fue del 40% al 70% de fps, según la escena. Sigue siendo más lenta que la versión normal, y la versión normal no cambia. Al actualizar, el juego solo se recompila, sin traducir todo de nuevo.
+- **Generador:** cuando la carpeta de la engine antigua no se puede cambiar porque algún programa la tiene abierta, el generador ahora lo intenta de nuevo, cierra por sí solo un programa de la propia engine que haya quedado abierto y, si aun así no puede, dice qué programas están abiertos en la carpeta del juego (report 1336).
+
 ## 18/11/2026 · correção da câmera no Templo de Delfos
 ### pt
 - **Correção:** na ponte do Templo de Delfos, ao usar o Amuleto de Uroboros, a câmera podia ficar presa longe do Kratos e continuar assim pelo resto da fase (reports 1233, 1273, 1316 e 1322). Agora ela volta ao normal quando você solta o botão. Se o seu save já ficou com a câmera presa, volte a um save anterior a esse trecho.
