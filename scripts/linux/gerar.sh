@@ -224,7 +224,7 @@ achar_ps3game() {
     [ "${b^^}" = USRDIR ] && [ "$(basename "$(dirname "$r")")" = PS3_GAME ] && { dirname "$(dirname "$r")"; return 0; }
     # vários discos (uma pasta de ROMs com outros jogos): o do God of War: Ascension primeiro, pelo PARAM.SFO
     local todos; todos=$(find "$r" -mindepth 1 -maxdepth 4 -type d -name PS3_GAME 2>/dev/null | while read -r x; do [ -d "$x/USRDIR" ] && echo "$x"; done)
-    p=$(echo "$todos" | while read -r x; do [ -n "$x" ] && grep -aq 'BCUS98232' "$x/PARAM.SFO" 2>/dev/null && { echo "$x"; break; }; done)
+    p=$(echo "$todos" | while read -r x; do [ -n "$x" ] && grep -aqE 'BCUS98232|BCES0174[12]' "$x/PARAM.SFO" 2>/dev/null && { echo "$x"; break; }; done)
     [ -z "$p" ] && p=$(echo "$todos" | head -1)
     [ -n "$p" ] && { dirname "$p"; return 0; }
     return 1
@@ -279,20 +279,35 @@ jogo() {
     [ -n "$DISCO" ] || falha 'falta --disco (a pasta com PS3_GAME, ou o .iso/.7z/.zip/.rar do jogo)'
     ACHADO=''; achar_disco "$DISCO"; local d=$ACHADO
     [ -d "$d/PS3_GAME/USRDIR" ] || falha "não achei PS3_GAME/USRDIR em $d"
-    # o port é da versão americana (BCUS98232): a europeia (BCES01741) e as outras não servem
+    # 18/11: o port aceita a versão americana (BCUS98232) e as europeias (BCES01741 e BCES01742). O executável é o
+    # mesmo nas três; mudam os dados do disco e os do update 1.04, então cada disco usa o update dele (os mesmos
+    # endereços e SHA-1 do gerar.ps1). Sem PARAM.SFO legível, vale a americana.
     local id; id=$(grep -aoE 'B[CL][EUAJ][SM][0-9]{5}' "$d/PS3_GAME/PARAM.SFO" 2>/dev/null | head -1)
+    local titulo=BCUS98232
     case "$id" in
         ''|BCUS98232) ;;
-        B?ES*) falha "este disco é a versão europeia do God of War: Ascension ($id). O port só funciona com a versão americana (BCUS98232)." ;;
-        *) falha "este disco é de outra versão do God of War: Ascension ($id). O port só funciona com a versão americana (BCUS98232)." ;;
+        BCES01741)
+            titulo=$id
+            UPDATE_URL='http://b0.ww.np.dl.playstation.net/tppkg/np/BCES01741/BCES01741_T79/bf4bc83dffc6af5e/EP9000-BCES01741_00-GOWABDPATCH00001-A0104-V0100-PE.pkg'
+            UPDATE_SHA1=cc51f216ed9f7c6feb69964c0645b7890a045418 ;;
+        BCES01742)
+            titulo=$id
+            UPDATE_URL='http://b0.ww.np.dl.playstation.net/tppkg/np/BCES01742/BCES01742_T77/5460f89ef2e9a406/EP9000-BCES01742_00-GOWABDPATCH00001-A0104-V0100-PE.pkg'
+            UPDATE_SHA1=0f458704282da0fc2db9ca6ccfda5cb13383a6f2 ;;
+        *) falha "este disco é de outra versão do God of War: Ascension ($id). O port funciona com a versão americana (BCUS98232) e com as europeias (BCES01741 e BCES01742)." ;;
     esac
+    [ "$titulo" != BCUS98232 ] && msg "disco: versão europeia ($titulo); o update 1.04 é o dela"
+    # numa cópia europeia extraída de um .7z, ARCHIVES e LOCALIZED_ARCHIVES vieram com um ponto no fim do nome
+    local n; for n in ARCHIVES LOCALIZED_ARCHIVES; do
+        [ ! -e "$d/PS3_GAME/USRDIR/$n" ] && [ -f "$d/PS3_GAME/USRDIR/$n." ] && mv "$d/PS3_GAME/USRDIR/$n." "$d/PS3_GAME/USRDIR/$n" && msg "$n estava com um ponto no fim do nome: renomeado"
+    done
     msg "disco: $d"
     mkdir -p "$R/vfs"
     rm -f "$R/vfs/PS3_GAME"; [ -e "$R/vfs/PS3_GAME" ] && mv "$R/vfs/PS3_GAME" "$R/vfs/PS3_GAME.antigo-$(date +%Y%m%d%H%M%S)"
     ln -s "$(cd "$d/PS3_GAME" && pwd)" "$R/vfs/PS3_GAME"   # o vfs do jogo vê o disco sem copiar 34 GB
     local pkg=$UPDATE
     if [ -z "$pkg" ]; then
-        pkg=$R/dl/BCUS98232_update_1.04.pkg
+        pkg=$R/dl/${titulo}_update_1.04.pkg
         if [ "$(sha1sum "$pkg" 2>/dev/null | cut -d' ' -f1)" != "$UPDATE_SHA1" ]; then
             msg 'baixando o update 1.04 oficial do servidor da PlayStation (235 MB)'
             # reports 1314/1315: se o http falha (403 em algumas redes), o mesmo arquivo por https; o certificado desse
@@ -306,12 +321,13 @@ jogo() {
     eng pkg.exe "$pkg" "$t"
     local upd; upd=$(dirname "$(find "$t" -name PARAM.SFO | head -1)")
     [ -f "$upd/USRDIR/GOWA.SELF" ] || falha "não achei USRDIR/GOWA.SELF no update ($upd)"
-    mkdir -p "$R/vfs/game/BCUS98232"; cp -r "$upd/." "$R/vfs/game/BCUS98232/"
+    grep -aq "$titulo" "$upd/PARAM.SFO" || falha "o update escolhido não é o da versão do disco ($titulo)"
+    mkdir -p "$R/vfs/game/$titulo"; cp -r "$upd/." "$R/vfs/game/$titulo/"
     mkdir -p "$R/jogo"; cp "$upd/USRDIR/EBOOT.BIN" "$upd/USRDIR/GOWA.SELF" "$R/jogo/"
     local ch=$R/dl/rpcs3_chaves
     ex "$PY" "$R/scripts/gpl/unself.py" "$R/jogo/EBOOT.BIN" "$R/jogo/EBOOT.elf" --vault "$ch" --baixar
     ex "$PY" "$R/scripts/gpl/unself.py" "$R/jogo/GOWA.SELF" "$R/jogo/GOWA.elf" --vault "$ch" --klic-de "$R/jogo/EBOOT.elf"
-    confere "$SHA_GOWA" "$R/jogo/GOWA.elf" || falha 'GOWA.elf diferente do esperado: o port só serve para BCUS98232 com o update 1.04'
+    confere "$SHA_GOWA" "$R/jogo/GOWA.elf" || falha 'GOWA.elf diferente do esperado: o port só serve para o update 1.04 das versões BCUS98232, BCES01741 e BCES01742'
 }
 etapa 2_jogo jogo
 

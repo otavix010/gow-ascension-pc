@@ -77,6 +77,24 @@ $FFMPEG_ESPELHO_SHA = 'f6affc440dd120d582e427bf2345b8c346bd1547851228cf2e7a75504
 # indica os seus (nada deles vem neste repositório)
 $UPDATE_URL = 'http://b0.ww.np.dl.playstation.net/tppkg/np/BCUS98232/BCUS98232_T76/5525fbb7b6b5456d/UP9000-BCUS98232_00-GOWABDPATCH00001-A0104-V0100-PE.pkg'
 $UPDATE_SHA1 = '5a94c17aa07cb5181a505d3429c88ea3d9f4e4d0'   # do arquivo inteiro
+# 18/11 (ordem do usuário): as versões do disco que o port aceita. O executável (GOWA.elf) é o MESMO nas três, byte a
+# byte; mudam os dados do disco, os idiomas e os dados do update 1.04 (TPPS.PSARC), então cada disco usa o update
+# dele. O disco diz qual é pelo TITLE_ID do PARAM.SFO (Conferir-Regiao); sem PARAM.SFO legível, vale a americana.
+# lista = nome e tamanho dos arquivos que o jogo lê do disco ('' = sem lista: não tivemos esse disco para conferir).
+$VERSOES = [ordered]@{
+    'BCUS98232' = @{ nome = 'americana'; url = $UPDATE_URL; sha1 = $UPDATE_SHA1; lista = 'dados\disco_bcus98232.tsv' }
+    'BCES01741' = @{ nome = 'europeia'; lista = 'dados\disco_bces01741.tsv'; sha1 = 'cc51f216ed9f7c6feb69964c0645b7890a045418'
+                     url = 'http://b0.ww.np.dl.playstation.net/tppkg/np/BCES01741/BCES01741_T79/bf4bc83dffc6af5e/EP9000-BCES01741_00-GOWABDPATCH00001-A0104-V0100-PE.pkg' }
+    'BCES01742' = @{ nome = 'europeia'; lista = ''; sha1 = '0f458704282da0fc2db9ca6ccfda5cb13383a6f2'
+                     url = 'http://b0.ww.np.dl.playstation.net/tppkg/np/BCES01742/BCES01742_T77/5460f89ef2e9a406/EP9000-BCES01742_00-GOWABDPATCH00001-A0104-V0100-PE.pkg' }
+}
+$TITULO = 'BCUS98232'   # a versão do disco em uso
+function Usar-Versao([string]$id) {
+    if (-not $VERSOES.Contains($id) -or $id -eq $script:TITULO) { return }
+    $script:TITULO = $id
+    $script:UPDATE_URL = $VERSOES[$id].url
+    $script:UPDATE_SHA1 = $VERSOES[$id].sha1
+}
 $PUP_LISTA = 'http://fus01.ps3.update.playstation.net/update/ps3/list/us/ps3-updatelist.txt'
 # libsre.prx decriptado: o mesmo nos firmwares 4.x até o 4.93; a etapa 3 usa endereços fixos dele
 $SHA_LIBSRE = '9e7ee6edc99b1d372686cf927b883b18f19ed4d32d1faf35e214cca4ae0737b6'
@@ -220,7 +238,7 @@ function Escolher-Pasta([string]$texto) {
 }
 $marcaJogo = Join-Path $OUT '2_jogo.ok'
 if (-not $Disco -and ($Refazer -or -not (Test-Path $marcaJogo))) {
-    $Disco = Escolher-Pasta 'Escolha a pasta com a cópia do DISCO do God of War: Ascension (BCUS98232) -- a que contém PS3_GAME'
+    $Disco = Escolher-Pasta 'Escolha a pasta com a cópia do DISCO do God of War: Ascension (americano BCUS98232 ou europeu BCES01741) -- a que contém PS3_GAME'
     if (-not $Disco) { throw 'sem a pasta do disco' }
 }
 # reports 1011/1016 (09/11): o disco escolhido numa unidade que não existe (pendrive ou HD externo desligado, letra
@@ -865,7 +883,7 @@ function Achar-PS3Game([string]$raiz) {
         $arqYml = Join-Path $raiz $yml
         if (-not (Test-Path -LiteralPath $arqYml -PathType Leaf)) { continue }
         foreach ($l in [IO.File]::ReadAllLines($arqYml)) {
-            if ($l -notmatch '^\s*BCUS98232\s*:\s*(.+?)\s*$') { continue }
+            if ($l -notmatch '^\s*(?:BCUS98232|BCES01741|BCES01742)\s*:\s*(.+?)\s*$') { continue }
             $dir = $Matches[1].Trim('"', "'") -replace '/', '\'
             if ($dir -and (Test-Path -LiteralPath (Join-Path $dir 'PS3_GAME\USRDIR') -PathType Container)) { return $dir.TrimEnd('\') }
         }
@@ -876,7 +894,7 @@ function Achar-PS3Game([string]$raiz) {
         if (Test-Path -LiteralPath (Join-Path $base 'PS3_GAME\USRDIR') -PathType Container) { return $base }
         $c = @(Get-ChildItem -LiteralPath $base -Directory -ErrorAction SilentlyContinue |
                Where-Object { Test-Path -LiteralPath (Join-Path $_.FullName 'PS3_GAME\USRDIR') -PathType Container })
-        $c = @($c | Sort-Object { if ($_.Name -match 'BCUS98232|Ascension') { 0 } else { 1 } })
+        $c = @($c | Sort-Object { if ($_.Name -match 'BCUS98232|BCES0174[12]|Ascension') { 0 } else { 1 } })
         if ($c) { return $c[0].FullName }
     }
     $p = Get-ChildItem -LiteralPath $raiz -Directory -Recurse -Depth 3 -Filter PS3_GAME -ErrorAction SilentlyContinue |
@@ -931,7 +949,7 @@ function Achar-Disco([string]$d) {
         $achou = $null
         if (Test-Path -LiteralPath $dx) { $achou = Achar-PS3Game $dx }
         # uma extração de outra região (ver Conferir-Regiao) não é reaproveitada: o arquivo escolhido agora é outro
-        if ($achou -and (Id-Disco (Join-Path $achou 'PS3_GAME')) -notin @('', 'BCUS98232')) {
+        if ($achou -and (Id-Disco (Join-Path $achou 'PS3_GAME')) -notin (@('') + @($VERSOES.Keys))) {
             Msg "a extração anterior em $dx é de outra versão do jogo; apagando para extrair o arquivo escolhido"
             SemExcecao { cmd /c "rmdir /s /q `"$dx`" 2>&1" } | Out-Null
             $achou = $null
@@ -1353,7 +1371,7 @@ function Motivo-Update([string]$pasta) {
         return 'a pasta não tem o update (PARAM.SFO e USRDIR\GOWA.SELF)'
     }
     $s = Ler-Sfo $sfo
-    if ($s['TITLE_ID'] -ne 'BCUS98232') { return "é de outro jogo ($($s['TITLE_ID']))" }
+    if ($s['TITLE_ID'] -ne $script:TITULO) { return "é de outra versão ou de outro jogo ($($s['TITLE_ID'])); o disco é o $($script:TITULO)" }
     if ($s['CATEGORY'] -ne 'GD') { return 'é o disco, não o update' }
     if ($s['APP_VER'] -ne '01.04') { return "é a versão $($s['APP_VER']); o port precisa da 01.04" }
     if (-not (Test-Path -LiteralPath (Join-Path $pasta 'USRDIR\GOWA.SELF') -PathType Leaf)) { return 'falta o USRDIR\GOWA.SELF' }
@@ -1369,7 +1387,8 @@ function Achar-Update([string]$p) {
     }
     if (-not (Test-Path -LiteralPath $p -PathType Container)) { return @{ motivo = 'não existe mais' } }
     $motivo = ''
-    foreach ($c in @($p, (Join-Path $p 'BCUS98232'), (Join-Path $p 'game\BCUS98232'), (Join-Path $p 'dev_hdd0\game\BCUS98232'),
+    $t = $script:TITULO
+    foreach ($c in @($p, (Join-Path $p $t), (Join-Path $p "game\$t"), (Join-Path $p "dev_hdd0\game\$t"),
                      (Split-Path -Parent $p))) {
         if (-not $c -or -not (Test-Path -LiteralPath $c -PathType Container)) { continue }
         $m = Motivo-Update $c
@@ -1378,7 +1397,7 @@ function Achar-Update([string]$p) {
     }
     # um .pkg do jogo solto na pasta, o do 1.04 antes (a versão é conferida depois de extraído)
     $pkg = Get-ChildItem -LiteralPath $p -Filter '*.pkg' -File -ErrorAction SilentlyContinue |
-           Where-Object { $_.Name -match 'BCUS98232' } | Sort-Object { $_.Name -notmatch '0104|1\.04' } | Select-Object -First 1
+           Where-Object { $_.Name -match $script:TITULO } | Sort-Object { $_.Name -notmatch '0104|1\.04' } | Select-Object -First 1
     if ($pkg) { return @{ caminho = $pkg.FullName } }
     @{ motivo = $motivo }
 }
@@ -1393,18 +1412,36 @@ function Id-Disco([string]$ps3game) {
 # incompleta ainda serve (o jogo tira o título do update).
 function Conferir-Regiao([string]$ps3game) {
     $id = Id-Disco $ps3game
-    if (-not $id -or $id -eq 'BCUS98232') { return }
+    if (-not $id) { return }
+    if ($VERSOES.Contains($id)) {
+        Usar-Versao $id
+        if ($id -ne 'BCUS98232') { Msg "disco: versão $($VERSOES[$id].nome) ($id); o update 1.04 e a conferência dos arquivos são os dela" }
+        return
+    }
     $reg = switch -regex ($id) { '^B[CL]ES' { 'europeia' } '^B[CL]AS' { 'asiática' } '^B[CL]J[SM]' { 'japonesa' } default { 'de outra região' } }
-    throw ("este disco é a versão $reg do God of War: Ascension ($id). O port só funciona com a versão americana, " +
-           'BCUS98232, a do update 1.04: os arquivos das outras versões são diferentes e o jogo fecha ao abrir. ' +
-           'No launcher, clique em "Escolher o disco de novo" e escolha uma cópia do disco americano.')
+    throw ("este disco é a versão $reg do God of War: Ascension ($id). O port funciona com a versão americana " +
+           '(BCUS98232) e com as europeias (BCES01741 e BCES01742): os arquivos das outras versões são diferentes ' +
+           'e o jogo fecha ao abrir. No launcher, clique em "Escolher o disco de novo" e escolha uma cópia de uma dessas versões.')
 }
 # Reports 62 e 64 (27/10): o jogo abria e fechava sozinho, sem erro. Faltava um arquivo do disco na cópia do jogador
 # (EXTRASCIN2.PSARC num, GAME.PSARC no outro: extração ou cópia interrompida), e o jogo sai quando não acha um deles.
 # A lista dados\disco_bcus98232.tsv tem o nome e o tamanho de cada arquivo que o jogo lê do disco americano (só isso,
 # nada do jogo); o que faltar ou vier com outro tamanho para a geração com a lista.
 function Conferir-Arquivos([string]$pg) {
-    $lista = Join-Path $R 'dados\disco_bcus98232.tsv'
+    # 18/11: numa cópia europeia extraída de um .7z, ARCHIVES e LOCALIZED_ARCHIVES vieram com um ponto no fim do nome
+    # ("ARCHIVES."), que o Windows não abre pelo caminho normal: o jogo não acharia a lista de pacotes. Volta ao nome certo.
+    foreach ($n in @('ARCHIVES', 'LOCALIZED_ARCHIVES')) {
+        $certo = Join-Path $pg "USRDIR\$n"
+        $comPonto = '\\?\' + [IO.Path]::GetFullPath($certo) + '.'
+        try {
+            if (-not (Test-Path -LiteralPath $certo) -and [IO.File]::Exists($comPonto)) {
+                [IO.File]::Move($comPonto, ('\\?\' + [IO.Path]::GetFullPath($certo)))
+                Msg "$n estava com um ponto no fim do nome (""$n.""): renomeado"
+            }
+        } catch { Msg "não deu para renomear ""$n."" ($($_.Exception.Message))" }
+    }
+    if (-not $VERSOES[$script:TITULO].lista) { return }
+    $lista = Join-Path $R $VERSOES[$script:TITULO].lista
     if (-not (Test-Path -LiteralPath $lista)) { return }
     $ruins = @()
     foreach ($linha in [IO.File]::ReadAllLines($lista)) {
@@ -1439,8 +1476,8 @@ function Conferir-Arquivos([string]$pg) {
     if ($ruins -and $gp -and $gp.Length -eq 4801906) {
         throw ("a sua cópia do jogo é uma versão reduzida (sem os idiomas, o multiplayer e os extras, e com o " +
                "GAME.PSARC modificado), e o port precisa do disco completo: $($ruins.Count) arquivo(s) faltando ou " +
-               "diferentes. Copiar de novo a mesma versão não resolve: use uma cópia completa do disco americano " +
-               '(BCUS98232) e, no launcher, clique em "Escolher o disco de novo".')
+               "diferentes. Copiar de novo a mesma versão não resolve: use uma cópia completa do disco (americano " +
+               'BCUS98232 ou europeu BCES01741) e, no launcher, clique em "Escolher o disco de novo".')
     }
     if ($ruins) {
         throw ("a sua cópia do jogo está incompleta: $($ruins.Count) arquivo(s) do disco faltando ou cortados: " +
@@ -1477,6 +1514,14 @@ if ($Disco -and (Test-Path (Join-Path $OUT '2_jogo.ok'))) {
     $pgReal = Pasta-Do-Disco $pg   # o modo direto (report 340): o disco fica no outro drive
     $quebrado = -not (Test-Path -LiteralPath (Join-Path $pgReal 'USRDIR') -PathType Container)
     $idLigado = if ($quebrado) { '' } else { Id-Disco $pgReal }
+    if ($idLigado -and $VERSOES.Contains($idLigado)) {
+        Usar-Versao $idLigado
+        # 18/11: o disco ligado é de uma versão e o update instalado é de outra (o jogador trocou de disco): refaz a etapa
+        if (-not (Test-Path -LiteralPath (Join-Path $R "vfs\game\$idLigado\USRDIR\GOWA.SELF"))) {
+            Msg "o update instalado não é o da versão do disco ($idLigado): a etapa do jogo será refeita"
+            Remove-Item -LiteralPath (Join-Path $OUT '2_jogo.ok') -Force -ErrorAction SilentlyContinue
+        }
+    }
     # reports 379 e 389 (29/10): com o jogo gerado, "Escolher o disco de novo" também religa quando a cópia ligada
     # tem arquivo faltando ou cortado, ou quando a pasta escolhida é outra (só com junção ou modo direto: o espelho
     # de links físicos e a cópia ficam, salvo arquivo ruim). Um arquivo compactado não entra na comparação (seria
@@ -1496,7 +1541,7 @@ if ($Disco -and (Test-Path (Join-Path $OUT '2_jogo.ok'))) {
             Msg "disco escolhido em outra pasta ($esc; o ligado era $atual)"
         }
     }
-    if ($quebrado -or $ruim -or $outro -or ($idLigado -and $idLigado -ne 'BCUS98232')) {
+    if ($quebrado -or $ruim -or $outro -or ($idLigado -and -not $VERSOES.Contains($idLigado))) {
         $Disco = Achar-Disco $Disco
         $alvo = Join-Path $Disco 'PS3_GAME'
         $real = Destino-Real $alvo
@@ -1523,7 +1568,7 @@ if ($Disco -and (Test-Path (Join-Path $OUT '2_jogo.ok'))) {
 # que esteja em vfs\fora_do_update volta para o lugar.
 function Oficial-Update([string]$n) { ($n -in @('EBOOT.BIN', 'GOWA.SELF', 'PATCHES', 'TLOUCOUNTDOWN.SELF')) -or ($n -like 'TPPS*.PSARC') }
 function Limpar-Update-Vfs {
-    $u = Join-Path $R 'vfs\game\BCUS98232\USRDIR'
+    $u = Join-Path $R "vfs\game\$($script:TITULO)\USRDIR"
     if (-not (Test-Path -LiteralPath $u -PathType Container)) { return }
     $fora = Join-Path $R 'vfs\fora_do_update'
     if (Test-Path -LiteralPath $fora -PathType Container) {
@@ -1577,7 +1622,7 @@ Etapa '2_jogo' {
         }
     }
     if ($Update -eq 'auto') {
-        $Update = Join-Path $R 'dl\BCUS98232_update_1.04.pkg'
+        $Update = Join-Path $R "dl\$($script:TITULO)_update_1.04.pkg"
         if (-not (Test-Path -LiteralPath $Update) -or (Get-FileHash -LiteralPath $Update -Algorithm SHA1).Hash.ToLower() -ne $UPDATE_SHA1) {
             Msg 'baixando o update 1.04 oficial do servidor da PlayStation (235 MB)'
             # report 1057 (10/11): o servidor da Sony fechou a conexão sem resposta (curl 52) mesmo depois das novas
@@ -1613,7 +1658,7 @@ Etapa '2_jogo' {
         $upd = Extrair-Pkg $Update
     }
     if (-not (Test-Path (Join-Path $upd 'USRDIR\GOWA.SELF'))) { throw "não achei USRDIR\GOWA.SELF no update ($upd)" }
-    $dst = Join-Path $vfs 'game\BCUS98232'
+    $dst = Join-Path $vfs "game\$($script:TITULO)"
     cmd /c "robocopy `"$upd`" `"$dst`" /E /NFL /NDL /NJH /NJS /NP >> `"$LOG`" 2>&1"
     if ($LASTEXITCODE -ge 8) { throw "falhou a cópia do update (robocopy $LASTEXITCODE)" }
     Limpar-Update-Vfs
@@ -1628,7 +1673,7 @@ Etapa '2_jogo' {
     Exec $LOG "python `"$un`" `"$jogo\EBOOT.BIN`" `"$jogo\EBOOT.elf`" --vault `"$ch`" $baixar"
     Exec $LOG "python `"$un`" `"$jogo\GOWA.SELF`" `"$jogo\GOWA.elf`" --vault `"$ch`" --klic-de `"$jogo\EBOOT.elf`""
     $h = (Get-FileHash "$jogo\GOWA.elf" -Algorithm SHA256).Hash.ToLower()
-    if ($h -ne $SHA_GOWA) { throw "GOWA.elf diferente do esperado (sha256 $h). O port só serve para BCUS98232 com o update 1.04." }
+    if ($h -ne $SHA_GOWA) { throw "GOWA.elf diferente do esperado (sha256 $h). O port só serve para o update 1.04 das versões BCUS98232, BCES01741 e BCES01742." }
 }
 
 # ---------------------------------------------------------------------------- firmware (libsre por LLE)

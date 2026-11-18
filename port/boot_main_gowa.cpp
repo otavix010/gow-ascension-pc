@@ -3205,7 +3205,8 @@ int main(int argc, char** argv)
          * cellGame's default: the SFO was not read, and that case goes on as before. */
         {
             const char* id = cellGame_get_title_id();
-            if (id && *id && strcmp(id, "BCUS98232") != 0 && strcmp(id, "BLES00000") != 0) {
+            /* 18/11: as europeias BCES01741 e BCES01742 rodam com o update 1.04 delas (o GOWA.elf do 01742 é idêntico ao americano, byte a byte) */
+            if (id && *id && strcmp(id, "BCUS98232") != 0 && strcmp(id, "BCES01741") != 0 && strcmp(id, "BCES01742") != 0 && strcmp(id, "BLES00000") != 0) {
                 const bool eu = !strncmp(id, "BCES", 4) || !strncmp(id, "BLES", 4);
                 const bool as = !strncmp(id, "BCAS", 4) || !strncmp(id, "BLAS", 4);
                 const bool jp = !strncmp(id, "BCJS", 4) || !strncmp(id, "BLJS", 4) || !strncmp(id, "BCJM", 4) || !strncmp(id, "BLJM", 4);
@@ -3234,6 +3235,18 @@ int main(int argc, char** argv)
          * tamanho e os 4 primeiros bytes dos .PSARC ("PSAR"). GOWA_SEM_CONFERIR_DISCO=1 pula. */
         if (!getenv("GOWA_SEM_CONFERIR_DISCO")) {
             char lista[MAX_PATH * 2] = {0};
+            /* 18/11: a lista é a da versão do disco (dados/disco_<id em minúsculas>.tsv; americana BCUS98232,
+             * europeia BCES01741); uma versão sem lista (BCES01742) abre sem a conferência */
+            char nome_lista[64] = "disco_bcus98232.tsv";
+            {
+                const char* idl = cellGame_get_title_id();
+                if (idl && strlen(idl) == 9 && strcmp(idl, "BLES00000") != 0) {
+                    char min[16]; size_t k = 0;
+                    for (; idl[k] && k < sizeof min - 1; k++) min[k] = (char)tolower((unsigned char)idl[k]);
+                    min[k] = 0;
+                    snprintf(nome_lista, sizeof nome_lista, "disco_%s.tsv", min);
+                }
+            }
             {
                 char exe[MAX_PATH]; const DWORD ne = GetModuleFileNameA(NULL, exe, MAX_PATH);
                 char cand[2][MAX_PATH * 2]; int nc = 0;
@@ -3241,9 +3254,9 @@ int main(int argc, char** argv)
                     char* s = strrchr(exe, '\\'); if (s) *s = 0;
                     s = strrchr(exe, '\\'); if (s) *s = 0;
                     s = strrchr(exe, '\\'); if (s) *s = 0;
-                    snprintf(cand[nc++], sizeof cand[0], "%s\\dados\\disco_bcus98232.tsv", exe);
+                    snprintf(cand[nc++], sizeof cand[0], "%s\\dados\\%s", exe, nome_lista);
                 }
-                snprintf(cand[nc++], sizeof cand[0], "%s/../dados/disco_bcus98232.tsv", ppu_vfs_root);
+                snprintf(cand[nc++], sizeof cand[0], "%s/../dados/%s", ppu_vfs_root, nome_lista);
                 for (int i = 0; i < nc && !lista[0]; i++)
                     if (GetFileAttributesA(cand[i]) != INVALID_FILE_ATTRIBUTES) snprintf(lista, sizeof lista, "%s", cand[i]);
             }
