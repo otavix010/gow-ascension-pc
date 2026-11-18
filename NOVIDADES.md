@@ -4,6 +4,20 @@ O Otavix Launcher mostra este arquivo na página "Novidades" do jogo. Cada atual
 "## <data> · <versão>" e o texto em português (### pt), inglês (### en) e, quando houver, espanhol (### es).
 As mais novas ficam em cima.
 
+## 18/11/2026 · teclado e mouse configuráveis · engine 0.13.0
+### pt
+- **Novo:** as teclas do teclado e os botões do mouse agora podem ser trocados na página Controles do jogo, no launcher (versão 1.0.100 ou mais nova). Cada botão do controle tem a sua tecla, e a legenda do F1 no jogo mostra o mapa que você escolheu.
+- **Novo:** o movimento do mouse funciona como o analógico direito (a esquiva), com sensibilidade ajustável. Depois da primeira tecla ou clique no jogo, o cursor fica preso na janela e escondido; Alt+Tab solta. O mouse pode ser desligado sem desligar o teclado.
+- As teclas padrão continuam as mesmas (W A S D, Espaço, botões do mouse, Q, F, C, R...), com I J K L a mais para o analógico direito. Ao atualizar, o jogo é só recompilado.
+### en
+- **New:** keyboard keys and mouse buttons can now be changed on the game's Controls page in the launcher (version 1.0.100 or newer). Each controller button has its own key, and the F1 legend in the game shows the map you chose.
+- **New:** the mouse's movement works as the right stick (the dodge), with adjustable sensitivity. After the first key or click in the game, the cursor is held inside the window and hidden; Alt+Tab releases it. The mouse can be turned off without turning the keyboard off.
+- The default keys stay the same (W A S D, Space, mouse buttons, Q, F, C, R...), plus I J K L for the right stick. When you update, the game is only recompiled.
+### es
+- **Nuevo:** las teclas del teclado y los botones del ratón ahora se pueden cambiar en la página Controles del juego, en el launcher (versión 1.0.100 o más nueva). Cada botón del mando tiene su tecla, y la leyenda de F1 en el juego muestra el mapa que elegiste.
+- **Nuevo:** el movimiento del ratón funciona como el stick derecho (la esquiva), con sensibilidad ajustable. Tras la primera tecla o clic en el juego, el cursor queda retenido en la ventana y oculto; Alt+Tab lo suelta. El ratón se puede desactivar sin desactivar el teclado.
+- Las teclas por defecto siguen iguales (W A S D, Espacio, botones del ratón, Q, F, C, R...), con I J K L además para el stick derecho. Al actualizar, el juego solo se recompila.
+
 ## 18/11/2026 · desempenho da versão compatível · engine 0.12.9
 ### pt
 - **Desempenho:** a versão compatível do jogo, usada em processadores sem AVX2 (como o Core i5/i7 de 2ª e 3ª geração), ficou mais rápida (report 1306). As contas de ponto flutuante das SPUs passavam por um caminho lento nessa versão; nas nossas medições o ganho foi de 40% a 70% de fps, conforme a cena. Ela continua mais lenta que a versão normal, e a versão normal não muda. Ao atualizar, o jogo é só recompilado, sem traduzir tudo de novo.
