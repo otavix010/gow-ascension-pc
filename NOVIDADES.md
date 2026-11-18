@@ -4,6 +4,14 @@ O Otavix Launcher mostra este arquivo na página "Novidades" do jogo. Cada atual
 "## <data> · <versão>" e o texto em português (### pt), inglês (### en) e, quando houver, espanhol (### es).
 As mais novas ficam em cima.
 
+## 18/11/2026 · correção da câmera no Templo de Delfos
+### pt
+- **Correção:** na ponte do Templo de Delfos, ao usar o Amuleto de Uroboros, a câmera podia ficar presa longe do Kratos e continuar assim pelo resto da fase (reports 1233, 1273, 1316 e 1322). Agora ela volta ao normal quando você solta o botão. Se o seu save já ficou com a câmera presa, volte a um save anterior a esse trecho.
+### en
+- **Fix:** on the bridge in the Temple of Delphi, using the Amulet of Uroboros could leave the camera stuck far from Kratos for the rest of the level (reports 1233, 1273, 1316 and 1322). It now returns to normal when you release the button. If your save already has the stuck camera, go back to a save from before that section.
+### es
+- **Corrección:** en el puente del Templo de Delfos, al usar el Amuleto de Uróboros, la cámara podía quedarse fija lejos de Kratos durante el resto del nivel (reportes 1233, 1273, 1316 y 1322). Ahora vuelve a la normalidad al soltar el botón. Si tu partida guardada ya quedó con la cámara fija, vuelve a una partida anterior a ese tramo.
+
 ## 17/11/2026 · correções · engine 0.12.8
 ### pt
 - **Correção:** o jogo podia congelar de vez, com a música continuando, e só voltava ao ser fechado e aberto de novo (reports 1238, 1239 e 1323). A causa: de vez em quando o leitor de comandos da placa de vídeo passava por um trecho antigo da fila, e uma instrução velha desse trecho mudava o destino dos avisos que a placa manda para destravar o trabalho do processador. Esse valor inválido agora é recusado e o jogo segue normalmente.

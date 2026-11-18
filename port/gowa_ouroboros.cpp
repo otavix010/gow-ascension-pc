@@ -59,9 +59,20 @@ extern "C" void gowa_ouroboros_posta(ppu_context* ctx)
     if (!obj) return;
     Estado* e = achar(obj, anim == AN_CANCELA);
     if (!e) return;
-    if (anim == AN_SOLTA_FORA && !trava && e->anim == AN_CANCELA && e->cancelou_na_trava) {
-        if (g_log) fprintf(stderr, "[ouroboros] q=%u obj=%08X saiu da trava fora do amuleto: posto 0x%08X antes de 0x%08X\n",
-                           cellGcm_flip_request_count(), obj, AN_ABAIXA, AN_SOLTA_FORA);
+    /* 17/11 (reports 1233, 1273, 1316 e 1322), primeira levantada da ponte: com o fps baixo o Kratos às vezes sai
+     * de "segurar" (0x9D8D30EE) direto para o amuleto cancelado (0xDB278381) no fim de um ciclo da animação, com o
+     * botão ainda apertado e sem trava nenhuma. Ao soltar o botão ele toca 0xFF486CA2 e o "abaixar" que o roteiro
+     * da câmera espera não vem: a câmera fica para sempre com os parâmetros do amuleto (10, 15, 45 em 0xA1783C) e o
+     * Kratos fora do quadro. Vale a mesma saída da segunda levantada: posta antes o 0xB6DC4C64. Só age com a
+     * câmera ainda no amuleto (segurar o botão sem alvo também passa pelo cancelado, mas com a câmera normal).
+     * Bancada (gravação a 30 Hz): sem a regra, 3 de 7 presas; com ela, 5 de 5 curadas. GOWA_OURO_CAMERA=0 desliga. */
+    static int s_cam = -1;
+    if (s_cam < 0) { const char* v = getenv("GOWA_OURO_CAMERA"); s_cam = !(v && v[0] == '0'); }
+    const int camera_no_amuleto = s_cam && vm_read32(0xA1783Cu) == 0x41200000u && vm_read32(0xA17840u) == 0x41700000u &&
+                                  vm_read32(0xA17844u) == 0x42340000u;
+    if (anim == AN_SOLTA_FORA && !trava && e->anim == AN_CANCELA && (e->cancelou_na_trava || camera_no_amuleto)) {
+        { static unsigned s_n; if (g_log || s_n++ < 8) fprintf(stderr, "[ouroboros] q=%u obj=%08X saiu do amuleto cancelado (trava %d, camera %d): posto 0x%08X antes de 0x%08X\n",
+                           cellGcm_flip_request_count(), obj, e->cancelou_na_trava, camera_no_amuleto, AN_ABAIXA, AN_SOLTA_FORA); }
         ppu_context salvo;
         memcpy(&salvo, ctx, sizeof salvo);
         ctx->gpr[4] = AN_ABAIXA;
