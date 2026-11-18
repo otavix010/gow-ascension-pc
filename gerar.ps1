@@ -200,6 +200,13 @@ function SemExcecao([scriptblock]$bloco) {
     try { & $bloco } finally { $ErrorActionPreference = $eap }
 }
 
+# os programas em execução cujo .exe está dentro de uma pasta (report 1336: quem segura a pasta da engine)
+function Processos-Na-Pasta([string]$pasta) {
+    $base = $pasta.TrimEnd('\') + '\'
+    @(Get-Process -ErrorAction SilentlyContinue | Where-Object {
+        $_.Id -ne $PID -and $_.Path -and $_.Path.StartsWith($base, [StringComparison]::OrdinalIgnoreCase) })
+}
+
 # ---------------------------------------------------------------------------- entradas (janelas se faltarem)
 function Escolher-Pasta([string]$texto) {
     try {
@@ -768,8 +775,25 @@ Etapa '1_engine' {
     }
     $idAntes = Id-Tradutor $ENG
     if (Test-Path -LiteralPath $ENG) {
-        SemExcecao { cmd /c "rmdir /s /q `"$ENG`" 2>&1" } | Out-Null
-        if (Test-Path -LiteralPath $ENG) { throw "não deu para trocar a pasta $ENG (algum arquivo dela está aberto?). Feche o jogo e gere de novo." }
+        # report 1336 (18/11): a troca parava na primeira tentativa, sem dizer quem segurava a pasta. Agora são três
+        # tentativas; um programa da própria engine que ficou aberto de uma geração anterior (engine\bin) é fechado, e
+        # se ainda assim não der, a mensagem diz quais programas estão abertos na pasta do jogo.
+        foreach ($t in 1..3) {
+            SemExcecao { cmd /c "rmdir /s /q `"$ENG`" 2>&1" } | Out-Null
+            if (-not (Test-Path -LiteralPath $ENG)) { break }
+            foreach ($p in @(Processos-Na-Pasta $ENG)) {
+                Msg "fechando $($p.Name).exe, um programa da engine que ficou aberto de uma geração anterior"
+                SemExcecao { Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue } | Out-Null
+            }
+            if ($t -lt 3) { Msg "a pasta da engine antiga ainda está em uso; tentando de novo em 3 s ($t de 3)"; Start-Sleep -Seconds 3 }
+        }
+        if (Test-Path -LiteralPath $ENG) {
+            $abertos = @(Processos-Na-Pasta $R | ForEach-Object { "$($_.Name).exe" } | Select-Object -Unique)
+            $quem = if ($abertos) { " Programas abertos nessa pasta agora: $($abertos -join ', ')." } else { '' }
+            throw ("não deu para trocar a pasta ${ENG}: algum arquivo dela está em uso.$quem Feche o jogo, feche janelas do " +
+                   'Explorador ou do terminal abertas nessa pasta, libere a pasta do jogo no antivírus e gere de novo. ' +
+                   'Se continuar, reinicie o computador e gere de novo.')
+        }
     }
     Move-Item -LiteralPath $novo -Destination $ENG
     [IO.File]::WriteAllText($marcaPacote, $ENGINE_SHA, (New-Object Text.UTF8Encoding $false))
