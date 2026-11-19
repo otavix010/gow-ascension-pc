@@ -4,6 +4,17 @@ O Otavix Launcher mostra este arquivo na página "Novidades" do jogo. Cada atual
 "## <data> · <versão>" e o texto em português (### pt), inglês (### en) e, quando houver, espanhol (### es).
 As mais novas ficam em cima.
 
+## 19/11/2026 · correções · engine 0.13.1
+### pt
+- **Correção:** a tela podia ficar preta enquanto durava um golpe com certos efeitos, como a arma do Hades (report 1366). Um efeito do jogo recria a sua área de desenho com um tamanho diferente a cada vez, e isso fazia o port descartar a imagem do quadro. Agora ele descarta só as versões antigas dessa mesma área.
+- **Gerador:** uma cópia do jogo criptografada (como as .iso da Redump) agora é recusada já na geração, com a explicação, em vez de o jogo abrir e fechar sozinho (report 1365).
+### en
+- **Fix:** the screen could go black while some attacks lasted, such as with the Hades weapon (report 1366). A game effect recreates its drawing area with a different size each time, and this made the port drop the frame's image. It now drops only the old versions of that same area.
+- **Generator:** an encrypted copy of the game (such as the Redump .iso files) is now refused during generation, with an explanation, instead of the game opening and closing by itself (report 1365).
+### es
+- **Corrección:** la pantalla podía quedarse negra mientras duraban algunos golpes, como con el arma de Hades (report 1366). Un efecto del juego recrea su área de dibujo con un tamaño distinto cada vez, y eso hacía que el port descartara la imagen del cuadro. Ahora descarta solo las versiones antiguas de esa misma área.
+- **Generador:** una copia cifrada del juego (como las .iso de Redump) ahora se rechaza ya en la generación, con la explicación, en lugar de que el juego se abra y se cierre solo (report 1365).
+
 ## 18/11/2026 · versão europeia do disco
 ### pt
 - **Novo:** o port agora aceita também o disco europeu do jogo (BCES01741), além do americano (BCUS98232); o outro disco europeu, BCES01742, também é reconhecido, mas ainda não foi testado por nós. O gerador reconhece a versão do disco sozinho e baixa o update 1.04 dela. Escolha o disco europeu no launcher e gere; para trocar de versão depois, use "Escolher o disco de novo".
