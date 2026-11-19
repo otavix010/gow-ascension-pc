@@ -1499,6 +1499,22 @@ function Conferir-Arquivos([string]$pg) {
                    'No launcher, clique em "Escolher o disco de novo" e escolha essa cópia.')
         }
     }
+    # Report 1365 (19/11): numa cópia criptografada o ARCHIVES saiu legível e passou acima, mas todos os .PSARC vinham
+    # cifrados: o jogo abria, a conferência dele recusava e ele fechava (código 5). Todo .PSARC começa com "PSAR";
+    # olhamos os 4 primeiros bytes do GAME.PSARC e do SHELL.PSARC (os dois que o jogo lê primeiro).
+    foreach ($nome in @('GAME.PSARC', 'SHELL.PSARC')) {
+        $f = Join-Path $pg "USRDIR\$nome"
+        if (-not (Test-Path -LiteralPath $f -PathType Leaf)) { continue }
+        $cab = New-Object byte[] 4; $lidos = 0
+        try { $fs = [IO.File]::OpenRead($f); try { $lidos = $fs.Read($cab, 0, 4) } finally { $fs.Dispose() } } catch { continue }
+        if ($lidos -eq 4 -and [Text.Encoding]::ASCII.GetString($cab) -ne 'PSAR') {
+            throw ('a sua cópia do jogo está criptografada: os arquivos estão lá, mas o conteúdo vem cifrado (é o caso ' +
+                   'das .iso da Redump, feitas para gravar em disco; o ' + $nome + ' não começa como um pacote do jogo), e ' +
+                   'com ela o jogo abre e fecha sozinho. O port precisa de uma cópia decriptada: a pasta com PS3_GAME ' +
+                   'tirada do seu PS3 ou do RPCS3, ou uma .iso decriptada. No launcher, clique em "Escolher o disco de ' +
+                   'novo" e escolha essa cópia.')
+        }
+    }
 }
 function Extrair-Pkg([string]$pkg) {
     $tmp = Join-Path $R 'out\update_pkg'

@@ -297,6 +297,12 @@ jogo() {
         *) falha "este disco é de outra versão do God of War: Ascension ($id). O port funciona com a versão americana (BCUS98232) e com as europeias (BCES01741 e BCES01742)." ;;
     esac
     [ "$titulo" != BCUS98232 ] && msg "disco: versão europeia ($titulo); o update 1.04 é o dela"
+    # report 1365: uma cópia criptografada (as .iso da Redump) tem os nomes e tamanhos certos, mas o conteúdo cifrado;
+    # todo .PSARC começa com "PSAR"
+    local pk; for pk in GAME.PSARC SHELL.PSARC; do
+        [ -f "$d/PS3_GAME/USRDIR/$pk" ] || continue
+        [ "$(head -c 4 "$d/PS3_GAME/USRDIR/$pk")" = PSAR ] || falha "a sua cópia do jogo está criptografada ($pk não começa como um pacote do jogo; é o caso das .iso da Redump). O port precisa de uma cópia decriptada: a pasta com PS3_GAME tirada do seu PS3 ou do RPCS3, ou uma .iso decriptada."
+    done
     # numa cópia europeia extraída de um .7z, ARCHIVES e LOCALIZED_ARCHIVES vieram com um ponto no fim do nome
     local n; for n in ARCHIVES LOCALIZED_ARCHIVES; do
         [ ! -e "$d/PS3_GAME/USRDIR/$n" ] && [ -f "$d/PS3_GAME/USRDIR/$n." ] && mv "$d/PS3_GAME/USRDIR/$n." "$d/PS3_GAME/USRDIR/$n" && msg "$n estava com um ponto no fim do nome: renomeado"
