@@ -4,6 +4,20 @@ O Otavix Launcher mostra este arquivo na página "Novidades" do jogo. Cada atual
 "## <data> · <versão>" e o texto em português (### pt), inglês (### en) e, quando houver, espanhol (### es).
 As mais novas ficam em cima.
 
+## 20/11/2026 · correções · engine 0.13.2
+### pt
+- **Correção:** a abertura da história e outros vídeos podiam ficar com a tela preta quando os arquivos de vídeo (avcodec-63.dll e outros) sumiam da pasta do jogo depois da geração, em geral apagados pelo antivírus (report 1381). Agora o jogo usa a cópia que o gerador guarda.
+- **Gerador:** um arquivo de firmware incompleto ou que não é o oficial, que tenha ficado na pasta do port, agora é apagado e baixado de novo, em vez de parar a geração sempre no mesmo ponto (report 1398). Quando o servidor de atualização do PS3 recusa o download, a mensagem explica como baixar o firmware pelo navegador e escolher o arquivo no launcher (report 1394).
+- **Linux:** o gerador agora acha também o Proton instalado pela distribuição (como o proton-cachyos) e o da Steam pelo Flatpak; sem nenhum Proton, ele avisa o que instalar em vez de gerar um jogo que não abre (reports 1387 e 1388).
+### en
+- **Fix:** the story intro and other videos could stay black when the video files (avcodec-63.dll and others) disappeared from the game folder after generation, usually deleted by the antivirus (report 1381). The game now uses the copy kept by the generator.
+- **Generator:** an incomplete or non-official firmware file left in the port folder is now deleted and downloaded again, instead of stopping the generation at the same point every time (report 1398). When the PS3 update server refuses the download, the message explains how to download the firmware in the browser and pick the file in the launcher (report 1394).
+- **Linux:** the generator now also finds the Proton installed by the distribution (such as proton-cachyos) and the one from Steam via Flatpak; with no Proton at all, it says what to install instead of generating a game that does not open (reports 1387 and 1388).
+### es
+- **Corrección:** la introducción de la historia y otros vídeos podían quedarse en negro cuando los archivos de vídeo (avcodec-63.dll y otros) desaparecían de la carpeta del juego después de la generación, en general borrados por el antivirus (report 1381). Ahora el juego usa la copia que guarda el generador.
+- **Generador:** un archivo de firmware incompleto o que no es el oficial, que haya quedado en la carpeta del port, ahora se borra y se descarga de nuevo, en lugar de detener la generación siempre en el mismo punto (report 1398). Cuando el servidor de actualizaciones de PS3 rechaza la descarga, el mensaje explica cómo descargar el firmware desde el navegador y elegir el archivo en el launcher (report 1394).
+- **Linux:** el generador ahora encuentra también el Proton instalado por la distribución (como proton-cachyos) y el de Steam por Flatpak; sin ningún Proton, avisa qué instalar en lugar de generar un juego que no abre (reports 1387 y 1388).
+
 ## 19/11/2026 · correções · engine 0.13.1
 ### pt
 - **Correção:** a tela podia ficar preta enquanto durava um golpe com certos efeitos, como a arma do Hades (report 1366). Um efeito do jogo recria a sua área de desenho com um tamanho diferente a cada vez, e isso fazia o port descartar a imagem do quadro. Agora ele descarta só as versões antigas dessa mesma área.

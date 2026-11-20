@@ -101,10 +101,10 @@ $SHA_LIBSRE = '9e7ee6edc99b1d372686cf927b883b18f19ed4d32d1faf35e214cca4ae0737b6'
 # A Otavix Engine PS3 (06/11): a engine vem compilada num pacote (o runtime, os cabeçalhos que o código gerado inclui
 # e o tradutor do PPU e das SPUs em .exe), que vai para engine\. O código do jogo continua sendo traduzido e compilado
 # aqui, a partir do disco do jogador, pelo tradutor do pacote. -Engine <zip> usa um pacote local no lugar do baixado.
-$ENGINE_VERSAO = '0.13.1'
+$ENGINE_VERSAO = '0.13.2'
 $ENGINE_NOME = "otavix-engine-ps3-$ENGINE_VERSAO"
 $ENGINE_URLS = @("https://otavix-launcher.otavix-launcher-servidor.workers.dev/v1/arquivos/engine/ps3/$ENGINE_NOME.zip")
-$ENGINE_SHA = 'ae90ea3f871092299c6bec64d5898c2b6ac3fbaaae0fb81ff08f3481237aa11a'
+$ENGINE_SHA = '3022841db37ec59c13fd2878e369a8572e54b0332e0dcacfc6f37d6baecd1616'
 $ENG = Join-Path $R 'engine'
 $ENGINE_BIN = Join-Path $ENG 'bin'
 # o tradutor das SPUs para os scripts de tradução do port (scripts\otx_ponte.py)
@@ -1704,7 +1704,13 @@ Etapa '3_firmware' {
         $pup = Join-Path $R 'dl\PS3UPDAT.PUP'
         if (-not (Test-Path -LiteralPath $pup)) {
             $lista = Join-Path $R 'dl\ps3-updatelist.txt'
-            Baixar $PUP_LISTA $lista | Out-Null
+            # report 1394 (20/11): o servidor de atualização do PS3 respondeu 403 para um jogador; a mensagem diz o que fazer
+            try { Baixar $PUP_LISTA $lista | Out-Null }
+            catch {
+                throw ("o servidor de atualização do PS3 não deixou baixar o firmware neste PC ($(($_.Exception.Message -split "`n")[0])). " +
+                       "Baixe o PS3UPDAT.PUP pelo navegador, no site da PlayStation (PS3 > atualização do software do sistema), " +
+                       "escolha esse arquivo no campo Firmware do launcher e gere de novo.")
+            }
             $url = [regex]::Match((Get-Content $lista -Raw), 'CDN=([^;\s]+/PS3UPDAT\.PUP)').Groups[1].Value
             if (-not $url) { throw "a lista de atualização do PS3 não trouxe o PS3UPDAT.PUP ($PUP_LISTA)" }
             Msg "baixando o firmware oficial do PS3 (PS3UPDAT.PUP, ~200 MB) de $url"
@@ -1737,7 +1743,18 @@ Etapa '3_firmware' {
         try { Libsre-De $Firmware; $feito = $true }
         catch { Msg "o firmware escolhido não serviu ($(($_.Exception.Message -split "`n")[0])); usando o firmware oficial do PS3" }
     }
-    if (-not $feito) { Libsre-De (Pup-Oficial) }
+    if (-not $feito) {
+        # report 1398 (20/11): um dl\PS3UPDAT.PUP que não era o firmware oficial inteiro ("não achei o libsre.sprx no
+        # PUP") era reaproveitado a cada geração; ele é apagado e o oficial baixado de novo, uma vez
+        try { Libsre-De (Pup-Oficial) }
+        catch {
+            $velho = Join-Path $R 'dl\PS3UPDAT.PUP'
+            if (-not (Test-Path -LiteralPath $velho)) { throw }
+            Msg "o PS3UPDAT.PUP baixado antes não serviu ($(($_.Exception.Message -split "`n")[0])); baixando de novo"
+            Remove-Item -LiteralPath $velho -Force
+            Libsre-De (Pup-Oficial)
+        }
+    }
     Push-Location $ENG
     try {
         Exec $LOG "$ENGINE_BIN\ppu_prx.exe `"$fw\libsre.prx`" --base 0x30000000 --output `"$lle`""

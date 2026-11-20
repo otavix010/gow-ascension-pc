@@ -92,11 +92,20 @@ achar_wine() {
     for w in $(ls -dt "$HOME"/.local/share/Steam/compatibilitytools.d/*/files/bin/wine \
                       "$HOME"/.steam/steam/compatibilitytools.d/*/files/bin/wine \
                       "$HOME"/.local/share/Steam/steamapps/common/Proton*/files/bin/wine \
-                      "$HOME"/.steam/steam/steamapps/common/Proton*/files/bin/wine 2>/dev/null); do
+                      "$HOME"/.steam/steam/steamapps/common/Proton*/files/bin/wine \
+                      "$HOME"/.var/app/com.valvesoftware.Steam/.local/share/Steam/compatibilitytools.d/*/files/bin/wine \
+                      "$HOME"/.var/app/com.valvesoftware.Steam/.local/share/Steam/steamapps/common/Proton*/files/bin/wine \
+                      /usr/share/steam/compatibilitytools.d/*/files/bin/wine 2>/dev/null); do
         [ -x "$w" ] && { echo "$w"; return; }
     done
+    # reports 1387/1388 (20/11, CachyOS): sem Proton achado, o wine do sistema gerava o jogo, mas o D3D12 dele não abre a
+    # engine (D3D12CreateDevice falhou; numa outra vez "free(): invalid size"). Ele ainda serve para os programas da
+    # geração; o jogar (etapa 7) para e explica. O proton-cachyos da distro (/usr/share/steam/compatibilitytools.d) e a
+    # Steam pelo Flatpak agora entram na busca acima.
     command -v wine
 }
+# o wine achado é de um Proton (tem o script proton três pastas acima)
+wine_do_proton() { [ -x "$(dirname "$(dirname "$(dirname "$1")")")/proton" ]; }
 ferramentas() {
     mkdir -p "$F"; cd "$F" || falha "não deu para criar $F"
     [ -x llvm/bin/clang-cl ] || { msg 'baixando o LLVM 19.1.5 (1,5 GB)'; baixar https://github.com/llvm/llvm-project/releases/download/llvmorg-19.1.5/LLVM-19.1.5-Linux-X64.tar.xz llvm.tar.xz && mkdir -p llvm && tar -C llvm --strip-components=1 -xf llvm.tar.xz && rm llvm.tar.xz || falha 'o LLVM não baixou'; }
@@ -344,13 +353,23 @@ firmware() {
     if [ -z "$pup" ]; then
         pup=$R/dl/PS3UPDAT.PUP
         if [ ! -f "$pup" ]; then
-            baixar "$PUP_LISTA" "$R/dl/ps3-updatelist.txt" || falha 'a lista de atualização do PS3 não baixou'
+            baixar "$PUP_LISTA" "$R/dl/ps3-updatelist.txt" || falha 'o servidor de atualização do PS3 não deixou baixar o firmware (report 1394): baixe o PS3UPDAT.PUP pelo navegador, no site da PlayStation, e passe com --firmware <arquivo>'
             local url; url=$(grep -o 'CDN=[^;[:space:]]*/PS3UPDAT\.PUP' "$R/dl/ps3-updatelist.txt" | head -1 | cut -d= -f2)
             [ -n "$url" ] || falha 'a lista de atualização do PS3 não trouxe o PS3UPDAT.PUP'
             msg "baixando o firmware oficial do PS3 (~200 MB)"; baixar "$url" "$pup" || falha 'o firmware não baixou'
         fi
     fi
-    ex "$PY" "$R/scripts/gpl/pup_libsre.py" "$pup" "$fw/libsre.sprx" --vault "$ch" --baixar
+    # report 1398: um PUP que ficou de um download que não terminou (o baixar retoma no próprio arquivo) e não serve é
+    # apagado e baixado de novo, uma vez
+    if ! "$PY" "$R/scripts/gpl/pup_libsre.py" "$pup" "$fw/libsre.sprx" --vault "$ch" --baixar >> "$LOG" 2>&1; then
+        [ -z "$FIRMWARE" ] || falha "o firmware $pup não serviu (veja $LOG)"
+        msg "o PS3UPDAT.PUP baixado antes não serviu; baixando de novo"; rm -f "$pup"
+        baixar "$PUP_LISTA" "$R/dl/ps3-updatelist.txt" || falha 'a lista de atualização do PS3 não baixou'
+        local url2; url2=$(grep -o 'CDN=[^;[:space:]]*/PS3UPDAT\.PUP' "$R/dl/ps3-updatelist.txt" | head -1 | cut -d= -f2)
+        [ -n "$url2" ] || falha 'a lista de atualização do PS3 não trouxe o PS3UPDAT.PUP'
+        baixar "$url2" "$pup" || falha 'o firmware não baixou'
+        ex "$PY" "$R/scripts/gpl/pup_libsre.py" "$pup" "$fw/libsre.sprx" --vault "$ch" --baixar
+    fi
     ex "$PY" "$R/scripts/gpl/unself.py" "$fw/libsre.sprx" "$fw/libsre.prx" --vault "$ch" --baixar
     confere "$SHA_LIBSRE" "$fw/libsre.prx" || falha 'libsre.prx diferente do esperado'
     eng ppu_prx.exe "$fw/libsre.prx" --base 0x30000000 --output "$lle"
@@ -455,6 +474,9 @@ msg "versão da build: portátil (AVX2), pelo Proton"
 # ---------------------------------------------------------------------------- jogar (pelo Proton)
 jogar() {
     local b=$R/port/build_v3rz
+    if [ -z "${OTX_WINE:-}" ] && ! wine_do_proton "$WINE"; then
+        falha "o jogo precisa de um Proton (ele traz o vkd3d-proton, o D3D12 que a engine usa) e só achei o wine do sistema ($WINE). Instale na Steam o \"Proton Experimental\" ou o GE-Proton (no CachyOS também serve o pacote proton-cachyos), abra a Steam uma vez e gere de novo. (Quem já tem um wine com o vkd3d-proton pode apontar OTX_WINE para ele.)"
+    fi
     cp "$R/dl/ffmpeg9/$FFMPEG_NOME/bin/"*.dll "$b/"
     # o compilador de shaders do wine (vkd3d) falha em alguns shaders do jogo; o da Microsoft (redistribuível) vai
     # junto da engine quando houver: engine/bin/d3dcompiler_47.dll
@@ -495,6 +517,8 @@ cd "\$R/port/build_v3rz" && exec "\$W" gowa.exe "\$(z "\$R/jogo/GOWA.elf")" > "\
 EOF
     chmod +x "$R/jogar.sh"
 }
+# o jogar.sh guarda o wine com que foi feito: com outro wine achado agora (um Proton instalado depois), ele se refaz
+grep -qF "W=\${OTX_WINE:-$WINE}" "$R/jogar.sh" 2>/dev/null || rm -f "$OUT/7_jogar.ok"
 etapa 7_jogar jogar
 
 # ---------------------------------------------------------------------------- shaders pré-compilados (opcional)
