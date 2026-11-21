@@ -4,6 +4,14 @@ O Otavix Launcher mostra este arquivo na página "Novidades" do jogo. Cada atual
 "## <data> · <versão>" e o texto em português (### pt), inglês (### en) e, quando houver, espanhol (### es).
 As mais novas ficam em cima.
 
+## 21/11/2026 · modo leve automático · engine 0.13.3
+### pt
+- **Novo:** modo leve. Ele tira as sombras dinâmicas e o desfoque de movimento, os efeitos que mais pesam, e numa gráfica integrada a luta fica cerca de 20% mais rápida (medido num portátil a 15 W: média de 24 para 29 fps, e a queda mínima de 18 para 24). Em Automático, o padrão, ele liga sozinho quando a placa de vídeo é integrada (gráficas Intel, processadores AMD com gráfico Radeon, portáteis como o Steam Deck e o Legion Go) e fica desligado nas placas dedicadas. Dá para escolher Ligado ou Desligado na página Vídeo do launcher.
+### en
+- **New:** light mode. It removes dynamic shadows and motion blur, the heaviest effects, and on integrated graphics combat runs about 20% faster (measured on a 15 W handheld: average from 24 to 29 fps, and the minimum dip from 18 to 24). On Automatic, the default, it turns on by itself when the graphics are integrated (Intel graphics, AMD processors with Radeon graphics, handhelds such as the Steam Deck and Legion Go) and stays off on dedicated graphics cards. You can choose On or Off on the launcher's Video page.
+### es
+- **Nuevo:** modo ligero. Quita las sombras dinámicas y el desenfoque de movimiento, los efectos que más pesan, y con una gráfica integrada el combate va cerca de un 20% más rápido (medido en un portátil a 15 W: promedio de 24 a 29 fps, y la caída mínima de 18 a 24). En Automático, el predeterminado, se activa solo cuando la gráfica es integrada (gráficas Intel, procesadores AMD con gráfica Radeon, portátiles como Steam Deck y Legion Go) y queda desactivado con tarjetas gráficas dedicadas. Se puede elegir Activado o Desactivado en la página Vídeo del launcher.
+
 ## 21/11/2026 · gerador
 ### pt
 - **Gerador:** com um Visual Studio 2022 antigo, o compilador (clang anterior à versão 19) caía no meio da compilação do jogo ("clang frontend command failed due to signal", report 1399). Agora o gerador confere a versão antes de compilar e, se for antiga, pede ao instalador do Visual Studio para atualizar o Build Tools (o Windows pede permissão); se não der, explica como atualizar.

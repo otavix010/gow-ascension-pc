@@ -22,6 +22,11 @@
  *   GOWA_DANO_CAUSADO=<f>|mata  multiplica o dano que o Kratos causa (2, 5) ou mata com um golpe
  *   GOWA_ORBES_MAX=1, GOWA_MAGIA_INF=1, GOWA_ITENS_INF=1, GOWA_FURIA_INF=1  medidores sempre cheios
  *   GOWA_PULO_INF=1      pulos no ar sem limite
+ *   GOWA_MODO_LEVE=auto|1|0  modo leve: sem sombras dinâmicas e sem motion blur (21/11, PCs fracos). auto (o padrão,
+ *                        também sem a variável) liga sozinho quando a GPU é integrada (memória unificada com a CPU:
+ *                        gráficas Intel, APUs AMD, a Legion); 1 liga sempre; 0 nunca. Medido na Legion a 15 W, luta
+ *                        no Cyn275: sem sombras +24% de fps (mínimo 17,8 -> 24), sem motion blur +8%, sem
+ *                        profundidade de campo ~0 (fica de fora). As opções GOWA_SEM_* valem por cima.
  */
 #include "ppu_recomp.h"
 #include "vm.h"
@@ -32,6 +37,8 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+
+extern "C" int rsx_gpu_integrada(void);   /* engine: 1 integrada, 0 dedicada, -1 ainda não se sabe */
 
 namespace {
 
@@ -46,6 +53,7 @@ constexpr uint32_t MLAA_PALAVRA = 0x83CE74u;
 
 struct Opcoes {
     int sem_mlaa, sem_dof, sem_mblur, sem_sombras;
+    int leve_pendente;                          /* modo leve automático esperando a engine dizer se a GPU é integrada */
     float dano_recebido;                        /* 1 = normal */
     float dano_causado;                         /* 1 = normal */
     int mata, orbes, magia, itens, furia, pulo;
@@ -70,10 +78,25 @@ float escala(const char* n, float padrao, float lo, float hi)
     return v < lo ? lo : v > hi ? hi : v;
 }
 
+void aplica_leve(Opcoes& o, const char* por)
+{
+    o.sem_sombras = 1;
+    o.sem_mblur = 1;
+    fprintf(stderr, "[opcoes] modo leve (%s): sem sombras dinâmicas e sem motion blur\n", por);
+}
+
 const Opcoes& opcoes()
 {
     static Opcoes o;
     static int lido = 0;
+    if (lido && o.leve_pendente) {
+        const int g = rsx_gpu_integrada();
+        if (g >= 0) {
+            o.leve_pendente = 0;
+            if (g == 1) aplica_leve(o, "automático: GPU integrada");
+            else fprintf(stderr, "[opcoes] modo leve automático: placa dedicada, não liga\n");
+        }
+    }
     if (!lido) {
         o.sem_mlaa = liga("GOWA_SEM_MLAA");
         o.sem_dof = liga("GOWA_SEM_DOF");
@@ -88,6 +111,9 @@ const Opcoes& opcoes()
         o.itens = liga("GOWA_ITENS_INF");
         o.furia = liga("GOWA_FURIA_INF");
         o.pulo = liga("GOWA_PULO_INF");
+        const char* leve = getenv("GOWA_MODO_LEVE");
+        if (leve && (*leve == '1' || !strcmp(leve, "ligado") || !strcmp(leve, "on"))) aplica_leve(o, "ligado");
+        else if (!(leve && (*leve == '0' || !strcmp(leve, "desligado") || !strcmp(leve, "off")))) o.leve_pendente = 1;
         lido = 1;
         fprintf(stderr, "[opcoes] sem: mlaa=%d dof=%d mblur=%d sombras=%d | dano recebido x%.2f, causado %s%.2f | "
                         "orbes=%d magia=%d itens=%d furia=%d pulo=%d\n",
