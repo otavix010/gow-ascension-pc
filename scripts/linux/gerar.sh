@@ -28,7 +28,9 @@ done
 SHA_GOWA=813723ac4e091d79ea20ad2500b2e86cb0fd25f3736541431921273e7a77246d
 SHA_LIBSRE=9e7ee6edc99b1d372686cf927b883b18f19ed4d32d1faf35e214cca4ae0737b6
 UPDATE_URL='http://b0.ww.np.dl.playstation.net/tppkg/np/BCUS98232/BCUS98232_T76/5525fbb7b6b5456d/UP9000-BCUS98232_00-GOWABDPATCH00001-A0104-V0100-PE.pkg'
-PUP_LISTA='http://fus01.ps3.update.playstation.net/update/ps3/list/us/ps3-updatelist.txt'
+# report 1394: o servidor de atualização dos EUA pode recusar (403) conforme o país; as outras regiões servem o mesmo
+# firmware (o libsre que sai dele é conferido pelo sha256 de qualquer jeito)
+PUP_REGIOES='us eu uk jp au'
 SERVIDOR='https://otavix-launcher.otavix-launcher-servidor.workers.dev/v1/arquivos'
 ENGINE_VERSAO=$(sed -n "s/^\$ENGINE_VERSAO = '\(.*\)'.*/\1/p" "$R/gerar.ps1")
 ENGINE_SHA=$(sed -n "s/^\$ENGINE_SHA = '\(.*\)'.*/\1/p" "$R/gerar.ps1")
@@ -347,16 +349,29 @@ jogo() {
 etapa 2_jogo jogo
 
 # ---------------------------------------------------------------------------- firmware (libsre por LLE)
+# report 1394: baixa o PS3UPDAT.PUP oficial pela lista de atualização de uma região; a que recusar passa para a próxima
+pup_oficial() {
+    local reg url lista=$R/dl/ps3-updatelist.txt
+    for reg in $PUP_REGIOES; do
+        rm -f "$lista"   # o baixar retoma no arquivo que existe: a lista de outra região ficaria no lugar
+        if baixar "http://f${reg}01.ps3.update.playstation.net/update/ps3/list/$reg/ps3-updatelist.txt" "$lista"; then
+            url=$(grep -o 'CDN=[^;[:space:]]*/PS3UPDAT\.PUP' "$lista" | head -1 | cut -d= -f2)
+            if [ -n "$url" ]; then
+                msg "baixando o firmware oficial do PS3 (~200 MB) de $url"
+                baixar "$url" "$1" && return 0
+            fi
+        fi
+        rm -f "$1"; msg "o servidor de atualização do PS3 ($reg) não serviu; tentando outra região"
+    done
+    falha 'o servidor de atualização do PS3 não deixou baixar o firmware (report 1394): baixe o PS3UPDAT.PUP pelo navegador, no site da PlayStation, e passe com --firmware <arquivo>'
+}
 firmware() {
     local fw=$R/fw lle=$R/fw/lle ch=$R/dl/rpcs3_chaves pup=$FIRMWARE
     mkdir -p "$lle"
     if [ -z "$pup" ]; then
         pup=$R/dl/PS3UPDAT.PUP
         if [ ! -f "$pup" ]; then
-            baixar "$PUP_LISTA" "$R/dl/ps3-updatelist.txt" || falha 'o servidor de atualização do PS3 não deixou baixar o firmware (report 1394): baixe o PS3UPDAT.PUP pelo navegador, no site da PlayStation, e passe com --firmware <arquivo>'
-            local url; url=$(grep -o 'CDN=[^;[:space:]]*/PS3UPDAT\.PUP' "$R/dl/ps3-updatelist.txt" | head -1 | cut -d= -f2)
-            [ -n "$url" ] || falha 'a lista de atualização do PS3 não trouxe o PS3UPDAT.PUP'
-            msg "baixando o firmware oficial do PS3 (~200 MB)"; baixar "$url" "$pup" || falha 'o firmware não baixou'
+            pup_oficial "$pup"
         fi
     fi
     # report 1398: um PUP que ficou de um download que não terminou (o baixar retoma no próprio arquivo) e não serve é
@@ -364,10 +379,7 @@ firmware() {
     if ! "$PY" "$R/scripts/gpl/pup_libsre.py" "$pup" "$fw/libsre.sprx" --vault "$ch" --baixar >> "$LOG" 2>&1; then
         [ -z "$FIRMWARE" ] || falha "o firmware $pup não serviu (veja $LOG)"
         msg "o PS3UPDAT.PUP baixado antes não serviu; baixando de novo"; rm -f "$pup"
-        baixar "$PUP_LISTA" "$R/dl/ps3-updatelist.txt" || falha 'a lista de atualização do PS3 não baixou'
-        local url2; url2=$(grep -o 'CDN=[^;[:space:]]*/PS3UPDAT\.PUP' "$R/dl/ps3-updatelist.txt" | head -1 | cut -d= -f2)
-        [ -n "$url2" ] || falha 'a lista de atualização do PS3 não trouxe o PS3UPDAT.PUP'
-        baixar "$url2" "$pup" || falha 'o firmware não baixou'
+        pup_oficial "$pup"
         ex "$PY" "$R/scripts/gpl/pup_libsre.py" "$pup" "$fw/libsre.sprx" --vault "$ch" --baixar
     fi
     ex "$PY" "$R/scripts/gpl/unself.py" "$fw/libsre.sprx" "$fw/libsre.prx" --vault "$ch" --baixar

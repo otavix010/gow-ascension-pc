@@ -95,7 +95,10 @@ function Usar-Versao([string]$id) {
     $script:UPDATE_URL = $VERSOES[$id].url
     $script:UPDATE_SHA1 = $VERSOES[$id].sha1
 }
-$PUP_LISTA = 'http://fus01.ps3.update.playstation.net/update/ps3/list/us/ps3-updatelist.txt'
+# report 1394: o servidor de atualização dos EUA pode recusar (403) conforme o país; as outras regiões servem o mesmo
+# firmware (o libsre que sai dele é conferido pelo sha256 de qualquer jeito)
+$PUP_REGIOES = 'us', 'eu', 'uk', 'jp', 'au'
+function Pup-Lista([string]$reg) { "http://f${reg}01.ps3.update.playstation.net/update/ps3/list/$reg/ps3-updatelist.txt" }
 # libsre.prx decriptado: o mesmo nos firmwares 4.x até o 4.93; a etapa 3 usa endereços fixos dele
 $SHA_LIBSRE = '9e7ee6edc99b1d372686cf927b883b18f19ed4d32d1faf35e214cca4ae0737b6'
 # A Otavix Engine PS3 (06/11): a engine vem compilada num pacote (o runtime, os cabeçalhos que o código gerado inclui
@@ -1704,17 +1707,28 @@ Etapa '3_firmware' {
         $pup = Join-Path $R 'dl\PS3UPDAT.PUP'
         if (-not (Test-Path -LiteralPath $pup)) {
             $lista = Join-Path $R 'dl\ps3-updatelist.txt'
-            # report 1394 (20/11): o servidor de atualização do PS3 respondeu 403 para um jogador; a mensagem diz o que fazer
-            try { Baixar $PUP_LISTA $lista | Out-Null }
-            catch {
-                throw ("o servidor de atualização do PS3 não deixou baixar o firmware neste PC ($(($_.Exception.Message -split "`n")[0])). " +
+            # report 1394 (20/11): o servidor de atualização do PS3 respondeu 403 para um jogador; tenta as outras regiões
+            # e, se nenhuma servir, a mensagem diz o que fazer
+            $erro = $null
+            foreach ($reg in $PUP_REGIOES) {
+                try {
+                    Baixar (Pup-Lista $reg) $lista | Out-Null
+                    $url = [regex]::Match((Get-Content $lista -Raw), 'CDN=([^;\s]+/PS3UPDAT\.PUP)').Groups[1].Value
+                    if (-not $url) { throw "a lista de atualização do PS3 ($reg) não trouxe o PS3UPDAT.PUP" }
+                    Msg "baixando o firmware oficial do PS3 (PS3UPDAT.PUP, ~200 MB) de $url"
+                    Baixar $url $pup | Out-Null
+                    $erro = $null; break
+                } catch {
+                    $erro = ($_.Exception.Message -split "`n")[0]
+                    Remove-Item -LiteralPath $pup -Force -ErrorAction SilentlyContinue
+                    Msg "o servidor de atualização do PS3 ($reg) não serviu ($erro); tentando outra região"
+                }
+            }
+            if ($erro) {
+                throw ("o servidor de atualização do PS3 não deixou baixar o firmware neste PC ($erro). " +
                        "Baixe o PS3UPDAT.PUP pelo navegador, no site da PlayStation (PS3 > atualização do software do sistema), " +
                        "escolha esse arquivo no campo Firmware do launcher e gere de novo.")
             }
-            $url = [regex]::Match((Get-Content $lista -Raw), 'CDN=([^;\s]+/PS3UPDAT\.PUP)').Groups[1].Value
-            if (-not $url) { throw "a lista de atualização do PS3 não trouxe o PS3UPDAT.PUP ($PUP_LISTA)" }
-            Msg "baixando o firmware oficial do PS3 (PS3UPDAT.PUP, ~200 MB) de $url"
-            Baixar $url $pup | Out-Null
         }
         $pup
     }

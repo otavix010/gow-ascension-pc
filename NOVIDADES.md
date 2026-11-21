@@ -4,6 +4,14 @@ O Otavix Launcher mostra este arquivo na página "Novidades" do jogo. Cada atual
 "## <data> · <versão>" e o texto em português (### pt), inglês (### en) e, quando houver, espanhol (### es).
 As mais novas ficam em cima.
 
+## 21/11/2026 · gerador: firmware por outras regiões
+### pt
+- **Gerador:** quando o servidor de atualização do PS3 dos EUA recusa o download do firmware (erro 403, report 1394), o gerador agora baixa o mesmo firmware oficial pelos servidores da Europa, do Reino Unido, do Japão ou da Austrália, nessa ordem. Só se todos recusarem aparece a mensagem para baixar pelo navegador. Vale para Windows e Linux.
+### en
+- **Generator:** when the US PS3 update server refuses the firmware download (error 403, report 1394), the generator now downloads the same official firmware from the European, UK, Japanese or Australian servers, in that order. The message about downloading it in the browser only appears if all of them refuse. Applies to Windows and Linux.
+### es
+- **Generador:** cuando el servidor de actualización de PS3 de EE. UU. rechaza la descarga del firmware (error 403, report 1394), el generador ahora descarga el mismo firmware oficial desde los servidores de Europa, Reino Unido, Japón o Australia, en ese orden. El mensaje para descargarlo con el navegador solo aparece si todos lo rechazan. Vale para Windows y Linux.
+
 ## 21/11/2026 · modo leve automático · engine 0.13.3
 ### pt
 - **Novo:** modo leve. Ele tira as sombras dinâmicas e o desfoque de movimento, os efeitos que mais pesam, e numa gráfica integrada a luta fica cerca de 20% mais rápida (medido num portátil a 15 W: média de 24 para 29 fps, e a queda mínima de 18 para 24). Em Automático, o padrão, ele liga sozinho quando a placa de vídeo é integrada (gráficas Intel, processadores AMD com gráfico Radeon, portáteis como o Steam Deck e o Legion Go) e fica desligado nas placas dedicadas. Dá para escolher Ligado ou Desligado na página Vídeo do launcher.
