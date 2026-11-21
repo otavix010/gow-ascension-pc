@@ -2200,7 +2200,48 @@ function Gerar-Icone {
         if ($tinha) { & $reconfigura }
     }
 }
+# report 1399 (21/11): o clang de um Visual Studio 2022 antigo (anterior ao 19, avisa "unknown attribute 'preserve_none'")
+# caía ("clang frontend command failed due to signal") num arquivo grande do código traduzido das SPUs, também com 2
+# arquivos por vez. O jogo pede o clang 19 ou mais novo (o do VS 2022 17.13 em diante): mais antigo, o instalador do VS
+# é chamado para atualizar o Build Tools (o Windows pede permissão); se continuar antigo, o gerador para e explica.
+function Versao-Clang {
+    $c = Join-Path $VS 'VC\Tools\Llvm\x64\bin\clang.exe'
+    if (-not (Test-Path -LiteralPath $c)) { return 0 }
+    $t = "$(@(SemExcecao { & $c --version 2>$null })[0])"
+    if ($t -match 'clang version (\d+)\.') { return [int]$matches[1] }
+    return 0
+}
+function Conferir-Clang {
+    $v = Versao-Clang
+    if ($v -eq 0 -or $v -ge 19) { return }
+    $inst = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\setup.exe"
+    if (Test-Path -LiteralPath $inst) {
+        Msg "o clang do Visual Studio é a versão $v, e o jogo precisa da 19 ou mais nova: atualizando o Visual Studio Build Tools (alguns minutos; o Windows pede permissão)"
+        $logVs = Join-Path $OUT 'vs_instala.log'
+        $args_ = @('update', '--installPath', "`"$VS`"", '--passive', '--norestart')
+        try {
+            $p = Start-Process -FilePath $inst -ArgumentList $args_ -Verb RunAs -Wait -PassThru -ErrorAction Stop
+            Anotar $logVs "$(Get-Date) setup.exe $($args_ -join ' '): código $($p.ExitCode)"
+            $t0 = Get-Date
+            while (((Get-Date) - $t0).TotalMinutes -lt 40) {
+                $vivos = @(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | Where-Object {
+                    $_.Name -in 'vs_installer.exe', 'vs_installershell.exe', 'vs_setup_bootstrapper.exe' -or
+                    ($_.Name -eq 'setup.exe' -and (-not $_.ExecutablePath -or $_.ExecutablePath -like '*\Microsoft Visual Studio\Installer\*')) })
+                if (-not $vivos.Count) { break }
+                Start-Sleep -Seconds 5
+            }
+        } catch {
+            Anotar $logVs "$(Get-Date) setup.exe $($args_ -join ' '): não abriu ($($_.Exception.Message))"
+        }
+        $v = Versao-Clang
+        if ($v -ge 19) { Msg "clang do Visual Studio atualizado: versão $v"; return }
+    }
+    throw ("o clang do Visual Studio é a versão $v, antiga demais para compilar o jogo (ele cai nos arquivos grandes do código das SPUs). " +
+           'Abra o "Visual Studio Installer" e clique em Atualizar no Build Tools 2022 (ou rode num terminal: winget upgrade -e --id ' +
+           'Microsoft.VisualStudio.2022.BuildTools); depois gere de novo.')
+}
 Etapa '6_compilar' {
+    Conferir-Clang
     Gerar-Icone   # 17/11: o ícone do jogo entra no exe (port\app.rc)
     # 12/11: a tabela de NIDs do HLE é do runtime da engine (não da tradução): refeita aqui, uma engine que só muda o
     # runtime recompila sem traduzir o PPU de novo

@@ -4,6 +4,14 @@ O Otavix Launcher mostra este arquivo na página "Novidades" do jogo. Cada atual
 "## <data> · <versão>" e o texto em português (### pt), inglês (### en) e, quando houver, espanhol (### es).
 As mais novas ficam em cima.
 
+## 21/11/2026 · gerador
+### pt
+- **Gerador:** com um Visual Studio 2022 antigo, o compilador (clang anterior à versão 19) caía no meio da compilação do jogo ("clang frontend command failed due to signal", report 1399). Agora o gerador confere a versão antes de compilar e, se for antiga, pede ao instalador do Visual Studio para atualizar o Build Tools (o Windows pede permissão); se não der, explica como atualizar.
+### en
+- **Generator:** with an old Visual Studio 2022, the compiler (clang older than version 19) crashed in the middle of compiling the game ("clang frontend command failed due to signal", report 1399). The generator now checks the version before compiling and, if it is old, asks the Visual Studio installer to update the Build Tools (Windows asks for permission); if that fails, it explains how to update.
+### es
+- **Generador:** con un Visual Studio 2022 antiguo, el compilador (clang anterior a la versión 19) fallaba en medio de la compilación del juego ("clang frontend command failed due to signal", report 1399). Ahora el generador comprueba la versión antes de compilar y, si es antigua, pide al instalador de Visual Studio que actualice las Build Tools (Windows pide permiso); si no puede, explica cómo actualizar.
+
 ## 20/11/2026 · correções · engine 0.13.2
 ### pt
 - **Correção:** a abertura da história e outros vídeos podiam ficar com a tela preta quando os arquivos de vídeo (avcodec-63.dll e outros) sumiam da pasta do jogo depois da geração, em geral apagados pelo antivírus (report 1381). Agora o jogo usa a cópia que o gerador guarda.
