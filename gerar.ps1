@@ -115,6 +115,10 @@ $env:OTX_SPU_LIFTER = Join-Path $ENGINE_BIN 'spu_traduz.exe'
 $env:OTX_SPU_PONTE = Join-Path $ENGINE_BIN 'spu_ponte.exe'
 $OUT = Join-Path $R 'out\gerar'
 New-Item -ItemType Directory -Force $OUT | Out-Null
+# reports 1435-1437 (22/11): os arquivos temporários do tradutor das SPUs iam para o %TEMP% do Windows, fora da pasta
+# do port; agora ficam dentro dela, e uma exceção do antivírus para a pasta do port cobre tudo o que o gerador grava
+$env:OTX_TMP = Join-Path $R 'out\tmp'
+New-Item -ItemType Directory -Force $env:OTX_TMP | Out-Null
 # -RefazerDe N: refaz da etapa N em diante (ex.: 4 depois de atualizar o port; o jogo e o
 # firmware preparados nas etapas 2 e 3 continuam valendo)
 if ($RefazerDe -gt 0) {
@@ -352,8 +356,32 @@ function Exec([string]$log, [string]$linha) {
                    "Inteligente de Aplicativos, deixe Desativado e gere de novo. Atenção: depois de desligado, o Windows " +
                    "só deixa ligar de novo reinstalando o sistema.`r`nlog completo: $log")
         }
+        # reports 1435-1437: um programa da engine chamado pelos scripts de tradução saiu sem erro e sem gravar nada
+        if ($cauda -match 'OTX_SEM_SAIDA: (.+)') { Falha-Sem-Saida $Matches[1].Trim() }
         throw "falhou (código $LASTEXITCODE): $linha`r`nlog completo: $log"
     }
+}
+# os antivírus registrados no Windows (Central de Segurança; não precisa de administrador), para a mensagem abaixo
+function Antivirus-Do-PC {
+    try {
+        $n = @(Get-CimInstance -Namespace root/SecurityCenter2 -ClassName AntiVirusProduct -ErrorAction Stop |
+               ForEach-Object { $_.displayName } | Where-Object { $_ } | Select-Object -Unique)
+        if ($n.Count) { return ($n -join ', ') }
+    } catch { }
+    return 'não identificado'
+}
+# Reports 1435-1441 e 1438 (22/11, uma mesma instalação): um programa da engine (pkg.exe, spu_workloads.exe,
+# spu_ponte.exe, spu_traduz.exe) terminou com código 0, sem escrever nada no log e sem gravar a saída -- depois de ter
+# funcionado antes na mesma geração --, e a cada geração a pasta engine aparecia com arquivos faltando ou mudados. É o
+# que acontece quando um antivírus põe o programa em quarentena ou o roda isolado ("sandbox", contenção automática):
+# o que ele grava não chega à pasta. Antes isso aparecia como traceback do Python ou "robocopy 16".
+function Falha-Sem-Saida([string]$oque) {
+    $av = Antivirus-Do-PC
+    if ($script:LOG) { Anotar $script:LOG "[gerar] sem saída: $oque | antivírus: $av" }
+    throw ("um programa do gerador terminou sem erro, mas o que ele devia gravar não apareceu ($oque). Isso acontece " +
+           'quando o antivírus bloqueia, põe em quarentena ou roda isolado ("sandbox"/contenção automática) os ' +
+           "programas da engine. Antivírus neste PC: $av. Abra o antivírus, restaure o que ele tiver posto em quarentena " +
+           "da pasta $R, adicione essa pasta às exceções (exclusões) dele e gere de novo.")
 }
 function Etapa([string]$nome, [scriptblock]$corpo) {
     $marca = Join-Path $OUT "$nome.ok"
@@ -739,6 +767,16 @@ function Conferir-Engine([string]$pasta) {
 $marcaEng = Join-Path $OUT '1_engine.ok'
 if ((Test-Path -LiteralPath $marcaEng) -and -not (Engine-Inteira)) {
     Msg '1_engine: o pacote da engine mudou ou não está inteiro; instalando de novo'
+    # reports 1435-1441: o mesmo pacote, com arquivos que somem ou mudam entre uma geração e outra (antivírus): o
+    # nome deles vai para o log do launcher
+    $mesmo = (Test-Path -LiteralPath $marcaPacote) -and (Get-Content -LiteralPath $marcaPacote -Raw).Trim() -eq $ENGINE_SHA
+    if ($mesmo -and (Test-Path -LiteralPath (Join-Path $ENG 'manifesto.json'))) {
+        $ruins = @(Conferir-Engine $ENG)
+        if ($ruins.Count) {
+            Msg (('1_engine: {0} arquivo(s) da engine sumiram ou mudaram desde a instalação ({1}); se isso se repetir, ' +
+                  'é o antivírus mexendo na pasta engine') -f $ruins.Count, (($ruins | Select-Object -First 4) -join ', '))
+        }
+    }
     Remove-Item -LiteralPath $marcaEng -Force
 }
 Etapa '1_engine' {
@@ -1523,7 +1561,13 @@ function Extrair-Pkg([string]$pkg) {
     $tmp = Join-Path $R 'out\update_pkg'
     Exec $LOG "$ENGINE_BIN\pkg.exe `"$pkg`" `"$tmp`""
     $sfo = Get-ChildItem $tmp -Recurse -Filter PARAM.SFO | Select-Object -First 1
-    if (-not $sfo) { throw "o PKG não trouxe PARAM.SFO ($tmp)" }
+    if (-not $sfo) {
+        # report 1438: o .pkg conferido pelo SHA-1 e o pkg.exe saiu sem erro e sem extrair nada
+        if (-not (Test-Path -LiteralPath $tmp) -or -not (Get-ChildItem -LiteralPath $tmp -Recurse -File | Select-Object -First 1)) {
+            Falha-Sem-Saida "pkg.exe -> $tmp"
+        }
+        throw "o PKG não trouxe PARAM.SFO ($tmp)"
+    }
     $sfo.DirectoryName
 }
 if ($Disco -and (Test-Path (Join-Path $OUT '2_jogo.ok'))) {
@@ -1832,6 +1876,7 @@ Etapa '5_spu' {
         }
     }
     Exec $LOG "$ENGINE_BIN\spu_workloads.exe --input `"$R\jogo\GOWA.elf`" --input `"$R\fw\libsre.prx`" --lifted `"$sw`" --out `"$sw\spu_workloads.c`" --constructor --allow-partial"
+    if (-not (Test-Path -LiteralPath "$sw\spu_workloads.c" -PathType Leaf)) { Falha-Sem-Saida "spu_workloads.exe -> $sw\spu_workloads.c" }
     cmd /c "robocopy `"$sw`" `"$R\port\spu`" /E /NFL /NDL /NJH /NJS /NP >> `"$LOG`" 2>&1"
     if ($LASTEXITCODE -ge 8) { throw "falhou a cópia de $sw (robocopy $LASTEXITCODE)" }
     Exec $LOG "python `"$s\lift_gowa_jobmods.py`""

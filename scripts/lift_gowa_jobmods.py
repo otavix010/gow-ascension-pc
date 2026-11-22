@@ -23,7 +23,7 @@ import sys
 
 R = RAIZ
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))   # 06/11: o tradutor das SPUs vem compilado no pacote da engine
-from otx_ponte import embrulha, retornos_montados, casos_de_switch, comando_lifter  # noqa: E402
+from otx_ponte import embrulha, retornos_montados, casos_de_switch, comando_lifter, sem_saida  # noqa: E402
 
 BASE = 0x4000
 ELF = os.path.join(R, 'jogo', 'GOWA.elf')
@@ -120,6 +120,8 @@ def main():
             if 'unsupported instruction(s)' in t:
                 unsup = int(t.split()[0])
         print(f'{nome}  arquivo=0x{s:06X} bytes=0x{n:05X} entrada=0x{entry:05X} funcoes={funcs} sem_traducao={unsup}')
+        if funcs == 0:   # report 1437: o tradutor saiu sem erro e sem traduzir nada (todo módulo tem funções)
+            sem_saida(f'{os.path.basename(cmd[0])} {nome}')
         tabela.append((va, n, nome, entry_off))
     if os.path.exists(tmp_elf):
         os.remove(tmp_elf)

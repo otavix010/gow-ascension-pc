@@ -42,8 +42,17 @@ def _roda(args):
     return r.stdout.decode('utf-8', 'replace')
 
 
+def sem_saida(oque):
+    """reports 1435-1437: o programa da engine terminou sem erro e não gravou nada (antivírus em quarentena ou
+    "sandbox"); a linha OTX_SEM_SAIDA vira, no gerar.ps1, a mensagem que explica isso ao jogador"""
+    raise SystemExit(f'OTX_SEM_SAIDA: {oque}')
+
+
 def _com_arquivo(cru, faz):
-    fd, cam = tempfile.mkstemp(suffix='.bin', prefix='otx_ponte_')
+    pasta = os.environ.get('OTX_TMP') or None   # o gerar.ps1 põe dentro da pasta do port (out\tmp)
+    if pasta:
+        os.makedirs(pasta, exist_ok=True)
+    fd, cam = tempfile.mkstemp(suffix='.bin', prefix='otx_ponte_', dir=pasta)
     try:
         with os.fdopen(fd, 'wb') as f:
             f.write(bytes(cru))
@@ -61,6 +70,8 @@ def embrulha(codigo, base=0, entrada=None):
         saida = cam + '.elf'
         try:
             _roda(['embrulha', cam, hex(base), '-' if entrada is None else hex(entrada), saida])
+            if not os.path.isfile(saida):
+                sem_saida(f'{os.path.basename(PONTE)} embrulha -> {saida}')
             with open(saida, 'rb') as f:
                 return f.read()
         finally:
