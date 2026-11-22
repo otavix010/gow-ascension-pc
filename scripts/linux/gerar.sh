@@ -27,6 +27,11 @@ done
 # as mesmas constantes do gerar.ps1
 SHA_GOWA=813723ac4e091d79ea20ad2500b2e86cb0fd25f3736541431921273e7a77246d
 SHA_LIBSRE=9e7ee6edc99b1d372686cf927b883b18f19ed4d32d1faf35e214cca4ae0737b6
+# as ferramentas de compilação baixadas do GitHub (sha256 dos arquivos das releases)
+SHA_LLVM=13e9975b026d431c945927960e5f8c0a47a155a2f600f57e85f4d1482620c65f
+SHA_CMAKE=5a1133ff103c71eb5120e2cc3de922733e7d8a26a98ae716397e8676adb367bf
+SHA_NINJA=6f98805688d19672bd699fbbfa2c2cf0fc054ac3df1f0e6a47664d963d530255
+SHA_XWIN=d870eb4b2f390878af6da1ccd3cf321d22fcb72720984853b4be732ae597fc88
 UPDATE_URL='http://b0.ww.np.dl.playstation.net/tppkg/np/BCUS98232/BCUS98232_T76/5525fbb7b6b5456d/UP9000-BCUS98232_00-GOWABDPATCH00001-A0104-V0100-PE.pkg'
 # report 1394: o servidor de atualização dos EUA pode recusar (403) conforme o país; as outras regiões servem o mesmo
 # firmware (o libsre que sai dele é conferido pelo sha256 de qualquer jeito)
@@ -62,6 +67,19 @@ baixar() {   # url destino: retoma quedas (como o Baixar do gerar.ps1)
     return 1
 }
 confere() { [ -f "$2" ] && [ "$(sha256sum "$2" | cut -d' ' -f1)" = "$1" ]; }
+baixar_ferr() {   # url destino sha256: deixa o arquivo inteiro e conferido, ou nenhum (report 1450: um llvm.tar.xz
+    # estragado ficava na pasta e o baixar "retomava" em cima dele em toda geração seguinte)
+    local t
+    confere "$3" "$2" && return 0
+    for t in 1 2; do
+        if baixar "$1" "$2"; then
+            confere "$3" "$2" && return 0
+            msg 'o arquivo baixado veio diferente do esperado (sha256); baixando de novo do começo'
+        fi
+        rm -f "$2"
+    done
+    return 1
+}
 etapa() {   # nome função: pula as etapas feitas (marcadas), a não ser a partir de --de
     if [ -n "$DE" ] && [ "$1" \> "$DE" -o "$1" = "$DE" ]; then rm -f "$OUT/$1.ok"; fi
     if [ -f "$OUT/$1.ok" ]; then msg "$1: já feita"; return; fi
@@ -84,6 +102,18 @@ prerequisitos() {
     [ "${livre:-99}" -ge 15 ] || falha "pouco espaço em $(df -P "$R" | awk 'NR==2{print $6}'): ${livre} GB livres, e a geração precisa de uns 15 GB"
 }
 prerequisitos
+
+# uma geração por vez nesta pasta (report 1450: uma segunda geração, aberta com a primeira ainda baixando o LLVM,
+# gravou no mesmo arquivo e estragou o download das duas). Pelo PID e não por flock: o wineserver herdaria a trava.
+TRAVA=$OUT/gerar.pid
+if [ -f "$TRAVA" ]; then
+    outro=$(cat "$TRAVA" 2>/dev/null)
+    if [ -n "$outro" ] && [ "$outro" != "$$" ] && tr '\0' ' ' 2>/dev/null < "/proc/$outro/cmdline" | grep -q 'gerar\.sh'; then
+        falha "já há uma geração rodando nesta pasta (processo $outro): espere ela terminar (o download do LLVM, 1,5 GB, pode levar meia hora) ou feche-a antes de gerar de novo"
+    fi
+fi
+echo $$ > "$TRAVA"
+trap 'rm -f "$TRAVA"' EXIT
 
 # ---------------------------------------------------------------------------- ferramentas
 F=${GOWA_FERR:-$HOME/.local/share/otavix/ferr}
@@ -110,10 +140,10 @@ achar_wine() {
 wine_do_proton() { [ -x "$(dirname "$(dirname "$(dirname "$1")")")/proton" ]; }
 ferramentas() {
     mkdir -p "$F"; cd "$F" || falha "não deu para criar $F"
-    [ -x llvm/bin/clang-cl ] || { msg 'baixando o LLVM 19.1.5 (1,5 GB)'; baixar https://github.com/llvm/llvm-project/releases/download/llvmorg-19.1.5/LLVM-19.1.5-Linux-X64.tar.xz llvm.tar.xz && mkdir -p llvm && tar -C llvm --strip-components=1 -xf llvm.tar.xz && rm llvm.tar.xz || falha 'o LLVM não baixou'; }
-    [ -x cmake/bin/cmake ] || { msg 'baixando o CMake'; baixar https://github.com/Kitware/CMake/releases/download/v3.31.6/cmake-3.31.6-linux-x86_64.tar.gz cmake.tgz && mkdir -p cmake && tar -C cmake --strip-components=1 -xzf cmake.tgz && rm cmake.tgz || falha 'o CMake não baixou'; }
-    [ -x ninja ] || { msg 'baixando o Ninja'; baixar https://github.com/ninja-build/ninja/releases/download/v1.12.1/ninja-linux.zip ninja.zip && python3 -c "import zipfile;zipfile.ZipFile('ninja.zip').extractall('.')" && chmod +x ninja && rm ninja.zip || falha 'o Ninja não baixou'; }
-    [ -x xwin ] || { msg 'baixando o xwin'; baixar https://github.com/Jake-Shadle/xwin/releases/download/0.10.0/xwin-0.10.0-x86_64-unknown-linux-musl.tar.gz xwin.tgz && tar --strip-components=1 -xzf xwin.tgz && rm xwin.tgz || falha 'o xwin não baixou'; }
+    [ -x llvm/bin/clang-cl ] || { msg 'baixando o LLVM 19.1.5 (1,5 GB)'; baixar_ferr https://github.com/llvm/llvm-project/releases/download/llvmorg-19.1.5/LLVM-19.1.5-Linux-X64.tar.xz llvm.tar.xz $SHA_LLVM && mkdir -p llvm && tar -C llvm --strip-components=1 -xf llvm.tar.xz && rm llvm.tar.xz || { rm -rf llvm.tar.xz llvm; falha 'o LLVM não baixou'; }; }
+    [ -x cmake/bin/cmake ] || { msg 'baixando o CMake'; baixar_ferr https://github.com/Kitware/CMake/releases/download/v3.31.6/cmake-3.31.6-linux-x86_64.tar.gz cmake.tgz $SHA_CMAKE && mkdir -p cmake && tar -C cmake --strip-components=1 -xzf cmake.tgz && rm cmake.tgz || { rm -rf cmake.tgz cmake; falha 'o CMake não baixou'; }; }
+    [ -x ninja ] || { msg 'baixando o Ninja'; baixar_ferr https://github.com/ninja-build/ninja/releases/download/v1.12.1/ninja-linux.zip ninja.zip $SHA_NINJA && python3 -c "import zipfile;zipfile.ZipFile('ninja.zip').extractall('.')" && chmod +x ninja && rm ninja.zip || { rm -f ninja.zip ninja; falha 'o Ninja não baixou'; }; }
+    [ -x xwin ] || { msg 'baixando o xwin'; baixar_ferr https://github.com/Jake-Shadle/xwin/releases/download/0.10.0/xwin-0.10.0-x86_64-unknown-linux-musl.tar.gz xwin.tgz $SHA_XWIN && tar --strip-components=1 -xzf xwin.tgz && rm xwin.tgz || { rm -f xwin.tgz xwin; falha 'o xwin não baixou'; }; }
     [ -d winsdk/crt/include ] || { msg 'baixando o CRT e o Windows SDK da Microsoft (licença da Microsoft aceita, como no Visual Studio)'; ./xwin --accept-license --arch x86_64 splat --output winsdk >> "$LOG" 2>&1 || falha 'o xwin não baixou o SDK'; }
     # o lld-link/llvm-mt querem libxml2.so.2 (ICU 67), que distros novas não têm: a cópia do runtime da Steam
     mkdir -p libextra
