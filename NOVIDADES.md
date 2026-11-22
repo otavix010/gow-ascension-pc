@@ -6,11 +6,11 @@ As mais novas ficam em cima.
 
 ## 22/11/2026 · gerador: antivírus
 ### pt
-- **Gerador:** quando o antivírus bloqueia, põe em quarentena ou isola os programas da engine, a geração agora para com uma mensagem clara (o nome do antivírus do PC e como restaurar os arquivos e adicionar a pasta do port às exceções) em vez de um erro técnico; os arquivos temporários do gerador também passaram a ficar dentro da pasta do port.
+- **Gerador:** quando o antivírus bloqueia, põe em quarentena ou isola os programas da engine, a geração agora para com uma mensagem clara (o nome do antivírus do PC e como restaurar os arquivos e adicionar a pasta do port às exceções) em vez de um erro técnico; os arquivos temporários do gerador também passaram a ficar dentro da pasta do port. Quando o Windows não deixa gravar na pasta do port (antivírus ou "Acesso controlado a pastas"), o gerador agora avisa logo no começo, com a mesma orientação.
 ### en
-- **Generator:** when an antivirus blocks, quarantines or sandboxes the engine programs, generation now stops with a clear message (the name of the PC's antivirus and how to restore the files and add the port folder to its exclusions) instead of a technical error; the generator's temporary files now also stay inside the port folder.
+- **Generator:** when an antivirus blocks, quarantines or sandboxes the engine programs, generation now stops with a clear message (the name of the PC's antivirus and how to restore the files and add the port folder to its exclusions) instead of a technical error; the generator's temporary files now also stay inside the port folder. When Windows does not allow writing to the port folder (antivirus or "Controlled folder access"), the generator now says so right at the start, with the same guidance.
 ### es
-- **Generador:** cuando el antivirus bloquea, pone en cuarentena o aísla los programas del motor, la generación ahora se detiene con un mensaje claro (el nombre del antivirus del PC y cómo restaurar los archivos y añadir la carpeta del port a las exclusiones) en lugar de un error técnico; los archivos temporales del generador ahora también quedan dentro de la carpeta del port.
+- **Generador:** cuando el antivirus bloquea, pone en cuarentena o aísla los programas del motor, la generación ahora se detiene con un mensaje claro (el nombre del antivirus del PC y cómo restaurar los archivos y añadir la carpeta del port a las exclusiones) en lugar de un error técnico; los archivos temporales del generador ahora también quedan dentro de la carpeta del port. Cuando Windows no deja escribir en la carpeta del port (antivirus o "Acceso controlado a carpetas"), el generador ahora lo avisa desde el principio, con la misma orientación.
 
 ## 21/11/2026 · gerador: firmware por outras regiões
 ### pt

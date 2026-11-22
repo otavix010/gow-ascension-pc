@@ -334,11 +334,27 @@ function Anotar([string]$arq, [string]$texto, [switch]$Novo) {
             $fs = New-Object IO.FileStream($arq, $(if ($Novo) { 'Create' } else { 'Append' }), 'Write', 'ReadWrite')
             try { $fs.Write($b, 0, $b.Length) } finally { $fs.Dispose() }
             return
-        } catch [IO.IOException] {
-            if ($i -ge 50) { throw }
+        } catch {
+            # o erro do .NET vem embrulhado pelo PowerShell; só "arquivo em uso" (o launcher lendo) vale tentar de novo
+            $ex = $_.Exception
+            while ($ex.InnerException) { $ex = $ex.InnerException }
+            $emUso = $ex -is [IO.IOException] -and -not ($ex -is [IO.FileNotFoundException]) -and
+                     -not ($ex -is [IO.DirectoryNotFoundException]) -and -not ($ex -is [IO.PathTooLongException])
+            if (-not $emUso -or $i -ge 50) { Falha-Gravacao $arq $ex.Message }
             Start-Sleep -Milliseconds 100
         }
     }
+}
+# Report 1449 (22/11): logo o primeiro log ("out\gerar\1_ferramentas.log") não pôde ser criado -- "Could not find file"
+# ao CRIAR um arquivo numa pasta que acabou de ser criada. É o erro que aparece quando uma proteção do Windows barra a
+# gravação (antivírus com proteção contra ransomware, "Acesso controlado a pastas" da Segurança do Windows); pasta que
+# não existe dá "parte do caminho", e arquivo somente leitura, "acesso negado". Antes, o jogador via a exceção crua.
+function Falha-Gravacao([string]$arq, [string]$erro) {
+    throw ("o Windows não deixou o gerador gravar na pasta do port (${arq}: $erro). Isso acontece quando o antivírus " +
+           '(proteção contra ransomware) ou o "Acesso controlado a pastas" da Segurança do Windows barra a gravação, ou ' +
+           "quando o drive está protegido contra gravação. Antivírus neste PC: $(Antivirus-Do-PC). Libere a pasta $R " +
+           'no antivírus (ou o gerador e o PowerShell no "Acesso controlado a pastas"), ou mova a pasta gow-ascension ' +
+           'para outro lugar, como C:\Jogos\gow-ascension, e gere de novo.')
 }
 # roda um comando nativo pelo cmd (stdout e stderr no log da etapa); falha = exceção com o log
 function Exec([string]$log, [string]$linha) {
@@ -382,6 +398,17 @@ function Falha-Sem-Saida([string]$oque) {
            'quando o antivírus bloqueia, põe em quarentena ou roda isolado ("sandbox"/contenção automática) os ' +
            "programas da engine. Antivírus neste PC: $av. Abra o antivírus, restaure o que ele tiver posto em quarentena " +
            "da pasta $R, adicione essa pasta às exceções (exclusões) dele e gere de novo.")
+}
+# report 1449: antes de qualquer etapa, confere se dá para criar um arquivo em out\gerar (o New-Item -Force não
+# reclama nem de uma junção quebrada no lugar da pasta)
+$sonda = Join-Path $OUT '.sonda_gravacao'
+try {
+    [IO.File]::WriteAllText($sonda, 'ok')
+    Remove-Item -LiteralPath $sonda -Force -ErrorAction SilentlyContinue
+} catch {
+    $ex = $_.Exception
+    while ($ex.InnerException) { $ex = $ex.InnerException }
+    Falha-Gravacao $sonda $ex.Message
 }
 function Etapa([string]$nome, [scriptblock]$corpo) {
     $marca = Join-Path $OUT "$nome.ok"
