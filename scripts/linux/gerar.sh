@@ -485,11 +485,37 @@ fi
 etapa 5_spu spu
 
 # ---------------------------------------------------------------------------- compilar (portátil: AVX2, para-zero)
+# apaga o estado do CMake e do ninja e os objetos (CMakeFiles) de uma pasta de build; o resto dela (gowa.exe, opções) fica
+limpa_cmake() { rm -rf "$1/CMakeCache.txt" "$1/CMakeFiles" "$1/build.ninja" "$1/.ninja_deps" "$1/.ninja_log" "$1/cmake_install.cmake"; }
 compilar() {
     # 12/11: a tabela de NIDs do HLE é do runtime (não da tradução): refeita aqui, como no gerar.ps1
     eng ppu_nids.exe --all --out "$R/port/recompiled/ppu_hle_nids.cpp"
     export FFMPEG_DIR=$R/dl/ffmpeg9/$FFMPEG_NOME GOWA_PY_EXE=$PY GOWA_JOBS=$JOBS
-    ex bash "$R/scripts/linux/build_linux.sh" x86-64-v3 rz   # pelo bash: o zip do port pode chegar sem a permissão de execução
+    local b=$R/port/build_v3rz antigo l0 fim
+    # report 1454 (o 1063 do gerar.ps1): a pasta do port mudou de lugar (/mnt/... -> ~/Downloads/...) e a configuração
+    # do CMake da build ainda apontava para o lugar antigo (VerifyGlobs.cmake "Not a file"). Build configurada em outra
+    # pasta (pelo caminho real: um link para a mesma pasta não conta) compila do zero aqui; o gowa.exe, as opções e o
+    # resto da pasta ficam
+    antigo=$(sed -n 's/^CMAKE_CACHEFILE_DIR:INTERNAL=//p' "$b/CMakeCache.txt" 2>/dev/null | head -1)
+    if [ -n "$antigo" ] && [ "$(realpath -m "$antigo")" != "$(realpath -m "$b")" ]; then
+        msg "a compilação anterior foi feita em outra pasta ($antigo): compilando do zero aqui"
+        limpa_cmake "$b"
+    fi
+    # pelo bash: o zip do port pode chegar sem a permissão de execução. Uma configuração do CMake estragada (compilação
+    # interrompida: VerifyGlobs.cmake ausente, "rebuilding 'build.ninja': subcommand failed") é limpa e refeita uma vez,
+    # como no gerar.ps1; outro erro sai como no ex (as últimas linhas vão para o report)
+    echo "> bash $R/scripts/linux/build_linux.sh x86-64-v3 rz" >> "$LOG"
+    l0=$(wc -l < "$LOG")
+    if ! bash "$R/scripts/linux/build_linux.sh" x86-64-v3 rz >> "$LOG" 2>&1; then
+        fim=$(tail -n +$((l0 + 1)) "$LOG" | grep -av "^\s*$")
+        if ! echo "$fim" | grep -q "VerifyGlobs.cmake\|rebuilding 'build.ninja'\|rebuilding build.ninja"; then
+            echo "$fim" | tail -12 | sed "s/^/[gerar]   /"
+            falha "bash falhou (veja $LOG)"
+        fi
+        msg 'a configuração da compilação anterior estava estragada: configurando de novo'
+        limpa_cmake "$b"
+        ex bash "$R/scripts/linux/build_linux.sh" x86-64-v3 rz
+    fi
     [ -f "$R/port/build_v3rz/gowa.exe" ] || falha 'o gowa.exe não foi gerado (veja o log)'
 }
 # 16/11: uma atualização que só muda os fontes do port (mesma engine) não refazia a compilação (a etapa estava marcada):
