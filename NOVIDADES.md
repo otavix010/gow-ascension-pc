@@ -4,6 +4,14 @@ O Otavix Launcher mostra este arquivo na página "Novidades" do jogo. Cada atual
 "## <data> · <versão>" e o texto em português (### pt), inglês (### en) e, quando houver, espanhol (### es).
 As mais novas ficam em cima.
 
+## 24/11/2026 · gerador: mensagens com acentos certos
+### pt
+- **Gerador:** as mensagens do gerador agora aparecem com os acentos certos no launcher em qualquer idioma do Windows (antes saíam embaralhadas, por exemplo "nÃ£o" em vez de "não", e ilegíveis num Windows em árabe ou outro alfabeto).
+### en
+- **Generator:** the generator's messages now show up correctly in the launcher on any Windows language (they used to come out garbled, and unreadable on Windows in Arabic or other non-Latin languages).
+### es
+- **Generador:** los mensajes del generador ahora aparecen con los acentos correctos en el launcher en cualquier idioma de Windows (antes salían desordenados, por ejemplo "nÃ£o" en lugar de "não", e ilegibles en un Windows en árabe u otro alfabeto).
+
 ## 24/11/2026 · gerador: versão digital da PSN
 ### pt
 - **Gerador:** quando a pasta ou o arquivo escolhido é a versão digital da PSN do jogo (NPUA80918 e as de outras regiões, inclusive o .pkg, o .rap e a pasta instalada no RPCS3), o gerador agora diz que essa versão não é suportada e quais versões em disco servem (BCUS98232, BCES01741 e BCES01742), em vez de "não achei o jogo". Vale para Windows e Linux.

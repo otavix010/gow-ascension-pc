@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
   Gera e compila o God of War: Ascension a partir da SUA cópia do jogo.
 
@@ -59,6 +59,10 @@ param(
     [switch]$Refazer
 )
 $ErrorActionPreference = 'Stop'
+# acentos certos no launcher e no console em qualquer idioma do Windows (report 1479: num Windows em árabe a
+# mensagem saía embaralhada; em português também saía "nǜo" no launcher): este arquivo é UTF-8 com BOM, e a saída
+# do gerador também vai em UTF-8, que é como o launcher a lê
+try { [Console]::OutputEncoding = [Text.UTF8Encoding]::new($false); $OutputEncoding = [Console]::OutputEncoding } catch { }
 # Reports 171, 180 e 181 (28/10): num Windows em árabe (cp1256) ou vietnamita (cp1258) o print com acento do
 # unself.py dava UnicodeEncodeError depois de decriptar, e a geração parava. Os scripts Python falam UTF-8.
 $env:PYTHONUTF8 = '1'
