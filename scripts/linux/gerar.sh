@@ -281,9 +281,38 @@ arquivo_do_disco() {
     [ -n "$iso" ] && [ "$(echo "$iso" | wc -l)" -eq 1 ] && { echo "$iso"; return 0; }
     return 1
 }
+# report 1464 (24/11): a versão digital da PSN (NPUA80918 nos EUA; NPEA, NPJA... nas outras regiões) não tem PS3_GAME
+# (instalada, a pasta do jogo é a própria NPxx00000, com os arquivos cifrados pela licença da conta) e vem num .pkg com
+# o .rap e .edat. O port não a suporta. O id vem do PARAM.SFO da pasta ou de até três níveis abaixo (o RPCS3
+# inteiro: dev_hdd0/game/NPUA80918; o do Ascension: NPUA80918 ou o título com "Ascension"), do nome da pasta ou de um .pkg, .rap ou .edat; NPWR é o código de troféus.
+versao_digital() {
+    local d=${1%/} s id
+    if [ -f "$d" ]; then
+        case "${d,,}" in *.pkg|*.rap|*.edat) basename "$d" | grep -oE 'NP[A-Z]{2}[0-9]{5}' | grep -v '^NPWR' | head -1 | grep . ; return ;; esac
+        return 1
+    fi
+    [ -d "$d" ] || return 1
+    while IFS= read -r s; do
+        [ -n "$s" ] || continue
+        id=$(grep -aoE 'NP[A-Z]{2}[0-9]{5}' "$s" | grep -v '^NPWR' | head -1)
+        [ -n "$id" ] || continue
+        if [ "$id" = NPUA80918 ] || grep -aq Ascension "$s"; then echo "$id"; return 0; fi
+    done < <(find "$d" -maxdepth 4 -type f -name PARAM.SFO 2>/dev/null | head -16)
+    id=$(basename "$d")
+    [[ $id =~ ^NP[A-Z]{2}[0-9]{5}$ && $id != NPWR* ]] && { echo "$id"; return 0; }
+    id=$(find "$d" -maxdepth 2 -type f \( -iname '*.pkg' -o -iname '*.rap' -o -iname '*.edat' \) -printf '%f\n' 2>/dev/null |
+         grep -oE 'NP[A-Z]{2}[0-9]{5}' | grep -v '^NPWR' | sort -u)
+    [ -n "$id" ] || return 1
+    echo "$id" | grep -qx NPUA80918 && { echo NPUA80918; return 0; }
+    echo "$id" | head -1
+}
+texto_digital() {
+    echo "esta é a versão digital da PSN do God of War: Ascension ($1), que o port não suporta: ele funciona só com as versões em disco, a americana (BCUS98232) e as europeias (BCES01741 e BCES01742). Escolha a cópia de um desses discos (a pasta com PS3_GAME ou o arquivo .iso, .7z, .zip ou .rar). | EN: this is the PSN digital version of God of War: Ascension ($1), which the port does not support: it only works with the disc versions, BCUS98232 (USA) and BCES01741 or BCES01742 (Europe). | ES: esta es la versión digital de PSN de God of War: Ascension ($1), que el port no admite: solo funciona con las versiones en disco, BCUS98232 (EE. UU.) y BCES01741 o BCES01742 (Europa)."
+}
 achar_disco() {
     local d=${1%/} a pai
     if [ -f "$d" ]; then   # um arquivo: extrai uma vez em disco/ (bsdtar abre iso, 7z, zip e rar)
+        local np; np=$(versao_digital "$d") && falha "$(texto_digital "$np")"
         local x=$R/disco
         if ! achar_ps3game "$x" >/dev/null; then
             command -v bsdtar >/dev/null || falha 'para abrir o arquivo do jogo é preciso o bsdtar (pacote libarchive); ou extraia o arquivo e escolha a pasta'
@@ -298,6 +327,7 @@ achar_disco() {
                 [ -n "$iso" ] && { msg "extraindo $(basename "$iso")"; ex bsdtar -xf "$iso" -C "$x"; rm -f "$iso"; }
             fi
         fi
+        if ! achar_ps3game "$x" >/dev/null; then np=$(versao_digital "$x") && falha "$(texto_digital "$np")"; fi
         ACHADO=$(achar_ps3game "$x") || falha "não achei PS3_GAME/USRDIR dentro de $d (uma .iso criptografada, como as da Redump, não serve)"
         return 0
     fi
@@ -313,6 +343,7 @@ achar_disco() {
         a=$(arquivo_do_disco "$pai" 0) && { msg "a pasta escolhida só tem textos (README); usando o arquivo $a"; achar_disco "$a"; return 0; }
     fi
     local partes; partes=$(find "$d" -maxdepth 4 -type f \( -iname '*.part1.rar' -o -iname '*.part01.rar' -o -iname '*.r00' \) | head -1)
+    local np; np=$(versao_digital "$d") && falha "$(texto_digital "$np")"
     [ -n "$partes" ] && falha "lá dentro há um arquivo dividido em partes ($(basename "$partes")): extraia-o com o 7-Zip/unrar numa pasta e escolha essa pasta"
     falha "não achei o jogo (PS3_GAME com USRDIR) em $d (dentro dela há: $(ls -A "$d" 2>/dev/null | head -6 | tr '\n' ',' | sed 's/,$//; s/,/, /g')). Escolha o arquivo do jogo (.iso, .7z, .zip ou .rar) ou a pasta onde ele foi extraído."
 }
@@ -324,6 +355,10 @@ jogo() {
     # mesmo nas três; mudam os dados do disco e os do update 1.04, então cada disco usa o update dele (os mesmos
     # endereços e SHA-1 do gerar.ps1). Sem PARAM.SFO legível, vale a americana.
     local id; id=$(grep -aoE 'B[CL][EUAJ][SM][0-9]{5}' "$d/PS3_GAME/PARAM.SFO" 2>/dev/null | head -1)
+    if [ -z "$id" ]; then   # um PS3_GAME com o TITLE_ID da PSN (report 1464)
+        local np; np=$(grep -aoE 'NP[A-Z]{2}[0-9]{5}' "$d/PS3_GAME/PARAM.SFO" 2>/dev/null | grep -v '^NPWR' | head -1)
+        [ -n "$np" ] && falha "$(texto_digital "$np")"
+    fi
     local titulo=BCUS98232
     case "$id" in
         ''|BCUS98232) ;;

@@ -984,6 +984,45 @@ function Arquivo-Do-Disco([string]$d, [int]$prof = 3) {
     return $null
 }
 # o disco também pode vir compactado: extrai uma vez para disco\ (o tar do Windows lê 7z, zip, rar e iso)
+# Report 1464 (24/11): a versão digital da PSN (NPUA80918 nos EUA; NPEA, NPJA... nas outras regiões) não tem PS3_GAME:
+# instalada, a pasta do jogo é a própria NPxx00000 (com USRDIR e os arquivos cifrados pela licença da conta), e ela vem
+# num .pkg com o .rap e .edat. O port não a suporta, e o jogador só ouvia "não achei o jogo". O TITLE_ID vem do PARAM.SFO
+# da pasta escolhida ou de até três níveis abaixo (o RPCS3 inteiro: dev_hdd0\game\NPUA80918; o do Ascension: NPUA80918
+# ou o título com "Ascension"), do nome da própria pasta ou de um .pkg, .rap ou .edat. NPWR é o código de troféus, não um jogo. Vazio se não é a versão digital.
+function Versao-Digital([string]$d) {
+    $re = 'NP(?!WR)[A-Z]{2}\d{5}'
+    try {
+        if (Test-Path -LiteralPath $d -PathType Leaf) {
+            $n = Split-Path -Leaf $d
+            if ($n -match '\.(pkg|rap|edat)$' -and $n -match "($re)") { return $Matches[1] }
+            return ''
+        }
+        if (-not (Test-Path -LiteralPath $d -PathType Container)) { return '' }
+        $sfos = @(Get-ChildItem -LiteralPath $d -Recurse -Depth 3 -File -Filter PARAM.SFO -Force -ErrorAction SilentlyContinue | Select-Object -First 16)
+        foreach ($s in $sfos) {
+            $c = Ler-Sfo $s.FullName
+            $id = [string]$c['TITLE_ID']
+            if ($id -match "^$re$" -and ($id -eq 'NPUA80918' -or [string]$c['TITLE'] -match 'Ascension')) { return $id }
+        }
+        $nome = Split-Path -Leaf ([IO.Path]::GetFullPath($d).TrimEnd('\'))
+        if ($nome -match "^($re)$") { return $Matches[1] }
+        $ids = @(Get-ChildItem -LiteralPath $d -Recurse -Depth 1 -File -Force -ErrorAction SilentlyContinue |
+                 Where-Object { $_.Extension -match '^\.(pkg|rap|edat)$' -and $_.Name -match $re } |
+                 ForEach-Object { [void]($_.Name -match "($re)"); $Matches[1] } | Sort-Object -Unique)
+        if ($ids -contains 'NPUA80918') { return 'NPUA80918' }
+        if ($ids.Count -gt 0) { return $ids[0] }
+    } catch { }
+    ''
+}
+function Texto-Digital([string]$id) {
+    ("esta é a versão digital da PSN do God of War: Ascension ($id), que o port não suporta: ele funciona só com as " +
+     'versões em disco, a americana (BCUS98232) e as europeias (BCES01741 e BCES01742). No launcher, clique em ' +
+     '"Escolher o disco de novo" e escolha a cópia de um desses discos (a pasta com PS3_GAME ou o arquivo .iso, .7z, ' +
+     ".zip ou .rar). | EN: this is the PSN digital version of God of War: Ascension ($id), which the port does not " +
+     'support: it only works with the disc versions, BCUS98232 (USA) and BCES01741 or BCES01742 (Europe). | ES: esta ' +
+     "es la versión digital de PSN de God of War: Ascension ($id), que el port no admite: solo funciona con las " +
+     'versiones en disco, BCUS98232 (EE. UU.) y BCES01741 o BCES01742 (Europa).')
+}
 function Achar-Disco([string]$d) {
     # report 818: o disco salvo está num drive que não está conectado agora (HD externo, pendrive, drive virtual)
     $q = if ($d -match '^([A-Za-z]:)') { $Matches[1] } else { $null }
@@ -1012,6 +1051,8 @@ function Achar-Disco([string]$d) {
         }
     } catch { }
     if (Test-Path -LiteralPath $d -PathType Leaf) {
+        $npid = Versao-Digital $d
+        if ($npid) { throw (Texto-Digital $npid) }
         if ($d -notmatch '\.(7z|zip|rar|iso)$') { throw "o disco tem que ser a pasta com PS3_GAME ou um arquivo .7z, .zip, .rar ou .iso ($d)" }
         $dx = Join-Path $R 'disco'
         $achou = $null
@@ -1051,6 +1092,7 @@ function Achar-Disco([string]$d) {
                 }
             }
         }
+        if (-not $achou) { $npid = Versao-Digital $dx; if ($npid) { throw (Texto-Digital $npid) } }
         if (-not $achou) { throw "não achei PS3_GAME\USRDIR dentro de $d (uma .iso criptografada, como as da Redump, não serve)" }
         return $achou
     }
@@ -1181,6 +1223,8 @@ function Achar-Disco([string]$d) {
             $como = (" (lá dentro há um arquivo dividido em partes, $($rarPartes[0].Name): extraia-o com o 7-Zip ou o WinRAR " +
                      'numa pasta e escolha essa pasta, a que fica com PS3_GAME)')
         }
+        $npid = Versao-Digital $d
+        if ($npid) { throw (Texto-Digital $npid) }
         # o que há lá dentro (e um nível abaixo), para quem escolheu uma pasta com nome de .iso ou a pasta errada
         if (-not $como) {
             $dentro = @(Get-ChildItem -LiteralPath $d -Force -ErrorAction SilentlyContinue | Select-Object -First 6 | ForEach-Object {
@@ -1486,6 +1530,7 @@ function Conferir-Regiao([string]$ps3game) {
         if ($id -ne 'BCUS98232') { Msg "disco: versão $($VERSOES[$id].nome) ($id); o update 1.04 e a conferência dos arquivos são os dela" }
         return
     }
+    if ($id -match '^NP') { throw (Texto-Digital $id) }
     $reg = switch -regex ($id) { '^B[CL]ES' { 'europeia' } '^B[CL]AS' { 'asiática' } '^B[CL]J[SM]' { 'japonesa' } default { 'de outra região' } }
     throw ("este disco é a versão $reg do God of War: Ascension ($id). O port funciona com a versão americana " +
            '(BCUS98232) e com as europeias (BCES01741 e BCES01742): os arquivos das outras versões são diferentes ' +

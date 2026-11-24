@@ -4,6 +4,14 @@ O Otavix Launcher mostra este arquivo na página "Novidades" do jogo. Cada atual
 "## <data> · <versão>" e o texto em português (### pt), inglês (### en) e, quando houver, espanhol (### es).
 As mais novas ficam em cima.
 
+## 24/11/2026 · gerador: versão digital da PSN
+### pt
+- **Gerador:** quando a pasta ou o arquivo escolhido é a versão digital da PSN do jogo (NPUA80918 e as de outras regiões, inclusive o .pkg, o .rap e a pasta instalada no RPCS3), o gerador agora diz que essa versão não é suportada e quais versões em disco servem (BCUS98232, BCES01741 e BCES01742), em vez de "não achei o jogo". Vale para Windows e Linux.
+### en
+- **Generator:** when the chosen folder or file is the game's PSN digital version (NPUA80918 and those from other regions, including the .pkg, the .rap and the folder installed in RPCS3), the generator now says that this version is not supported and which disc versions work (BCUS98232, BCES01741 and BCES01742), instead of "game not found". Applies to Windows and Linux.
+### es
+- **Generador:** cuando la carpeta o el archivo elegido es la versión digital de PSN del juego (NPUA80918 y las de otras regiones, incluido el .pkg, el .rap y la carpeta instalada en RPCS3), el generador ahora indica que esa versión no es compatible y qué versiones en disco sirven (BCUS98232, BCES01741 y BCES01742), en lugar de "no encontré el juego". Vale para Windows y Linux.
+
 ## 22/11/2026 · gerador: antivírus
 ### pt
 - **Gerador:** quando o antivírus bloqueia, põe em quarentena ou isola os programas da engine, a geração agora para com uma mensagem clara (o nome do antivírus do PC e como restaurar os arquivos e adicionar a pasta do port às exceções) em vez de um erro técnico; os arquivos temporários do gerador também passaram a ficar dentro da pasta do port. Quando o Windows não deixa gravar na pasta do port (antivírus ou "Acesso controlado a pastas"), o gerador agora avisa logo no começo, com a mesma orientação.
