@@ -4,6 +4,14 @@ O Otavix Launcher mostra este arquivo na página "Novidades" do jogo. Cada atual
 "## <data> · <versão>" e o texto em português (### pt), inglês (### en) e, quando houver, espanhol (### es).
 As mais novas ficam em cima.
 
+## 25/11/2026 · engine 0.13.4: muito menos memória de vídeo
+### pt
+- **Memória de vídeo:** as texturas que o jogo não usa há 30 segundos agora saem da memória de vídeo. Com o mesmo trecho do capítulo 5 a 720p, a memória de vídeo caiu de 8,9 GB para 1,6 GB e a memória RAM de 10,3 GB para 2,5 GB numa RTX 5080; na Legion Go S, de 7,7 GB para 1,9 GB. A imagem e o fps são os mesmos. Para voltar ao comportamento antigo, use GOWA_TEX_IDADE=0.
+### en
+- **Video memory:** textures the game hasn't used for 30 seconds now leave video memory. In the same chapter 5 section at 720p, video memory went from 8.9 GB down to 1.6 GB and RAM from 10.3 GB down to 2.5 GB on an RTX 5080; on the Legion Go S, from 7.7 GB down to 1.9 GB. Image and fps are the same. To get the old behavior back, use GOWA_TEX_IDADE=0.
+### es
+- **Memoria de video:** las texturas que el juego no usa desde hace 30 segundos ahora salen de la memoria de video. En el mismo tramo del capítulo 5 a 720p, la memoria de video bajó de 8,9 GB a 1,6 GB y la RAM de 10,3 GB a 2,5 GB en una RTX 5080; en la Legion Go S, de 7,7 GB a 1,9 GB. La imagen y los fps son los mismos. Para volver al comportamiento anterior, usa GOWA_TEX_IDADE=0.
+
 ## 24/11/2026 · gerador: mensagens com acentos certos
 ### pt
 - **Gerador:** as mensagens do gerador agora aparecem com os acentos certos no launcher em qualquer idioma do Windows (antes saíam embaralhadas, por exemplo "nÃ£o" em vez de "não", e ilegíveis num Windows em árabe ou outro alfabeto).
