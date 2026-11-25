@@ -17,6 +17,7 @@
   <a href="#vers%C3%B5es-windows-e-linux">Windows e Linux</a> ·
   <a href="#como-jogar">Como jogar</a> ·
   <a href="#estado-atual">Estado atual</a> ·
+  <a href="#port--rpcs3-medido-em-24112026">Port × RPCS3</a> ·
   <a href="#requisitos">Requisitos</a> ·
   <a href="#perguntas-frequentes">Perguntas frequentes</a> ·
   <a href="NOVIDADES.md">Novidades</a> ·
@@ -58,6 +59,8 @@ Como o código do jogo não pode ser distribuído, **o seu PC gera e compila a p
 | | |
 |---|---|
 | ![Fase 1, luta com a Fúria](docs/imagens/fase1_dodge.png) | ![Fase 1, close da Fúria](docs/imagens/fase1_furia.png) |
+
+**Como é feito:** o Otavix é um projeto de fãs, sem fins lucrativos, desenvolvido com a ajuda de assistentes de IA (Claude, da Anthropic), que escrevem e testam boa parte do código sob a direção do autor. Cada versão passa por testes antes de ser publicada, e os reports dos jogadores entram no mesmo ciclo.
 
 ## Como jogar
 
@@ -194,6 +197,53 @@ Nenhum travamento nem queda do jogo em cerca de 140 rodadas de teste. O combate 
 
 O que medimos num PC fraco (4 núcleos, sem AVX-512), o que ajudou, o que não ajudou e como medir: [docs/DESEMPENHO_PC_FRACO.md](docs/DESEMPENHO_PC_FRACO.md).
 
+## Port × RPCS3 (medido em 24/11/2026)
+
+Os vídeos e comentários que comparam o port com o RPCS3 são das versões de outubro. Medimos de novo **o port de hoje contra o RPCS3 de hoje, no mesmo trecho e nas mesmas configurações**, e publicamos o resultado como saiu. **No PC, neste trecho, o RPCS3 ganhou**: quadros mais regulares e bem menos memória. O port ganhou na abertura do jogo, que no RPCS3 travou várias vezes.
+
+**Versões:** port com a engine 0.13.3 (este repositório no commit `3e94d557`, gerado em 24/11 pelo `gerar.ps1`) e RPCS3 0.0.43-20662 (build oficial de 24/11/2026).
+
+**Configurações:**
+- resolução interna de 720p nos dois (port com `GOWA_RES_SCALE=1`; RPCS3 com a escala de 100%);
+- alvo de 60 FPS, que é o padrão dos dois: o limitador do port e o limite "Auto" do RPCS3;
+- áudio ligado nos dois, e o resto no padrão;
+- no RPCS3, a configuração **recomendada pelo próprio RPCS3** para este jogo, tirada do banco de configurações dele (Accurate RSX reservation access, Sleep Timers "As Host", Shader Precision "Ultra", Write Color Buffers, ZCULL), sem patches.
+
+Uma diferença ficou: o port pula o MLAA do jogo por padrão, e o RPCS3 roda o MLAA original (ele tem um patch "Disable MLAA", que não usamos).
+
+**Trecho:** capítulo 5, Vila de Kirra (checkpoint Cyn300), com o mesmo save nos dois e o Kratos parado. A medida tem 60 s e começa depois do primeiro minuto de jogo após o carregamento.
+
+**Método:**
+- **PC:** a ferramenta de teste do projeto conta os quadros que chegam à tela e lê a CPU, a RAM e a VRAM do processo. Foram 3 rodadas de cada, alternadas, com o PC sem outras cargas.
+- **Portátil:** Legion Go S a 15 W, com SteamOS 3.10 e o port pelo Proton GE-11-7. Os FPS vêm do MangoHud, e a CPU, a GPU, a energia e a memória vêm do sistema. Foram 2 rodadas.
+
+**PC 1** (Ryzen 7 9800X3D, RTX 5080, 32 GB, Windows 11), faixa das 3 rodadas:
+
+| | Port | RPCS3 |
+|---|---|---|
+| FPS médio | 60,2–60,7 | 61,1–61,6 |
+| 1% low | 28,2–33,2 | **43,3–43,8** |
+| Pior quadro | 44–91 ms | **26–29 ms** |
+| CPU (núcleos em uso, de 16 threads) | 6,3–6,7 | **5,9–6,1** |
+| RAM do processo | ~9,9 GB | **~6,0 GB** |
+| VRAM do processo | ~8,6 GB | **~1,0–1,1 GB** |
+| Áudio | sem cortes | sem cortes |
+| O que falha | engasgos de 40 a 90 ms de tempos em tempos (por isso o 1% low baixo); VRAM e RAM altas | com a configuração padrão, a abertura pelo disco travou com a tela preta ("RSX: nv406e::semaphore_acquire has timed out") nas 3 tentativas; com a configuração recomendada, abriu; a primeira abertura compila o cache por cerca de 5 minutos |
+
+**Portátil** (Lenovo Legion Go S, Ryzen Z1 Extreme, 15 W, SteamOS):
+
+| | Port | RPCS3 |
+|---|---|---|
+| FPS médio | 32,0–33,6 | não medido |
+| 1% low | 22,0–22,4 | — |
+| CPU do sistema | ~49% | — |
+| GPU | ~61% | — |
+| VRAM em uso | ~7,4 GB dos 8 GB reservados | — |
+| RAM do sistema em uso | ~4,6 GB | — |
+| O que falha | o 1% low fica bem abaixo da média; a VRAM fica perto do limite | na nossa instalação (AppImage oficial, aberto fora da Steam), o jogo travou na abertura, logo depois do logo da Sony, nas 14 tentativas que fizemos depois da primeira abertura (com a configuração padrão e com a recomendada, com a janela em foco ou não). Não chegamos ao trecho |
+
+**O que isso quer dizer:** num PC forte, o RPCS3 atual roda este trecho com quadros mais regulares e com uma fração da memória do port. A VRAM do port (8,6 GB a 720p) explica as queixas em placas de 8 GB, e é o próximo ponto que vamos atacar, junto com os engasgos. O 1% low do RPCS3 nesta tabela é com o áudio ligado: com o áudio desligado (renderer "Null"), ele chegou a 55. O notebook com GTX 1650 ainda não foi medido.
+
 ## Requisitos
 
 - **Windows 10/11 64 bits** e GPU com **Direct3D 12**, ou **Linux/SteamOS** com Proton (beta, veja [acima](#linux--steamos-beta); precisa de CPU com AVX2 e uns 15 GB livres).
@@ -231,7 +281,7 @@ Pelo launcher, em **"Reportar problema"** na página do jogo. O relato já vai c
 
 ## Licença e créditos
 
-- **Nosso código e ferramentas: [MIT](LICENSE).** O RPCS3 (GPL-2.0) foi usado como referência de comportamento; o código foi revisado linha a linha contra o do RPCS3 e nenhum trecho foi copiado. A única coincidência literal são duas tabelas de valores medidos do hardware, herdadas do ps3recomp.
+- **Nosso código e ferramentas: [MIT](LICENSE).** A licença cobre só o código e as ferramentas deste repositório. Ela não cobre o God of War: Ascension, o código ou os dados dele, o firmware do PS3 nem nada gerado a partir deles, e nada disso está incluído aqui. O RPCS3 (GPL-2.0) foi usado como referência de comportamento; o código foi revisado linha a linha contra o do RPCS3 e nenhum trecho foi copiado. A única coincidência literal são duas tabelas de valores medidos do hardware, herdadas do ps3recomp.
 - **[ps3recomp](https://github.com/sp00nznet/ps3recomp)**, de Ned Heller (sp00nznet), MIT: o tradutor, o runtime e o motor de desenho em que o port se apoia. A engine que partiu dele, a Otavix Engine PS3 (runtime e tradutor), vem compilada num pacote que o `gerar.ps1` baixa e confere pelo SHA-256; o aviso MIT do ps3recomp vai dentro do pacote (`engine/avisos/`).
 - **`scripts/gpl/unself.py` e `scripts/gpl/pup_libsre.py` são GPL-2.0** (`scripts/gpl/COPYING`): o decriptador de SELF, que segue o `unself.cpp` do [RPCS3](https://github.com/RPCS3/rpcs3), e o que tira o `libsre.sprx` do `PS3UPDAT.PUP`, que segue o instalador de firmware do RPCS3. Os dois rodam como programas separados.
 - **Chaves**: nenhuma chave foi criada por nós. As de decriptação de executáveis são lidas do código-fonte do RPCS3: o `gerar.ps1` baixa dois arquivos dele (`key_vault.cpp/.h`, numa versão fixa) para `dl\rpcs3_chaves`, ou usa os que você indicar com `-ChavesRpcs3`. A KLIC do jogo sai da sua própria cópia. A engine traz, como o ps3recomp original, chaves públicas de formatos do PS3.
@@ -246,8 +296,27 @@ A **native PC port** of *God of War: Ascension* (PS3) **for Windows and for Linu
 
 **Easiest: the [Otavix Launcher](https://github.com/otavix010/otavix-launcher/releases/latest)**, which downloads this port, asks for your folders, generates the game for your CPU and starts it. **Bring your own disc**: no game code or data and no firmware here. You need your own copy of the game (BCUS98232). Update 1.04 and the official PS3 firmware are free from Sony, and `gerar.cmd` downloads both from Sony's servers by itself (or use your own: [update 1.04 .pkg](http://b0.ww.np.dl.playstation.net/tppkg/np/BCUS98232/BCUS98232_T76/5525fbb7b6b5456d/UP9000-BCUS98232_00-GOWABDPATCH00001-A0104-V0100-PE.pkg) (must be exactly 1.04), and `PS3UPDAT.PUP` from [PlayStation's PS3 system software page](https://www.playstation.com/en-us/support/hardware/ps3/system-software/); RPCS3 is no longer needed). Install Python and the Visual Studio 2022 Build Tools with Clang (commands above), download this repository to a path without spaces, double-click **`gerar.cmd`** (it asks for the disc folder, then downloads the update and firmware, decrypts your copy, translates and builds; ~4 minutes on an 8-core Ryzen 7 9800X3D), then play with **`jogar.cmd`**.
 
+**How it is made:** Otavix is a non-profit fan project developed with the help of AI assistants (Anthropic's Claude), which write and test much of the code under the author's direction. Every release is tested before it is published, and player reports feed the same loop.
+
+**Port vs RPCS3 (measured 24 Nov 2026):** setup:
+- today's port (engine 0.13.3, commit `3e94d557`) against today's RPCS3 (0.0.43-20662);
+- same save and scene (chapter 5, Kirra village, checkpoint Cyn300, Kratos idle);
+- 720p internal resolution, 60 FPS target and audio on in both;
+- RPCS3 with its own recommended config for this game and no patches.
+
+The port skips the game's MLAA by default, while RPCS3 runs it.
+
+On a Ryzen 7 9800X3D + RTX 5080, RPCS3 won this scene:
+
+| | 1% low | Worst frame | CPU | Process RAM | Process VRAM |
+|---|---|---|---|---|---|
+| RPCS3 | 43.3-43.8 | 26-29 ms | 5.9-6.1 cores | ~6.0 GB | ~1.0-1.1 GB |
+| Port | 28.2-33.2 | 44-91 ms | 6.3-6.7 cores | ~9.9 GB | ~8.6 GB |
+
+Both averaged about 60 FPS. RPCS3's weak spot was the game's opening: with its default config it froze on a black screen ("semaphore_acquire has timed out") in all 3 disc boots, and with the recommended config it booted. On the Legion Go S at 15 W, the port ran this scene at 32-34 FPS (1% low ~22). In our install there (official AppImage, launched outside Steam), RPCS3 froze at the same opening point in all 14 attempts after the first boot, so it could not be measured there. The port's VRAM use and frame-time spikes are what we are working on next.
+
 Platforms: **Windows 10/11** (stable) and **Linux/SteamOS** (beta, through Proton, since Otavix Launcher 1.0.92; tested end to end on a Lenovo Legion Go S, Ryzen Z1 Extreme, SteamOS 3.10). Handheld results, uncapped: 46-49 fps at the start of the game at 15 W, ~44 fps in medium scenes at 15 W and 65-68 fps at 30 W, ~24 fps in heavy combat at 15 W (being optimized); details in [docs/desempenho_portatil.md](docs/desempenho_portatil.md). In the tables the machines are named PC 1 (Ryzen 7 9800X3D), PC 2 (i5-11400F), Notebook (i5-10300H) and Handheld (Legion Go S).
 
 Status: boots, menus, chapter 1 and chapter 16 play with correct image, 60 FPS locked on a Ryzen 7 9800X3D; the full game is not verified yet. Performance is CPU-bound and much better with AVX-512: ~68 FPS uncapped in chapter 16 on a 9800X3D, ~32 on an i5-11400F, ~8 on a 4-core laptop without AVX-512. The build `gerar.cmd` produces includes the same performance passes as ours (`scripts/otimizar.py`); only PGO is left out. Thread pinning is now off on CPUs with fewer than 12 logical processors (+4% on the laptop), and the GPU command reader no longer hangs on slow PCs.
 
-License: our code is MIT; ps3recomp is MIT (Ned Heller); `scripts/gpl/unself.py` and `scripts/gpl/pup_libsre.py` are GPL-2.0 (they follow RPCS3's unself.cpp and firmware installer). Decryption keys are read from RPCS3's source (downloaded at a pinned commit). *God of War* is a trademark of Sony Interactive Entertainment; this is a non-commercial fan project, not affiliated with or endorsed by Sony.
+License: our code is MIT ([LICENSE](LICENSE)). This license covers the code and tools in this repository only. It does not cover God of War: Ascension, its code or data, the PS3 firmware, or anything generated from them, none of which is included here. ps3recomp is MIT (Ned Heller); `scripts/gpl/unself.py` and `scripts/gpl/pup_libsre.py` are GPL-2.0 (they follow RPCS3's unself.cpp and firmware installer). Decryption keys are read from RPCS3's source (downloaded at a pinned commit). *God of War* is a trademark of Sony Interactive Entertainment; this is a non-commercial fan project, not affiliated with or endorsed by Sony.
