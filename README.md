@@ -17,7 +17,7 @@
   <a href="#vers%C3%B5es-windows-e-linux">Windows e Linux</a> ·
   <a href="#como-jogar">Como jogar</a> ·
   <a href="#estado-atual">Estado atual</a> ·
-  <a href="#port--rpcs3-medido-em-24112026">Port × RPCS3</a> ·
+  <a href="#port--rpcs3-medido-em-24-e-25112026">Port × RPCS3</a> ·
   <a href="#requisitos">Requisitos</a> ·
   <a href="#perguntas-frequentes">Perguntas frequentes</a> ·
   <a href="NOVIDADES.md">Novidades</a> ·
@@ -197,11 +197,13 @@ Nenhum travamento nem queda do jogo em cerca de 140 rodadas de teste. O combate 
 
 O que medimos num PC fraco (4 núcleos, sem AVX-512), o que ajudou, o que não ajudou e como medir: [docs/DESEMPENHO_PC_FRACO.md](docs/DESEMPENHO_PC_FRACO.md).
 
-## Port × RPCS3 (medido em 24/11/2026)
+## Port × RPCS3 (medido em 24 e 25/11/2026)
 
 Os vídeos e comentários que comparam o port com o RPCS3 são das versões de outubro. Medimos de novo **o port de hoje contra o RPCS3 de hoje, no mesmo trecho e nas mesmas configurações**, e publicamos o resultado como saiu. **No PC, neste trecho, o RPCS3 ganhou**: quadros mais regulares e bem menos memória. O port ganhou na abertura do jogo, que no RPCS3 travou várias vezes.
 
-**Versões:** port com a engine 0.13.3 (este repositório no commit `3e94d557`, gerado em 24/11 pelo `gerar.ps1`) e RPCS3 0.0.43-20662 (build oficial de 24/11/2026).
+**Atualização de 25/11 (engine 0.13.4):** medimos de novo o port, no mesmo trecho e com o mesmo método. O RPCS3 é o mesmo build, então os números dele são os de 24/11. A memória deixou de ser o problema: o port agora usa menos RAM que o RPCS3 e quase a mesma VRAM. O RPCS3 continua com quadros mais regulares no PC.
+
+**Versões:** port com a engine 0.13.3 (este repositório no commit `3e94d557`, gerado em 24/11 pelo `gerar.ps1`) e RPCS3 0.0.43-20662 (build oficial de 24/11/2026). Em 25/11, o port com a engine 0.13.4, gerado pelo `gerar.ps1` com a 0.13.4.
 
 **Configurações:**
 - resolução interna de 720p nos dois (port com `GOWA_RES_SCALE=1`; RPCS3 com a escala de 100%);
@@ -214,35 +216,35 @@ Uma diferença ficou: o port pula o MLAA do jogo por padrão, e o RPCS3 roda o M
 **Trecho:** capítulo 5, Vila de Kirra (checkpoint Cyn300), com o mesmo save nos dois e o Kratos parado. A medida tem 60 s e começa depois do primeiro minuto de jogo após o carregamento.
 
 **Método:**
-- **PC:** a ferramenta de teste do projeto conta os quadros que chegam à tela e lê a CPU, a RAM e a VRAM do processo. Foram 3 rodadas de cada, alternadas, com o PC sem outras cargas.
-- **Portátil:** Legion Go S a 15 W, com SteamOS 3.10 e o port pelo Proton GE-11-7. Os FPS vêm do MangoHud, e a CPU, a GPU, a energia e a memória vêm do sistema. Foram 2 rodadas.
+- **PC:** a ferramenta de teste do projeto conta os quadros que chegam à tela e lê a CPU, a RAM e a VRAM do processo. Foram 3 rodadas de cada, alternadas, com o PC sem outras cargas (a 0.13.4: 3 rodadas em 25/11).
+- **Portátil:** Legion Go S a 15 W, com SteamOS 3.10 e o port pelo Proton GE-11-7. Os FPS vêm do MangoHud, e a CPU, a GPU, a energia e a memória vêm do sistema. Foram 2 rodadas (2 também com a 0.13.4).
 
 **PC 1** (Ryzen 7 9800X3D, RTX 5080, 32 GB, Windows 11), faixa das 3 rodadas:
 
-| | Port | RPCS3 |
-|---|---|---|
-| FPS médio | 60,2–60,7 | 61,1–61,6 |
-| 1% low | 28,2–33,2 | **43,3–43,8** |
-| Pior quadro | 44–91 ms | **26–29 ms** |
-| CPU (núcleos em uso, de 16 threads) | 6,3–6,7 | **5,9–6,1** |
-| RAM do processo | ~9,9 GB | **~6,0 GB** |
-| VRAM do processo | ~8,6 GB | **~1,0–1,1 GB** |
-| Áudio | sem cortes | sem cortes |
-| O que falha | engasgos de 40 a 90 ms de tempos em tempos (por isso o 1% low baixo); VRAM e RAM altas | com a configuração padrão, a abertura pelo disco travou com a tela preta ("RSX: nv406e::semaphore_acquire has timed out") nas 3 tentativas; com a configuração recomendada, abriu; a primeira abertura compila o cache por cerca de 5 minutos |
+| | Port 0.13.3 (24/11) | Port 0.13.4 (25/11) | RPCS3 |
+|---|---|---|---|
+| FPS médio | 60,2–60,7 | 60,7–60,8 | 61,1–61,6 |
+| 1% low | 28,2–33,2 | 34,7–39,1 | **43,3–43,8** |
+| Pior quadro | 44–91 ms | 33–49 ms | **26–29 ms** |
+| CPU (núcleos em uso, de 16 threads) | 6,3–6,7 | 6,2–6,4 | **5,9–6,1** |
+| RAM do processo | ~9,9 GB | **~2,5 GB** | ~6,0 GB |
+| VRAM do processo | ~8,6 GB | ~1,55 GB | **~1,0–1,1 GB** |
+| Áudio | sem cortes | sem cortes | sem cortes |
+| O que falha | engasgos de 40 a 90 ms de tempos em tempos (por isso o 1% low baixo); VRAM e RAM altas | engasgos de 33 a 49 ms de tempos em tempos (o 1% low ainda fica abaixo do RPCS3); logo depois de carregar uma área grande, a VRAM sobe por menos de um minuto (até ~4,5 GB) e volta | com a configuração padrão, a abertura pelo disco travou com a tela preta ("RSX: nv406e::semaphore_acquire has timed out") nas 3 tentativas; com a configuração recomendada, abriu; a primeira abertura compila o cache por cerca de 5 minutos |
 
 **Portátil** (Lenovo Legion Go S, Ryzen Z1 Extreme, 15 W, SteamOS):
 
-| | Port | RPCS3 |
-|---|---|---|
-| FPS médio | 32,0–33,6 | não medido |
-| 1% low | 22,0–22,4 | — |
-| CPU do sistema | ~49% | — |
-| GPU | ~61% | — |
-| VRAM em uso | ~7,4 GB dos 8 GB reservados | — |
-| RAM do sistema em uso | ~4,6 GB | — |
-| O que falha | o 1% low fica bem abaixo da média; a VRAM fica perto do limite | na nossa instalação (AppImage oficial, aberto fora da Steam), o jogo travou na abertura, logo depois do logo da Sony, nas 14 tentativas que fizemos depois da primeira abertura (com a configuração padrão e com a recomendada, com a janela em foco ou não). Não chegamos ao trecho |
+| | Port 0.13.3 (24/11) | Port 0.13.4 (25/11) | RPCS3 |
+|---|---|---|---|
+| FPS médio | 32,0–33,6 | 31,9–33,6 | não medido |
+| 1% low | 22,0–22,4 | 21,2–21,8 | — |
+| CPU do sistema | ~49% | ~50% | — |
+| GPU | ~61% | ~62% | — |
+| VRAM em uso | ~7,4 GB dos 8 GB reservados | ~2,0–2,1 GB | — |
+| RAM do sistema em uso | ~4,6 GB | ~4,4 GB | — |
+| O que falha | o 1% low fica bem abaixo da média; a VRAM fica perto do limite | o 1% low fica bem abaixo da média | na nossa instalação (AppImage oficial, aberto fora da Steam), o jogo travou na abertura, logo depois do logo da Sony, nas 14 tentativas que fizemos depois da primeira abertura (com a configuração padrão e com a recomendada, com a janela em foco ou não). Não chegamos ao trecho |
 
-**O que isso quer dizer:** num PC forte, o RPCS3 atual roda este trecho com quadros mais regulares e com uma fração da memória do port. A VRAM do port (8,6 GB a 720p) explica as queixas em placas de 8 GB, e é o próximo ponto que vamos atacar, junto com os engasgos. O 1% low do RPCS3 nesta tabela é com o áudio ligado: com o áudio desligado (renderer "Null"), ele chegou a 55. O notebook com GTX 1650 ainda não foi medido.
+**O que isso quer dizer:** com a 0.13.4, a memória deixou de ser o problema. No PC, o port usa ~2,5 GB de RAM (o RPCS3, ~6 GB) e ~1,55 GB de VRAM (antes, 8,6 GB a 720p, o que explicava as queixas em placas de 8 GB); na Legion, a VRAM em uso caiu de ~7,4 para ~2 GB, com os mesmos FPS. Num PC forte, o RPCS3 atual ainda roda este trecho com quadros mais regulares (1% low de 43 contra 35–39 do port): os engasgos são o próximo ponto que vamos atacar. O 1% low do RPCS3 nesta tabela é com o áudio ligado: com o áudio desligado (renderer "Null"), ele chegou a 55. O notebook com GTX 1650 ainda não foi medido.
 
 ## Requisitos
 
@@ -298,22 +300,23 @@ A **native PC port** of *God of War: Ascension* (PS3) **for Windows and for Linu
 
 **How it is made:** Otavix is a non-profit fan project developed with the help of AI assistants (Anthropic's Claude), which write and test much of the code under the author's direction. Every release is tested before it is published, and player reports feed the same loop.
 
-**Port vs RPCS3 (measured 24 Nov 2026):** setup:
-- today's port (engine 0.13.3, commit `3e94d557`) against today's RPCS3 (0.0.43-20662);
+**Port vs RPCS3 (measured 24 and 25 Nov 2026):** setup:
+- the port (engine 0.13.3, commit `3e94d557`, on 24 Nov; engine 0.13.4 on 25 Nov) against today's RPCS3 (0.0.43-20662);
 - same save and scene (chapter 5, Kirra village, checkpoint Cyn300, Kratos idle);
 - 720p internal resolution, 60 FPS target and audio on in both;
 - RPCS3 with its own recommended config for this game and no patches.
 
 The port skips the game's MLAA by default, while RPCS3 runs it.
 
-On a Ryzen 7 9800X3D + RTX 5080, RPCS3 won this scene:
+On a Ryzen 7 9800X3D + RTX 5080:
 
 | | 1% low | Worst frame | CPU | Process RAM | Process VRAM |
 |---|---|---|---|---|---|
 | RPCS3 | 43.3-43.8 | 26-29 ms | 5.9-6.1 cores | ~6.0 GB | ~1.0-1.1 GB |
-| Port | 28.2-33.2 | 44-91 ms | 6.3-6.7 cores | ~9.9 GB | ~8.6 GB |
+| Port 0.13.3 (24 Nov) | 28.2-33.2 | 44-91 ms | 6.3-6.7 cores | ~9.9 GB | ~8.6 GB |
+| Port 0.13.4 (25 Nov) | 34.7-39.1 | 33-49 ms | 6.2-6.4 cores | ~2.5 GB | ~1.55 GB |
 
-Both averaged about 60 FPS. RPCS3's weak spot was the game's opening: with its default config it froze on a black screen ("semaphore_acquire has timed out") in all 3 disc boots, and with the recommended config it booted. On the Legion Go S at 15 W, the port ran this scene at 32-34 FPS (1% low ~22). In our install there (official AppImage, launched outside Steam), RPCS3 froze at the same opening point in all 14 attempts after the first boot, so it could not be measured there. The port's VRAM use and frame-time spikes are what we are working on next.
+All three averaged about 60 FPS. RPCS3's weak spot was the game's opening: with its default config it froze on a black screen ("semaphore_acquire has timed out") in all 3 disc boots, and with the recommended config it booted. On the Legion Go S at 15 W, the port ran this scene at 32-34 FPS (1% low ~21-22), and engine 0.13.4 cut its VRAM use from ~7.4 GB to ~2 GB at the same FPS. In our install there (official AppImage, launched outside Steam), RPCS3 froze at the same opening point in all 14 attempts after the first boot, so it could not be measured there. With engine 0.13.4 the port uses less RAM than RPCS3 and about the same VRAM; RPCS3 still has steadier frames on the PC, and the port's frame-time spikes are what we are working on next.
 
 Platforms: **Windows 10/11** (stable) and **Linux/SteamOS** (beta, through Proton, since Otavix Launcher 1.0.92; tested end to end on a Lenovo Legion Go S, Ryzen Z1 Extreme, SteamOS 3.10). Handheld results, uncapped: 46-49 fps at the start of the game at 15 W, ~44 fps in medium scenes at 15 W and 65-68 fps at 30 W, ~24 fps in heavy combat at 15 W (being optimized); details in [docs/desempenho_portatil.md](docs/desempenho_portatil.md). In the tables the machines are named PC 1 (Ryzen 7 9800X3D), PC 2 (i5-11400F), Notebook (i5-10300H) and Handheld (Legion Go S).
 
