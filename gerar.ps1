@@ -111,7 +111,7 @@ $SHA_LIBSRE = '9e7ee6edc99b1d372686cf927b883b18f19ed4d32d1faf35e214cca4ae0737b6'
 $ENGINE_VERSAO = '0.13.4'
 $ENGINE_NOME = "otavix-engine-ps3-$ENGINE_VERSAO"
 $ENGINE_URLS = @("https://otavix-launcher.otavix-launcher-servidor.workers.dev/v1/arquivos/engine/ps3/$ENGINE_NOME.zip")
-$ENGINE_SHA = '289948e1a60a6163f9a0755a130964da36490b0bb9aa648a94a626f20ca6d607'
+$ENGINE_SHA = '38d8bc8029feb422467f6e0a2ddc008b613a380e6c40b815ee9d17aadce68654'
 $ENG = Join-Path $R 'engine'
 $ENGINE_BIN = Join-Path $ENG 'bin'
 # o tradutor das SPUs para os scripts de tradução do port (scripts\otx_ponte.py)
@@ -504,6 +504,9 @@ function Escolher-Python {
     return $null
 }
 $py = Escolher-Python
+# report 1495 (25/11): o Python escolhido pode ser o python3.13.exe da Microsoft Store, com o "python" do PATH sendo
+# o atalho que só abre a loja (código 9009 no unself.py). Os scripts rodam pelo caminho completo do escolhido.
+$PYC = if ($py) { "`"$py`"" } else { 'python' }
 if ($py) {
     $env:PATH = (Split-Path -Parent $py) + ';' + $env:PATH
     Msg "Python: $py"
@@ -1812,8 +1815,8 @@ Etapa '2_jogo' {
     $baixar = ''
     if (-not $ch) { $ch = Join-Path $R 'dl\rpcs3_chaves'; $baixar = '--baixar' }
     $un = Join-Path $R 'scripts\gpl\unself.py'
-    Exec $LOG "python `"$un`" `"$jogo\EBOOT.BIN`" `"$jogo\EBOOT.elf`" --vault `"$ch`" $baixar"
-    Exec $LOG "python `"$un`" `"$jogo\GOWA.SELF`" `"$jogo\GOWA.elf`" --vault `"$ch`" --klic-de `"$jogo\EBOOT.elf`""
+    Exec $LOG "$PYC `"$un`" `"$jogo\EBOOT.BIN`" `"$jogo\EBOOT.elf`" --vault `"$ch`" $baixar"
+    Exec $LOG "$PYC `"$un`" `"$jogo\GOWA.SELF`" `"$jogo\GOWA.elf`" --vault `"$ch`" --klic-de `"$jogo\EBOOT.elf`""
     $h = (Get-FileHash "$jogo\GOWA.elf" -Algorithm SHA256).Hash.ToLower()
     if ($h -ne $SHA_GOWA) { throw "GOWA.elf diferente do esperado (sha256 $h). O port só serve para o update 1.04 das versões BCUS98232, BCES01741 e BCES01742." }
 }
@@ -1861,11 +1864,11 @@ Etapa '3_firmware' {
         } elseif ($origem -match '\.pup$') {
             # o arquivo do site da PlayStation: o libsre.sprx sai dos pacotes do dev_flash de dentro dele
             $sprx = Join-Path $fw 'libsre.sprx'
-            Exec $LOG "python `"$R\scripts\gpl\pup_libsre.py`" `"$origem`" `"$sprx`" --vault `"$ch`" --baixar"
+            Exec $LOG "$PYC `"$R\scripts\gpl\pup_libsre.py`" `"$origem`" `"$sprx`" --vault `"$ch`" --baixar"
         } elseif (-not (Test-Path -LiteralPath $origem -PathType Leaf)) {
             throw "$origem não existe"
         }
-        Exec $LOG "python `"$R\scripts\gpl\unself.py`" `"$sprx`" `"$fw\libsre.prx`" --vault `"$ch`" --baixar"
+        Exec $LOG "$PYC `"$R\scripts\gpl\unself.py`" `"$sprx`" `"$fw\libsre.prx`" --vault `"$ch`" --baixar"
         $h = (Get-FileHash "$fw\libsre.prx" -Algorithm SHA256).Hash.ToLower()
         if ($h -ne $SHA_LIBSRE) { throw "libsre.prx diferente do esperado (sha256 $h)" }
     }
@@ -1893,7 +1896,7 @@ Etapa '3_firmware' {
     try {
         Exec $LOG "$ENGINE_BIN\ppu_prx.exe `"$fw\libsre.prx`" --base 0x30000000 --output `"$lle`""
         Exec $LOG "$ENGINE_BIN\ppu_prx.exe `"$fw\libsre.prx`" --symbol libsre --out `"$lle\libsre_exports.c`" --json `"$lle\libsre_exports_c.json`""
-        Exec $LOG "python `"$R\scripts\libsre_stubs_json.py`" `"$lle\libsre_imports.json`" `"$lle\libsre_hle_stubs.json`""
+        Exec $LOG "$PYC `"$R\scripts\libsre_stubs_json.py`" `"$lle\libsre_imports.json`" `"$lle\libsre_hle_stubs.json`""
         Exec $LOG "$ENGINE_BIN\ppu_traduz.exe `"$lle\libsre_image.bin`" --raw --base 0x30000000 --toc 0x30039AB0 --code-end 0x3001DB18 --symbol-prefix libsre_ --functions `"$lle\libsre_functions.json`" --hle-stubs `"$lle\libsre_hle_stubs.json`" -o `"$lle\recomp`""
     } finally { Pop-Location }
     $pl = Join-Path $R 'port\lle_libsre'
@@ -1911,11 +1914,11 @@ Etapa '4_ppu' {
         Exec $LOG "$ENGINE_BIN\ppu_traduz.exe `"$R\jogo\GOWA.elf`" --functions `"$o\GOWA.functions.json`" --hle-stubs `"$o\GOWA.imports.json`" --code-end 0x661C14 --chunks 48 --insn-hooks `"$R\dados\ganchos_ppu.json`" --output `"$R\port\recompiled`" -j $Jobs"
         Exec $LOG "$ENGINE_BIN\ppu_nids.exe --all --out `"$R\port\recompiled\ppu_hle_nids.cpp`""
     } finally { Pop-Location }
-    Exec $LOG "python `"$R\scripts\ppu_preambulo.py`""
-    Exec $LOG "python `"$R\scripts\ppu_restrict.py`" aplicar"
-    Exec $LOG "python `"$R\scripts\remendos_ppu.py`" aplicar"
-    Exec $LOG "python `"$R\scripts\sonda.py`" por func_001C05A4 loc_0039C710 loc_00415914 func_00415120"
-    Exec $LOG "python `"$R\scripts\gerar_imports_inc.py`""
+    Exec $LOG "$PYC `"$R\scripts\ppu_preambulo.py`""
+    Exec $LOG "$PYC `"$R\scripts\ppu_restrict.py`" aplicar"
+    Exec $LOG "$PYC `"$R\scripts\remendos_ppu.py`" aplicar"
+    Exec $LOG "$PYC `"$R\scripts\sonda.py`" por func_001C05A4 loc_0039C710 loc_00415914 func_00415120"
+    Exec $LOG "$PYC `"$R\scripts\gerar_imports_inc.py`""
     Set-Content -LiteralPath $marcaLifter -Value (Md5-Lifter) -Encoding ASCII
 }
 
@@ -1955,25 +1958,25 @@ Etapa '5_spu' {
     if (-not (Test-Path -LiteralPath "$sw\spu_workloads.c" -PathType Leaf)) { Falha-Sem-Saida "spu_workloads.exe -> $sw\spu_workloads.c" }
     cmd /c "robocopy `"$sw`" `"$R\port\spu`" /E /NFL /NDL /NJH /NJS /NP >> `"$LOG`" 2>&1"
     if ($LASTEXITCODE -ge 8) { throw "falhou a cópia de $sw (robocopy $LASTEXITCODE)" }
-    Exec $LOG "python `"$s\lift_gowa_jobmods.py`""
-    Exec $LOG "python `"$s\lift_gowa_pm.py`""
-    Exec $LOG "python `"$s\lift_gowa_tspm.py`""
-    Exec $LOG "python `"$s\lift_gowa_syssrv.py`""
-    Exec $LOG "python `"$s\lift_gowa_plugins.py`" `"$R\dados\plugins_getcode_edge_cap16.txt`""
-    Exec $LOG "python `"$s\lift_gowa_plugins.py`" `"$R\dados\plugins_getcode_w11.txt`" --wids 11 --naofolha --inc `"$R\port\gowa_plugins_w11.inc`" --tabela g_gowa_plugin_fns_w11"
+    Exec $LOG "$PYC `"$s\lift_gowa_jobmods.py`""
+    Exec $LOG "$PYC `"$s\lift_gowa_pm.py`""
+    Exec $LOG "$PYC `"$s\lift_gowa_tspm.py`""
+    Exec $LOG "$PYC `"$s\lift_gowa_syssrv.py`""
+    Exec $LOG "$PYC `"$s\lift_gowa_plugins.py`" `"$R\dados\plugins_getcode_edge_cap16.txt`""
+    Exec $LOG "$PYC `"$s\lift_gowa_plugins.py`" `"$R\dados\plugins_getcode_w11.txt`" --wids 11 --naofolha --inc `"$R\port\gowa_plugins_w11.inc`" --tabela g_gowa_plugin_fns_w11"
     $hot = Join-Path $R 'port\gowa_jobmods_hot.inc'
     $utf8 = New-Object System.Text.UTF8Encoding($false)   # sem BOM: o .inc entra no meio de um .cpp
     [IO.File]::WriteAllText($hot, ("/* GERADO por gerar.ps1 + scripts/folhas_spu.py: funções folha seguras dos módulos de job`n" +
         " * que ficam interpretados (GOWA_JOBLIFT_HOT). va, LS, bytes da função. */`n" +
         "static const struct { uint32_t va, ls, len; } g_gowa_hot[] = {`n"), $utf8)
-    Exec $LOG "python `"$s\folhas_spu.py`" `"$R\port\spu\gowajm_006FC080\spu_recomp.c`" gowajm_006FC080_ --inc 6FC080 `"$hot`""
+    Exec $LOG "$PYC `"$s\folhas_spu.py`" `"$R\port\spu\gowajm_006FC080\spu_recomp.c`" gowajm_006FC080_ --inc 6FC080 `"$hot`""
     [IO.File]::AppendAllText($hot, "};`n", $utf8)
     # obrigatório: o boot liga GOWA_SPU_NUM_REMAP=3 (a 7ª SPU se vê como outra nas listas de
     # job do WWS); sem este passe os números colidem e o jogo para esperando um job
-    Exec $LOG "python `"$s\spu_num_remap.py`" aplicar"
-    Exec $LOG "python `"$s\guarda_avx512.py`" aplicar"
+    Exec $LOG "$PYC `"$s\spu_num_remap.py`" aplicar"
+    Exec $LOG "$PYC `"$s\guarda_avx512.py`" aplicar"
     # passes de desempenho (núcleos vetoriais, luz do EDGE na GPU, saltos diretos...)
-    if (-not $SemOtimizar) { Exec $LOG "python `"$s\otimizar.py`"" }
+    if (-not $SemOtimizar) { Exec $LOG "$PYC `"$s\otimizar.py`"" }
     Set-Content -LiteralPath $marcaSpu -Value (Md5-Spu) -Encoding ASCII
 }
 
