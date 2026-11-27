@@ -4,6 +4,17 @@ O Otavix Launcher mostra este arquivo na página "Novidades" do jogo. Cada atual
 "## <data> · <versão>" e o texto em português (### pt), inglês (### en) e, quando houver, espanhol (### es).
 As mais novas ficam em cima.
 
+## 27/11/2026 · engine 0.13.5: tela preta com o elemento do Hades e o MLAA ligado
+### pt
+- **Tela preta com o Hades:** com o "Anti-aliasing do PS3 (MLAA)" ligado, a cena não fica mais preta (só com o HUD) ao atacar com o elemento do Hades. Agora o MLAA pode ficar ligado.
+- **Motor:** as SPUs não perdem mais avisos de trabalho; antes alguns chegavam até 10 ms atrasados. O fps medido não muda.
+### en
+- **Black screen with Hades:** with "PS3 anti-aliasing (MLAA)" on, the scene no longer turns black (HUD only) when attacking with the Hades element. MLAA can now stay on.
+- **Engine:** the SPUs no longer miss work notifications; some used to arrive up to 10 ms late. Measured fps is unchanged.
+### es
+- **Pantalla negra con Hades:** con el "Antialiasing de PS3 (MLAA)" activado, la escena ya no se queda negra (solo con el HUD) al atacar con el elemento de Hades. Ahora el MLAA puede quedarse activado.
+- **Motor:** las SPU ya no pierden avisos de trabajo; antes algunos llegaban hasta 10 ms tarde. Los fps medidos no cambian.
+
 ## 25/11/2026 · engine 0.13.4: muito menos memória de vídeo; gerador com o Python da Microsoft Store
 ### pt
 - **Memória de vídeo:** as texturas que o jogo não usa há 10 segundos agora saem da memória de vídeo. Com o mesmo trecho do capítulo 5 a 720p, a memória de vídeo caiu de 8,9 GB para 1,6 GB e a memória RAM de 10,3 GB para 2,5 GB numa RTX 5080; na Legion Go S, de 7,7 GB para 1,9 GB. A imagem e o fps são os mesmos. Para voltar ao comportamento antigo, use GOWA_TEX_IDADE=0.
