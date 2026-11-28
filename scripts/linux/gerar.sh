@@ -32,6 +32,9 @@ SHA_LLVM=13e9975b026d431c945927960e5f8c0a47a155a2f600f57e85f4d1482620c65f
 SHA_CMAKE=5a1133ff103c71eb5120e2cc3de922733e7d8a26a98ae716397e8676adb367bf
 SHA_NINJA=6f98805688d19672bd699fbbfa2c2cf0fc054ac3df1f0e6a47664d963d530255
 SHA_XWIN=d870eb4b2f390878af6da1ccd3cf321d22fcb72720984853b4be732ae597fc88
+# report 1522: a libxml2 2.9 e a ICU 67 do Debian 11 para o lld-link, quando o sistema e a Steam não têm a cópia
+SHA_DEB_LIBXML2=b29ea9026561ef0019a57b8b192bf08f725976cd1dddd3fc6bcf876840350989
+SHA_DEB_ICU67=2bf5c46254f527865bfd6368e1120908755fa57d83634bd7d316c9b3cfd57303
 UPDATE_URL='http://b0.ww.np.dl.playstation.net/tppkg/np/BCUS98232/BCUS98232_T76/5525fbb7b6b5456d/UP9000-BCUS98232_00-GOWABDPATCH00001-A0104-V0100-PE.pkg'
 # report 1394: o servidor de atualização dos EUA pode recusar (403) conforme o país; as outras regiões servem o mesmo
 # firmware (o libsre que sai dele é conferido pelo sha256 de qualquer jeito)
@@ -138,6 +141,48 @@ achar_wine() {
 }
 # o wine achado é de um Proton (tem o script proton três pastas acima)
 wine_do_proton() { [ -x "$(dirname "$(dirname "$(dirname "$1")")")/proton" ]; }
+# baixa um .deb do Debian (o pool atual e o arquivo de versões antigas) e põe em libextra as bibliotecas pedidas
+deb_libs() {   # nome sha256 caminho_no_pool bibliotecas...
+    local d=$1 h=$2 p=$3 m; shift 3
+    for m in https://deb.debian.org/debian/pool/main https://archive.debian.org/debian/pool/main; do
+        baixar_ferr "$m/$p/$d" "$d" "$h" && break
+    done
+    confere "$h" "$d" || return 1
+    python3 - "$d" libextra "$@" <<'EOF' || { rm -f "$d"; return 1; }
+import io, os, sys, tarfile
+deb, dest, nomes = sys.argv[1], sys.argv[2], sys.argv[3:]
+b = open(deb, 'rb').read()
+if b[:8] != b'!<arch>\n':
+    sys.exit('não é um .deb')
+i, dados = 8, None
+while i + 60 <= len(b):
+    nome, tam = b[i:i + 16].decode().strip().rstrip('/'), int(b[i + 48:i + 58])
+    if nome.startswith('data.tar'):
+        dados = b[i + 60:i + 60 + tam]
+    i += 60 + tam + (tam & 1)
+if dados is None:
+    sys.exit('o .deb não tem data.tar')
+with tarfile.open(fileobj=io.BytesIO(dados)) as t:
+    membros = {os.path.normpath(m.name): m for m in t.getmembers()}
+    for n in nomes:
+        c = os.path.normpath('./usr/lib/x86_64-linux-gnu/' + n)
+        for _ in range(8):   # segue os links (libxml2.so.2 -> libxml2.so.2.9.10)
+            m = membros.get(c)
+            if m is None or not m.issym():
+                break
+            c = os.path.normpath(os.path.join(os.path.dirname(c), m.linkname))
+        if m is None or not m.isfile():
+            sys.exit(f'{n} não está no .deb')
+        with open(os.path.join(dest, n + '.tmp'), 'wb') as f:
+            f.write(t.extractfile(m).read())
+        os.replace(os.path.join(dest, n + '.tmp'), os.path.join(dest, n))
+EOF
+    rm -f "$d"
+}
+libxml_debian() {
+    deb_libs libxml2_2.9.10+dfsg-6.7+deb11u4_amd64.deb $SHA_DEB_LIBXML2 libx/libxml2 libxml2.so.2 &&
+    deb_libs libicu67_67.1-7_amd64.deb $SHA_DEB_ICU67 i/icu libicuuc.so.67 libicudata.so.67
+}
 ferramentas() {
     mkdir -p "$F"; cd "$F" || falha "não deu para criar $F"
     [ -x llvm/bin/clang-cl ] || { msg 'baixando o LLVM 19.1.5 (1,5 GB)'; baixar_ferr https://github.com/llvm/llvm-project/releases/download/llvmorg-19.1.5/LLVM-19.1.5-Linux-X64.tar.xz llvm.tar.xz $SHA_LLVM && mkdir -p llvm && tar -C llvm --strip-components=1 -xf llvm.tar.xz && rm llvm.tar.xz || { rm -rf llvm.tar.xz llvm; falha 'o LLVM não baixou'; }; }
@@ -163,6 +208,12 @@ ferramentas() {
             local s; s=$(ls "$rt"/$l* /usr/lib/$l* /usr/lib64/$l* /usr/lib/x86_64-linux-gnu/$l* 2>/dev/null | head -1)
             [ -n "$s" ] && cp -L "$s" libextra/$l
         done
+        # 28/11 (report 1522, SteamOS): sem a cópia no sistema nem na Steam, baixa as mesmas versões do Debian 11
+        # (libxml2 2.9.10 e ICU 67, as do runtime da Steam), conferidas pelo sha256, e tira só as bibliotecas
+        if LD_LIBRARY_PATH=libextra ldd llvm/bin/lld | grep -q 'not found'; then
+            msg 'baixando a libxml2 2.9 e a ICU 67 do Debian (o lld-link do LLVM oficial precisa delas)'
+            libxml_debian || msg 'a libxml2 do Debian não baixou'
+        fi
         if LD_LIBRARY_PATH=libextra ldd llvm/bin/lld | grep -q 'not found'; then
             local faltam; faltam=$(LD_LIBRARY_PATH=libextra ldd llvm/bin/lld | grep 'not found' | awk '{print $1}' | tr '\n' ' ')
             # distros novas trazem só o libxml2 2.14+ (libxml2.so.16), que o LLVM oficial não usa
